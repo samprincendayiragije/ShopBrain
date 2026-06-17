@@ -1,33 +1,25 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { openai } from "../lib/openai.js";
 import { sendWhatsAppMessage } from "../lib/whatsapp.js";
+import { supabase } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
 const VERIFY_TOKEN =
   process.env["WHATSAPP_VERIFY_TOKEN"] ?? "ShopBrain_kigali_2026";
 
-const SYSTEM_PROMPT = `You are ShopBrain, a helpful WhatsApp shopping assistant. 
-You help customers with product inquiries, order status questions, pricing, and general shopping support.
-Be concise, friendly, and professional. Keep replies under 300 characters when possible.
-If you don't know something specific (like a real order number or live inventory), say so honestly and offer to connect them with a human agent.
-Do not use markdown formatting — plain text only, since this is WhatsApp.`;
+// Owner's WhatsApp number(s) - only these numbers can use ShopBrain commands
+const OWNER_NUMBERS = [
+  "250795120043", // replace with shop owner's real number
+];
 
-const MAIN_MENU = `Welcome to ShopBrain! 🛍️
+function isOwner(phone: string): boolean {
+  const clean = phone.replace(/\D/g, "");
+  return OWNER_NUMBERS.some((n) => clean.endsWith(n.slice(-10)));
+}
 
-Reply with a number:
-1 - Browse products
-2 - Track my order
-3 - Pricing & deals
-4 - Contact support
-5 - Ask anything else`;
-
-const MENU_RESPONSES: Record<string, string> = {
-  "1": "🛍️ Our product catalogue is available at our website. What type of product are you looking for? I can help answer questions about it.",
-  "2": "📦 To track your order, please share your order number (e.g. ORD-12345) and I'll look into it for you.",
-  "3": "💰 We offer competitive pricing and frequent deals. Ask me about a specific product and I'll share current pricing.",
-  "4": "🙋 Our support team is available Mon–Fri, 8am–6pm EAT. You can also email support@shopbrain.com or reply here and I'll help.",
-};
+function cleanPhone(phone: string): string {
+  return phone.replace(/\D/g, "");
+}
 
 interface WhatsAppMessage {
   from: string;
@@ -85,6 +77,10 @@ router.post("/webhook", async (req: Request, res: Response) => {
       await handleMessage(from, text, req);
     } catch (err) {
       req.log.error({ err, from }, "Failed to handle message");
+      await sendWhatsAppMessage(
+        from,
+        "Sorry, something went wrong. Please try again.",
+      );
     }
   }
 });
@@ -94,34 +90,169 @@ async function handleMessage(
   text: string,
   req: Request,
 ): Promise<void> {
-  const lower = text.toLowerCase();
-
-  if (["hi", "hello", "hey", "start", "menu", "0"].includes(lower)) {
-    await sendWhatsAppMessage(from, MAIN_MENU);
+  // Only the owner can talk to ShopBrain
+  if (!isOwner(from)) {
+    await sendWhatsAppMessage(
+      from,
+      "This number is for shop owner use only.",
+    );
     return;
   }
 
-  if (MENU_RESPONSES[text]) {
-    await sendWhatsAppMessage(from, MENU_RESPONSES[text]!);
+  const trimmed = text.trim();
+  const upper = trimmed.toUpperCase();
+
+  // HELP / MENU
+  if (["HI", "HELLO", "MENU", "HELP"].includes(upper)) {
+    await sendWhatsAppMessage(
+      from,
+      `ShopBrain commands:
+
+📱 Send a phone number (e.g. 0788123456) — get customer info
+
+➕ ADD <phone> <name> <item> <amount>
+e.g. ADD 0788123456 Jean iPhone11screen 5000
+
+✅ PAID <phone> — mark customer as fully paid`,
+    );
     return;
   }
 
-  req.log.info({ from, text }, "Sending AI reply");
+  // ADD command
+  if (upper.startsWith("ADD ")) {
+    const parts = trimmed.split(" ");
+    if (parts.length < 5) {
+      await sendWhatsAppMessage(
+        from,
+        "Format: ADD <phone> <name> <item> <amount>\ne.g. ADD 0788123456 Jean iPhone11screen 5000",
+      );
+      return;
+    }
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    max_tokens: 300,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: text },
-    ],
-  });
+    const phone = cleanPhone(parts[1]!);
+    const name = parts[2]!;
+    const item = parts[3]!;
+    const amount = parseInt(parts[4]!, 10);
 
-  const reply =
-    completion.choices[0]?.message?.content?.trim() ??
-    "Sorry, I couldn't process your message. Please try again or type 'menu' to see options.";
+    if (isNaN(amount)) {
+      await sendWhatsAppMessage(from, "Amount must be a number.");
+      return;
+    }
 
-  await sendWhatsAppMessage(from, reply);
+    // Find or create customer
+    let { data: customer } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("phone", phone)
+      .eq("shop_id", from)
+      .single();
+
+    if (!customer) {
+      const { data: newCustomer, error } = await supabase
+        .from("customers")
+        .insert({ phone, name, shop_id: from })
+        .select()
+        .single();
+
+      if (error || !newCustomer) {
+        await sendWhatsAppMessage(from, "Failed to add customer. Try again.");
+        return;
+      }
+      customer = newCustomer;
+    }
+
+    const { error: txError } = await supabase.from("transactions").insert({
+      customer_id: customer.id,
+      item,
+      amount,
+      paid: false,
+    });
+
+    if (txError) {
+      await sendWhatsAppMessage(from, "Failed to save transaction. Try again.");
+      return;
+    }
+
+    await sendWhatsAppMessage(
+      from,
+      `✅ Saved: ${name} (${phone})\nItem: ${item}\nOwes: ${amount.toLocaleString()} Frw`,
+    );
+    return;
+  }
+
+  // PAID command
+  if (upper.startsWith("PAID ")) {
+    const parts = trimmed.split(" ");
+    const phone = cleanPhone(parts[1] ?? "");
+
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("phone", phone)
+      .eq("shop_id", from)
+      .single();
+
+    if (!customer) {
+      await sendWhatsAppMessage(from, "Customer not found.");
+      return;
+    }
+
+    await supabase
+      .from("transactions")
+      .update({ paid: true })
+      .eq("customer_id", customer.id)
+      .eq("paid", false);
+
+    await sendWhatsAppMessage(from, `✅ Marked all debts paid for ${customer.name}.`);
+    return;
+  }
+
+  // Plain phone number lookup
+  const possiblePhone = cleanPhone(trimmed);
+  if (possiblePhone.length >= 9) {
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("phone", possiblePhone)
+      .eq("shop_id", from)
+      .single();
+
+    if (!customer) {
+      await sendWhatsAppMessage(
+        from,
+        `No record found for ${trimmed}.\nUse: ADD ${trimmed} <name> <item> <amount>`,
+      );
+      return;
+    }
+
+    const { data: transactions } = await supabase
+      .from("transactions")
+      .select("*")
+      .eq("customer_id", customer.id)
+      .order("date", { ascending: false });
+
+    const unpaid = (transactions ?? []).filter((t) => !t.paid);
+    const totalOwed = unpaid.reduce((sum, t) => sum + t.amount, 0);
+    const lastTx = transactions?.[0];
+
+    const lastDate = lastTx
+      ? new Date(lastTx.date).toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+        })
+      : "N/A";
+
+    await sendWhatsAppMessage(
+      from,
+      `👤 ${customer.name}\n📦 Last item: ${lastTx?.item ?? "N/A"}\n💰 Owes: ${totalOwed.toLocaleString()} Frw\n📅 Last visit: ${lastDate}`,
+    );
+    return;
+  }
+
+  await sendWhatsAppMessage(
+    from,
+    "Send a phone number to look up a customer, or type MENU for commands.",
+  );
 }
 
 export default router;
