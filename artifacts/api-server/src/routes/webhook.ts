@@ -231,8 +231,13 @@ e.g. ADD 0788123456 Jean iPhone11screen 5000
       .eq("customer_id", customer.id)
       .order("date", { ascending: false });
 
-    const unpaid = (transactions ?? []).filter((t) => !t.paid);
-    const totalOwed = unpaid.reduce((sum, t) => sum + t.amount, 0);
+    const unpaid = (transactions ?? []).filter(
+      (t: { paid: boolean }) => !t.paid,
+    );
+    const totalOwed = unpaid.reduce(
+      (sum: number, t: { amount: number }) => sum + t.amount,
+      0,
+    );
     const lastTx = transactions?.[0];
 
     const lastDate = lastTx
