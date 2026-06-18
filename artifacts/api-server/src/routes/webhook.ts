@@ -9,7 +9,6 @@ const VERIFY_TOKEN =
 
 const OWNER_NUMBERS = [
   "250795120043",
-  "250787992801",
 ];
 
 function isOwner(phone: string): boolean {
