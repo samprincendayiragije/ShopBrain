@@ -7,7 +7,9 @@ const router: IRouter = Router();
 const VERIFY_TOKEN =
   process.env["WHATSAPP_VERIFY_TOKEN"] ?? "ShopBrain_kigali_2026";
 
-const OWNER_NUMBERS: string[] = [];
+const OWNER_NUMBERS = [
+  "250795120043",
+];
 
 function isOwner(phone: string): boolean {
   const clean = phone.replace(/\D/g, "");
