@@ -9,7 +9,9 @@ const VERIFY_TOKEN =
 
 // Owner's WhatsApp number(s) - only these numbers can use ShopBrain commands
 const OWNER_NUMBERS = [
-  "250795120043", // replace with shop owner's real number
+  "250795120043", 
+  "250790581531",
+  "250784336184"// replace with shop owner's real number
 ];
 
 function isOwner(phone: string): boolean {
@@ -79,7 +81,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
       req.log.error({ err, from }, "Failed to handle message");
       await sendWhatsAppMessage(
         from,
-        "Sorry, something went wrong. Please try again.",
+        "Sorry, something went wrong. Please try again."
       );
     }
   }
@@ -90,6 +92,8 @@ async function handleMessage(
   text: string,
   req: Request,
 ): Promise<void> {
+  req.log.info({ from_raw: from, from_cleaned: cleanPhone(from) }, "handleMessage called");
+
   // Only the owner can talk to ShopBrain
   if (!isOwner(from)) {
     await sendWhatsAppMessage(
