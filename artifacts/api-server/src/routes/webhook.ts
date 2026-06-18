@@ -9,9 +9,9 @@ const VERIFY_TOKEN =
 
 // Owner's WhatsApp number(s) - only these numbers can use ShopBrain commands
 const OWNER_NUMBERS = [
-  "250795120043", 
+  "250795120043",
   "250790581431",
-  "250784336184"// replace with shop owner's real number
+  "250784336184",
 ];
 
 function isOwner(phone: string): boolean {
