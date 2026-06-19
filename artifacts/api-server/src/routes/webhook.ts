@@ -8,7 +8,9 @@ const VERIFY_TOKEN =
   process.env["WHATSAPP_VERIFY_TOKEN"] ?? "ShopBrain_kigali_2026";
 
 const OWNER_NUMBERS = [
-  "250795120043","250793197687"
+  "250795120043",
+  "250793197687",
+  "250790581431",
 ];
 
 function isOwner(phone: string): boolean {
