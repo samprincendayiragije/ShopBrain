@@ -11,6 +11,7 @@ const OWNER_NUMBERS = [
   "250795120043",
   "250793197687",
   "250790581431",
+  "250786260484",
 ];
 
 function isOwner(phone: string): boolean {
@@ -86,6 +87,17 @@ router.post("/webhook", async (req: Request, res: Response) => {
   }
 });
 
+const SECURITY_TIP = `🔒 *Security Tip — Protect your data:*
+
+Lock this ShopBrain chat so only you can open it.
+
+*How to do it:*
+1. Long press this chat in your WhatsApp inbox
+2. Tap the lock icon 🔒
+3. It will now require your fingerprint or Face ID to open
+
+Your customer data stays private even if someone picks up your phone.`;
+
 async function handleMessage(
   from: string,
   text: string,
@@ -118,6 +130,8 @@ e.g. ADD 0788123456 Jean iPhone11screen 5000
 
 ✅ PAID <phone> — mark customer as fully paid`,
     );
+
+    await sendWhatsAppMessage(from, SECURITY_TIP);
     return;
   }
 
@@ -185,17 +199,14 @@ e.g. ADD 0788123456 Jean iPhone11screen 5000
     );
 
     // Send security tip only the very first time the owner adds any customer
-    if (isNewCustomer && customer.id) {
+    if (isNewCustomer) {
       const { count } = await supabase
         .from("customers")
         .select("*", { count: "exact", head: true })
         .eq("shop_id", from);
 
       if (count === 1) {
-        await sendWhatsAppMessage(
-          from,
-          `🔒 *Security Tip — Protect your data:*\n\nLock this ShopBrain chat so only you can open it.\n\n*How to do it:*\n1. Long press this chat in your WhatsApp inbox\n2. Tap the lock icon 🔒\n3. It will now require your fingerprint or Face ID to open\n\nYour customer data stays private even if someone picks up your phone.`,
-        );
+        await sendWhatsAppMessage(from, SECURITY_TIP);
       }
     }
 
