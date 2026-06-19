@@ -7,8 +7,14 @@ const router: IRouter = Router();
 const VERIFY_TOKEN =
   process.env["WHATSAPP_VERIFY_TOKEN"] ?? "ShopBrain_kigali_2026";
 
+const OWNER_NUMBERS = ["250795120043"];
+
 function cleanPhone(phone: string): string {
   return phone.replace(/\D/g, "");
+}
+
+function isOwner(from: string): boolean {
+  return OWNER_NUMBERS.includes(cleanPhone(from));
 }
 
 interface WhatsAppMessage {
@@ -91,17 +97,7 @@ async function handleMessage(
   text: string,
   req: Request,
 ): Promise<void> {
-  req.log.info({ from_raw: from, from_cleaned: cleanPhone(from) }, "handleMessage called");
-
-  const { data: owner, error: ownerError } = await supabase
-    .from("owners")
-    .select("id")
-    .eq("phone", cleanPhone(from))
-    .single();
-
-  req.log.info({ owner, ownerError, phone: cleanPhone(from) }, "owner lookup result");
-
-  if (!owner) {
+  if (!isOwner(from)) {
     await sendWhatsAppMessage(from, "This number is for shop owner use only.");
     return;
   }
@@ -156,7 +152,6 @@ e.g. ADD 0788123456 Jean iPhone11screen 5000
       .eq("shop_id", from)
       .single();
 
-    // Track whether this is a brand new customer
     const isNewCustomer = !customer;
 
     if (!customer) {
@@ -190,7 +185,6 @@ e.g. ADD 0788123456 Jean iPhone11screen 5000
       `✅ Saved: ${name} (${phone})\nItem: ${item}\nOwes: ${amount.toLocaleString()} Frw`,
     );
 
-    // Send security tip only the very first time the owner adds any customer
     if (isNewCustomer) {
       const { count } = await supabase
         .from("customers")
@@ -285,4 +279,4 @@ e.g. ADD 0788123456 Jean iPhone11screen 5000
   );
 }
 
-export default router;                                  
+export default router;
