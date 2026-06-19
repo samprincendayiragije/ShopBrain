@@ -7,18 +7,6 @@ const router: IRouter = Router();
 const VERIFY_TOKEN =
   process.env["WHATSAPP_VERIFY_TOKEN"] ?? "ShopBrain_kigali_2026";
 
-const OWNER_NUMBERS = [
-  "250793197687",
-  "250790581431",
-  "250786260484",
-  "250795120043",
-];
-
-function isOwner(phone: string): boolean {
-  const clean = phone.replace(/\D/g, "");
-  return OWNER_NUMBERS.some((n) => clean.endsWith(n.slice(-10)));
-}
-
 function cleanPhone(phone: string): string {
   return phone.replace(/\D/g, "");
 }
@@ -105,12 +93,14 @@ async function handleMessage(
 ): Promise<void> {
   req.log.info({ from_raw: from, from_cleaned: cleanPhone(from) }, "handleMessage called");
 
-  // Only the owner can talk to ShopBrain
-  if (!isOwner(from)) {
-    await sendWhatsAppMessage(
-      from,
-      "This number is for shop owner use only.",
-    );
+  const { data: owner } = await supabase
+    .from("owners")
+    .select("id")
+    .eq("phone", cleanPhone(from))
+    .single();
+
+  if (!owner) {
+    await sendWhatsAppMessage(from, "This number is for shop owner use only.");
     return;
   }
 

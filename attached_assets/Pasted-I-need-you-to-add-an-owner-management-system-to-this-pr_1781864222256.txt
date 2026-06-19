@@ -1,0 +1,68 @@
+I need you to add an owner management system to this project. Follow these instructions exactly and do not modify anything outside of what is listed here.
+STEP 1 — Supabase: Create the owners table
+Run this SQL in Supabase:
+sqlCREATE TABLE owners (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  phone TEXT NOT NULL UNIQUE,
+  name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO owners (phone, name) VALUES
+('250795120043', 'Owner 1'),
+('250793197687', 'Owner 2'),
+('250790581431', 'Owner 3');
+STEP 2 — Update the webhook
+In apps/api-server/src/routes/webhook.ts:
+
+Remove the OWNER_NUMBERS array and the isOwner() function entirely
+Replace the isOwner(from) check with an async Supabase query like this:
+
+tsconst { data: owner } = await supabase
+  .from("owners")
+  .select("id")
+  .eq("phone", cleanPhone(from))
+  .single();
+
+if (!owner) {
+  await sendWhatsAppMessage(from, "This number is for shop owner use only.");
+  return;
+}
+
+Do not touch anything else in webhook.ts
+
+STEP 3 — Create an admin web interface
+Create a single self-contained file at apps/api-server/src/routes/admin.ts that:
+
+Is a simple Express router
+Has a GET /admin route that serves a plain HTML page with:
+
+A password input (hardcoded password check: ShopBrain2026)
+A form to add a new owner (phone number + name)
+A list of all current owners fetched from Supabase with a remove button next to each
+Basic styling, nothing fancy, just clean and readable
+
+
+Has a POST /admin/add route that inserts a new owner into the owners Supabase table
+Has a POST /admin/remove route that deletes an owner by phone from the owners Supabase table
+All HTML is returned directly from the route as a string, no external template engine needed
+
+STEP 4 — Register the admin router
+In apps/api-server/src/index.ts, import and mount the admin router:
+tsimport adminRouter from "./routes/admin.js";
+app.use("/", adminRouter);
+STEP 5 — Do not touch anything else
+
+Do not modify build.mjs
+Do not modify .replit
+Do not modify package.json
+Do not modify any other routes
+Do not install any new dependencies
+Do not change the database schema for customers or transactions
+
+After all steps are done, restart the server and confirm:
+
+GET /admin loads the page
+Adding a number works and appears in Supabase
+Removing a number works
+The webhook correctly blocks non-owners
