@@ -150,6 +150,9 @@ e.g. ADD 0788123456 Jean iPhone11screen 5000
       .eq("shop_id", from)
       .single();
 
+    // Track whether this is a brand new customer
+    const isNewCustomer = !customer;
+
     if (!customer) {
       const { data: newCustomer, error } = await supabase
         .from("customers")
@@ -180,6 +183,22 @@ e.g. ADD 0788123456 Jean iPhone11screen 5000
       from,
       `✅ Saved: ${name} (${phone})\nItem: ${item}\nOwes: ${amount.toLocaleString()} Frw`,
     );
+
+    // Send security tip only the very first time the owner adds any customer
+    if (isNewCustomer && customer.id) {
+      const { count } = await supabase
+        .from("customers")
+        .select("*", { count: "exact", head: true })
+        .eq("shop_id", from);
+
+      if (count === 1) {
+        await sendWhatsAppMessage(
+          from,
+          `🔒 *Security Tip — Protect your data:*\n\nLock this ShopBrain chat so only you can open it.\n\n*How to do it:*\n1. Long press this chat in your WhatsApp inbox\n2. Tap the lock icon 🔒\n3. It will now require your fingerprint or Face ID to open\n\nYour customer data stays private even if someone picks up your phone.`,
+        );
+      }
+    }
+
     return;
   }
 
