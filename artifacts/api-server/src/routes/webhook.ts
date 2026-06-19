@@ -11,6 +11,7 @@ const OWNER_NUMBERS = [
   "250793197687",
   "250790581431",
   "250786260484",
+  "250795120043",
 ];
 
 function isOwner(phone: string): boolean {
