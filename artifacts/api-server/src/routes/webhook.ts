@@ -93,11 +93,13 @@ async function handleMessage(
 ): Promise<void> {
   req.log.info({ from_raw: from, from_cleaned: cleanPhone(from) }, "handleMessage called");
 
-  const { data: owner } = await supabase
+  const { data: owner, error: ownerError } = await supabase
     .from("owners")
     .select("id")
     .eq("phone", cleanPhone(from))
     .single();
+
+  req.log.info({ owner, ownerError, phone: cleanPhone(from) }, "owner lookup result");
 
   if (!owner) {
     await sendWhatsAppMessage(from, "This number is for shop owner use only.");
