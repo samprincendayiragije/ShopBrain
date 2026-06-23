@@ -31,3 +31,28 @@ export async function sendWhatsAppMessage(
     throw new Error(`WhatsApp API error ${res.status}: ${body}`);
   }
 }
+
+export async function sendWhatsAppInteractiveMessage(
+  to: string,
+  interactive: object,
+): Promise<void> {
+  const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`WhatsApp API error ${res.status}: ${body}`);
+  }
+}
