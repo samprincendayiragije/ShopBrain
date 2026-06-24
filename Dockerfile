@@ -1,9 +1,13 @@
 FROM node:20-alpine
 
-# Install pnpm globally
-RUN npm install -g pnpm
+# Install pnpm globally and verify version
+RUN npm install -g pnpm && pnpm --version
 
 WORKDIR /app
+
+# Copy workspace config files first so the pnpm catalog and lockfile
+# are available before any pnpm commands run
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 
 # Copy the entire monorepo
 COPY . .
