@@ -5,7 +5,11 @@ RUN npm install -g pnpm
 
 WORKDIR /app
 
-# Copy the entire monorepo
+# Copy pnpm workspace config and lockfile first so the catalog is available
+# before pnpm attempts to resolve dependencies
+COPY pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy the rest of the monorepo
 COPY . .
 
 # Install all workspace dependencies
