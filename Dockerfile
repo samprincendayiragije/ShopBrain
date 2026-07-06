@@ -12,9 +12,6 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 # Copy the entire monorepo
 COPY . .
 
-# Approve build scripts so native build deps like esbuild can run during install
-RUN pnpm approve-builds --all
-
 # Install all workspace dependencies
 RUN pnpm install --no-frozen-lockfile
 
