@@ -1,4 +1,4 @@
-FROM node:22-alpine
+FROM node:18-alpine
 
 # Install pnpm globally and verify version
 RUN npm install -g pnpm && pnpm --version
@@ -12,11 +12,13 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 # Copy the entire monorepo
 COPY . .
 
-# Install all workspace dependencies
-RUN pnpm install --no-frozen-lockfile
+# Install all workspace dependencies from the workspace root.
+# If pnpm blocks build scripts (ERR_PNPM_IGNORED_BUILDS), try to
+# auto-approve them and retry the install non-interactively.
+RUN pnpm -w install --no-frozen-lockfile || (pnpm approve-builds --all && pnpm -w install --no-frozen-lockfile)
 
-# Build the api-server package
-RUN pnpm --filter @workspace/api-server build
+# Build the api-server package (workspace-aware)
+RUN pnpm -w -F @workspace/api-server run build
 
 # Set working directory to the api-server for runtime
 WORKDIR /app/artifacts/api-server
@@ -25,4 +27,5 @@ WORKDIR /app/artifacts/api-server
 ENV PORT=3000
 EXPOSE ${PORT}
 
-CMD ["pnpm", "run", "start"]
+# Start the api-server package from the workspace
+CMD ["pnpm", "-w", "-F", "@workspace/api-server", "run", "start"]
