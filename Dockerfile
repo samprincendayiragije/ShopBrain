@@ -17,6 +17,9 @@ COPY . .
 # auto-approve them and retry the install non-interactively.
 RUN pnpm -w install --no-frozen-lockfile || (pnpm approve-builds --all && pnpm -w install --no-frozen-lockfile)
 
+# Explicitly install dependencies for the api-server package
+RUN pnpm -w -F @workspace/api-server install
+
 # Build the api-server package (workspace-aware)
 RUN pnpm -w -F @workspace/api-server run build
 
