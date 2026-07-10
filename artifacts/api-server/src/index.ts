@@ -1,18 +1,21 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 
+// Read PORT from environment. In some deployment environments PORT may not be set —
+// fall back to a safe default (3000) instead of crashing the process.
 const rawPort = process.env["PORT"];
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
+let port = 3000;
 
-const port = Number(rawPort);
-
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
+if (rawPort) {
+  const parsed = Number(rawPort);
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    logger.error({ rawPort }, `Invalid PORT value: "${rawPort}"; falling back to ${port}`);
+  } else {
+    port = parsed;
+  }
+} else {
+  logger.warn({ defaultPort: port }, "PORT environment variable not provided; using default port");
 }
 
 app.listen(port, (err) => {
