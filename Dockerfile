@@ -1,9 +1,10 @@
-FROM node:22-alpine
+﻿FROM node:22-alpine
 
 # Enable corepack so it installs the exact pnpm version pinned in
-# package.json's "packageManager" field — no version drift between
-# local dev, CI, and Railway builds.
-RUN corepack enable && corepack prepare --activate
+# package.json's "packageManager" field -- no version drift between
+# local dev, CI, and Railway builds. (Just "enable" here -- "prepare"
+# needs package.json to already be present, which happens below.)
+RUN corepack enable
 
 WORKDIR /app
 
@@ -17,7 +18,7 @@ COPY . .
 # Install all workspace dependencies. Because pnpm is pinned via
 # packageManager + corepack, this now matches the onlyBuiltDependencies
 # schema in pnpm-workspace.yaml and esbuild's build script is approved
-# automatically — no interactive approve-builds fallback needed.
+# automatically -- no interactive approve-builds fallback needed.
 RUN pnpm -w install --no-frozen-lockfile
 
 # Build the api-server package (workspace-aware)
