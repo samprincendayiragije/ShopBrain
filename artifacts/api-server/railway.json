@@ -1,7 +1,6 @@
 {
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "npm install -g pnpm && pnpm -w install --no-frozen-lockfile || (pnpm approve-builds --all && pnpm -w install --no-frozen-lockfile) && pnpm -w -F @workspace/api-server run build"
+    "builder": "DOCKERFILE"
   },
   "deploy": {
     "startCommand": "pnpm -w -F @workspace/api-server run start"

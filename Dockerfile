@@ -1,7 +1,9 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
-# Install pnpm globally and verify version
-RUN npm install -g pnpm && pnpm --version
+# Enable corepack so it installs the exact pnpm version pinned in
+# package.json's "packageManager" field — no version drift between
+# local dev, CI, and Railway builds.
+RUN corepack enable && corepack prepare --activate
 
 WORKDIR /app
 
@@ -12,13 +14,11 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 # Copy the entire monorepo
 COPY . .
 
-# Install all workspace dependencies from the workspace root.
-# If pnpm blocks build scripts (ERR_PNPM_IGNORED_BUILDS), try to
-# auto-approve them and retry the install non-interactively.
-RUN pnpm -w install --no-frozen-lockfile || (pnpm approve-builds --all && pnpm -w install --no-frozen-lockfile)
-
-# Explicitly install dependencies for the api-server package
-RUN pnpm -w -F @workspace/api-server install
+# Install all workspace dependencies. Because pnpm is pinned via
+# packageManager + corepack, this now matches the onlyBuiltDependencies
+# schema in pnpm-workspace.yaml and esbuild's build script is approved
+# automatically — no interactive approve-builds fallback needed.
+RUN pnpm -w install --no-frozen-lockfile
 
 # Build the api-server package (workspace-aware)
 RUN pnpm -w -F @workspace/api-server run build
