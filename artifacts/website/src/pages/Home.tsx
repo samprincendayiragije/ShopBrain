@@ -256,9 +256,9 @@ export default function Home() {
               <Shield className="text-primary" /> Privacy Policy
             </h2>
             <div className="space-y-6 text-muted-foreground leading-relaxed">
-              <p>Shop Brain collects WhatsApp phone numbers and customer debt records on behalf of shop owners.</p>
+              <p>Shop Brain Ltd collects WhatsApp phone numbers and customer debt records on behalf of shop owners.</p>
               <p>All data is stored securely and is only accessible to the authorised shop owner.</p>
-              <p>Shop Brain does not sell, share, or transfer customer data to any third party.</p>
+              <p>Shop Brain Ltd does not sell, share, or transfer customer data to any third party.</p>
               <p>Data is retained as long as the shop owner uses the service.</p>
               <p>WhatsApp messages sent to Shop Brain are processed to extract commands (e.g. ADD, PAID, customer lookup) and are not stored beyond what is needed to fulfil the request.</p>
               <div className="mt-8 p-6 bg-background rounded-xl border border-border">
@@ -277,7 +277,7 @@ export default function Home() {
             Shop Brain
           </div>
           <p className="text-background/70 font-medium">
-            Shop Brain — Registered in Rwanda
+            Shop Brain Ltd — Registered in Rwanda.
           </p>
         </div>
       </footer>
