@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "wJhA_-Ww2dpP1XFAHlew_"
+uri = "file://artifacts/website/public/images/shop-hero.jpg"
+type = "image"
+title = "small retail grocery shop interior"
