@@ -10,7 +10,7 @@ if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
 export async function sendWhatsAppMessage(
   to: string,
   text: string,
-): Promise<void> {
+): Promise<string> {
   const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
   const res = await fetch(url, {
     method: "POST",
@@ -25,9 +25,81 @@ export async function sendWhatsAppMessage(
       text: { body: text },
     }),
   });
-
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`WhatsApp API error ${res.status}: ${body}`);
   }
+  const data = await res.json();
+  return data.messages[0].id as string;
+}
+
+export async function sendWhatsAppInteractiveMessage(
+  to: string,
+  interactive: object,
+): Promise<void> {
+  const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`WhatsApp API error ${res.status}: ${body}`);
+  }
+}
+
+/**
+ * Sends a pre-approved WhatsApp message template.
+ * Required for messaging customers outside the 24h customer service window
+ * (i.e. anyone who hasn't messaged the bot recently, or ever).
+ *
+ * `params` are inserted in order into the {{1}}, {{2}}, {{3}}... placeholders
+ * in the template body, as configured in WhatsApp Manager.
+ *
+ * Example: sendWhatsAppTemplateMessage(phone, "debt_reminder", "en_US", [customerName, shopName, amount])
+ */
+export async function sendWhatsAppTemplateMessage(
+  to: string,
+  templateName: string,
+  languageCode: string,
+  params: string[],
+): Promise<string> {
+  const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: [
+          {
+            type: "body",
+            parameters: params.map((text) => ({ type: "text", text })),
+          },
+        ],
+      },
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`WhatsApp API error ${res.status}: ${body}`);
+  }
+  const data = await res.json();
+  return data.messages[0].id as string;
 }
