@@ -620,11 +620,8 @@ async function sendLanguagePicker(from: string, lang: Lang): Promise<void> {
   });
 }
 
-async function handleInteractive(
-  from: string,
-  replyId: string,
-  req: Request,
-): Promise<void> {
+async function handleInteractive(from: string, replyId: string, req: Request): Promise<void> {
+  req.log.info({ from, replyId }, "DEBUG: handleInteractive called");   // <-- ADD THIS LINE HERE
   if (!(await isOwner(from))) {
     const lang = await getLang(from);
     await sendWhatsAppMessage(from, T[lang].ownerOnly);
