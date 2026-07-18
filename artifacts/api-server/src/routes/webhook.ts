@@ -350,7 +350,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
           msg.interactive?.button_reply?.id ||
           msg.interactive?.list_reply?.id ||
           "";
-        req.log.info({ interactive: msg.interactive }, "DEBUG: raw interactive payload");
+        req.log.info({ fullMessage: msg }, "DEBUG: full raw message object");
         await handleInteractive(from, replyId, req);
         continue;
       }
