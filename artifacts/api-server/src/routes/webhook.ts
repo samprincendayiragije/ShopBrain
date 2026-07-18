@@ -323,12 +323,37 @@ router.post("/webhook", async (req: Request, res: Response) => {
   }
 });
 
+// CHANGED: now checks owner.language too. If the owner has never picked a
+// language, we send the bilingual onboarding language picker FIRST, before
+// ever asking for the shop name. Once language is set, shop name prompt is
+// sent in the correct language.
 async function getOrAskShopName(from: string, lang: Lang): Promise<string | null> {
-  const { data: owner } = await supabase.from("owners").select("name").eq("phone", cleanPhone(from)).single();
+  const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
   if (owner?.name) return owner.name;
+  if (!owner?.language) {
+    sessions[from] = { step: "setup_language", data: {} };
+    await sendOnboardingLanguagePicker(from);
+    return null;
+  }
   sessions[from] = { step: "setup_shop_name", data: {} };
-  await sendWhatsAppMessage(from, T[lang].askShopName);
+  await sendWhatsAppMessage(from, T[owner.language as Lang].askShopName);
   return null;
+}
+
+// NEW: shown ONLY once, to a brand-new owner row (phone exists in `owners` but
+// `language` is not yet set). Bilingual text since we don't know their
+// preference yet — this always comes before the shop name question.
+async function sendOnboardingLanguagePicker(from: string): Promise<void> {
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: "👋 Welcome to *ShopBrain* / Murakaza neza kuri *ShopBrain*\n\nSelect language / Hitamo ururimi:" },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "onboard_lang_en", title: "English" } },
+        { type: "reply", reply: { id: "onboard_lang_rw", title: "Ikinyarwanda" } },
+      ],
+    },
+  });
 }
 
 // Shown ONLY in two situations: right after a shop owner finishes signup
@@ -436,6 +461,18 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
   const lang = await getLang(from);
+
+  // NEW: handles the onboarding language picker buttons. Saves the chosen
+  // language to Supabase, then immediately asks for the shop name in that
+  // same language (not English, not the default) — this is the very first
+  // step for a brand-new owner row.
+  if (replyId === "onboard_lang_en" || replyId === "onboard_lang_rw") {
+    const chosenLang: Lang = replyId === "onboard_lang_rw" ? "rw" : "en";
+    await supabase.from("owners").update({ language: chosenLang }).eq("phone", cleanPhone(from));
+    sessions[from] = { step: "setup_shop_name", data: {} };
+    await sendWhatsAppMessage(from, T[chosenLang].askShopName);
+    return;
+  }
 
   if (replyId === "add_debt") {
     sessions[from] = { step: "add_phone", data: {} };
@@ -563,6 +600,9 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
       await supabase.from("owners").update(updateData).eq("phone", cleanPhone(from));
     } else {
       // New signups get a 1-month free trial starting today, defaulting to English.
+      // NOTE: in practice this branch should rarely fire now, since isOwner()
+      // requires a pre-existing row and the language picker runs first — kept
+      // as a safety fallback.
       const trialEndsAt = new Date();
       trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
       await supabase.from("owners").insert({
