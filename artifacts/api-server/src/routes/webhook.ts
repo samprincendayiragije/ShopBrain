@@ -71,6 +71,8 @@ const T = {
     ownerOnly: "This number is for shop owner use only.",
     somethingWrong: "Sorry, something went wrong. Please try again.",
     interactiveRetry: "❌ Something went wrong. Please try tapping the button again:",
+    languageAlreadySetRegistered: "🌐 Language already selected. If you want to change it, use 'Change Language' from the menu.",
+    languageAlreadySetUnregistered: "🌐 Language already selected. Please finish registration by entering your shop name first. You can change the language later.",
     reminderInvalidNumber: "❌ Invalid number.\nUsage: REMIND <phone>\ne.g. REMIND 0788123456",
     remindAllSummary: (count: number, total: number) => `✅ Reminders sent to *${count} customers*:\n\n`,
     remindAllTotal: (total: number) => `\n💰 *Total outstanding: ${total.toLocaleString()} Frw*`,
@@ -109,7 +111,7 @@ const T = {
     askName: "Andika izina ry'umukiriya?",
     askItem: "Igicuruzwa atwaye?",
     askAmount: "Agusigayemo angahe? (muri Frw)",
-    invalidPhone: "❌ Nimero si yo. Andika nimero y'umukiriya nyayo:",
+    invalidPhone: "❌ Nimero si yo. Andika nimero y'umukiriya ikurikira:",
     invalidAmount: "❌ Umubare si wo. Andika umubare urugero 5000",
     debtSaved: (name: string, phone: string, item: string, amount: number, total: number) =>
       `✅ *Umwenda Wabitswe!*\n\n👤 ${name} (${phone})\n📦 Igicuruzwa: ${item}\n💰 Byongewe: ${amount.toLocaleString()} Frw\n📊 Asigayemo: ${total.toLocaleString()} Frw`,
@@ -119,9 +121,9 @@ const T = {
     viewHistory: "📋 Reba amadeni",
     sendReminder: "🔔 kwibutsa",
     markPaidBtn: "✅ Emeza Kwishyura",
-    reminderSent: (name: string) => `⏳ Ubutumwa bwoherejwe kuri *${name}* — murarategereza ko babwakira...`,
+    reminderSent: (name: string) => `⏳ Ubutumwa bwoherejwe kuri *${name}* — tegereza ko bakiriye...`,
     reminderDelivered: (name: string, phone: string, amount: number) =>
-      `✅ Umukiriya *${name}* (${phone}) yakiriye ubutumwa bw'ideni rya *${amount.toLocaleString()} Frw* 🎉`,
+      `✅ Umukiriya *${name}* (${phone}) yakiriye ubutumwa bw'ishyura rya *${amount.toLocaleString()} Frw* 🎉`,
     reminderRead: (name: string) => `👀 Umukiriya *${name}* yasomye ubutumwa!`,
     reminderSentNotReceived: (name: string, phone: string) =>
       `✅ Ubutumwa bwoherejwe neza kuri *${name}* (${phone}) — ntabwo barakira ubutumwa`,
@@ -130,16 +132,16 @@ const T = {
     noDebts: (name: string) => `✅ ${name} ntagomba kwishyura. Nta butumwa bwoherejwe.`,
     findCustomerPrompt: "🔍 *Shakisha Umukiriya*\n\nAndika nimero y'umukiriya:",
     markPaidPrompt: "✅ *Emeza Kwishyura*\n\nAndika nimero y'umukiriya:",
-    askPartialAmount: "💰 Umukiriya atanze angahe?",
-    askPartialItem: "📦 Ni ikihe gicuruzwa cy'iri kwishyurwa?",
+    askPartialAmount: "💰 Umukiriya ariha angahe?",
+    askPartialItem: "📦 Ni iyihe kiguzi cy'iri shyura?",
     whatToDo: "Urashaka gukora iki?",
-    existingCustomer: (name: string) => `👤 Umukiriya usanzwe: *${name}*\n\nIgicuruzwa atwaye?`,
-    noHistory: (name: string) => `📋 Nta makuru yideni yabonetse kuri ${name}.`,
-    historyHeader: (name: string) => `📋 *Urutonde rw'Ideni ryose — ${name}*`,
+    existingCustomer: (name: string) => `👤 Umukiriya warahise: *${name}*\n\nIgicuruzwa atwaye?`,
+    noHistory: (name: string) => `📋 Nta makuru yabonetse kuri ${name}.`,
+    historyHeader: (name: string) => `📋 *Urutonde rw'Amadeni — ${name}*`,
     totalOwed: (total: number) => `💰 *Asigayemo: ${total.toLocaleString()} Frw*`,
-    noCustomers: "📋 Nta bakiriya b'ideni bahari.",
+    noCustomers: "📋 Nta bakiriya wanditse.",
     allCustomersHeader: (count: number) => `📋 *Abakiriya Bose (${count})*\n\n`,
-    allCustomersContinued: "📋 *gukomeza...*\n\n",
+    allCustomersContinued: "📋 *Bikomeza...*\n\n",
     owes: "Asigayemo",
     registered: "Yanditse",
     cleared: "Yishyuye ✅",
@@ -150,14 +152,16 @@ const T = {
     noUnpaid: (name: string) => `✅ ${name} ntagomba kwishyura.`,
     askShopName: "👋 Murakaza neza kuri *ShopBrain!*\n\nAndikisha ubucuruzi bwawe:",
     shopNameSaved: (name: string) => `✅ Kwiyandikisha byakunze — *${name}*!`,
-    shopNameTooShort: "❌ Izina ni rigufi cyane. Andikisha ubucuruzi bwawe:",
+    shopNameTooShort: "❌ Izina rifupi cyane. Andikisha ubucuruzi bwawe:",
     selectLanguage: "🌐 Hitamo ururimi rwawe:",
     languageSet: "✅ Ururimi rwahinduwe kuri Kinyarwanda!",
     ownerOnly: "Iyi nimero ni iy'nyir'iduka gusa.",
     somethingWrong: "Hari ikibazo. Gerageza nanone.",
     interactiveRetry: "❌ Hari ikibazo cyabaye. Ongera ukande buto:",
+    languageAlreadySetRegistered: "🌐 Ururimi rwarahisemo. Niba ushaka kurihindura, koresha 'Guhindura Ururimi' kuri menu.",
+    languageAlreadySetUnregistered: "🌐 Ururimi rwarahisemo. Ongera wandike izina ry'ubucuruzi bwawe kugira ngo urangize kwiyandikisha. Ushobora guhindura ururimi nyuma.",
     reminderInvalidNumber: "❌ Nimero si yo.\nUkurikira: REMIND <nimero>\nUrugero: REMIND 0788123456",
-    remindAllSummary: (count: number, total: number) => `✅ Ubutumwa bwoherejewe kubakiriya *${count}*:\n\n`,
+    remindAllSummary: (count: number, total: number) => `✅ Ubutumwa woherejewe kubakiriya *${count}*:\n\n`,
     remindAllTotal: (total: number) => `\n💰 *Igiteranyo cyamafranga: ${total.toLocaleString()} Frw*`,
     remindAllNone: "✅ Nta bakiriya bafite amadeni.",
     totalDebtHeader: "💰 *Igiteranyo cy'amadeni atarishyurwa*",
@@ -478,10 +482,38 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
 
   // Handles the onboarding language picker buttons. Saves the chosen language
   // to Supabase, then immediately asks for the shop name in that same
-  // language (not English, not the default) — this is the very first step
-  // for a brand-new owner row.
+  // language — this is the very first step for a brand-new owner row.
+  //
+  // GUARD: WhatsApp keeps old button bubbles tappable forever. If someone
+  // already finished picking a language (and/or finished registering), the
+  // OTHER button from that same old bubble is still sitting there and can
+  // silently overwrite their language if tapped later. So before acting on
+  // this tap, check the owner's actual current state first.
   if (replyId === "onboard_lang_en" || replyId === "onboard_lang_rw") {
     const chosenLang: Lang = replyId === "onboard_lang_rw" ? "rw" : "en";
+    const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
+
+    if (owner?.language && owner?.name) {
+      // Fully registered already — this is a stale tap on an old onboarding
+      // bubble. Don't touch anything; point them to Change Language instead.
+      const currentLang = owner.language as Lang;
+      await sendWhatsAppMessage(from, T[currentLang].languageAlreadySetRegistered);
+      await sendPersistentMenu(from, currentLang);
+      return;
+    }
+
+    if (owner?.language && !owner?.name) {
+      // Language already picked, but registration (shop name) isn't done yet —
+      // this is a stale tap on the OTHER onboarding button. Don't switch
+      // language; just remind them to finish entering their shop name.
+      const currentLang = owner.language as Lang;
+      await sendWhatsAppMessage(from, T[currentLang].languageAlreadySetUnregistered);
+      sessions[from] = { step: "setup_shop_name", data: {} };
+      await sendWhatsAppMessage(from, T[currentLang].askShopName);
+      return;
+    }
+
+    // First time — no language chosen yet. Proceed as normal.
     await supabase.from("owners").update({ language: chosenLang }).eq("phone", cleanPhone(from));
     sessions[from] = { step: "setup_shop_name", data: {} };
     await sendWhatsAppMessage(from, T[chosenLang].askShopName);
