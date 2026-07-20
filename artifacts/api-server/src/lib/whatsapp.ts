@@ -29,8 +29,8 @@ export async function sendWhatsAppMessage(
     const body = await res.text();
     throw new Error(`WhatsApp API error ${res.status}: ${body}`);
   }
-  const data = await res.json();
-  return data.messages[0].id as string;
+  const data = await res.json() as { messages: Array<{ id: string }> };
+  return data.messages[0].id;
 }
 
 export async function sendWhatsAppInteractiveMessage(
@@ -100,6 +100,6 @@ export async function sendWhatsAppTemplateMessage(
     const body = await res.text();
     throw new Error(`WhatsApp API error ${res.status}: ${body}`);
   }
-  const data = await res.json();
-  return data.messages[0].id as string;
+  const data = await res.json() as { messages: Array<{ id: string }> };
+  return data.messages[0].id;
 }
