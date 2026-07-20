@@ -876,12 +876,13 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     await sendWhatsAppMessage(from, T[lang].noCustomer(phone));
     return;
   }
-  const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
+  const { data: unpaidTx } = await supabase.from("transactions").select("amount, item").eq("customer_id", customer.id).eq("paid", false);
   const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
   if (total === 0) {
     await sendWhatsAppMessage(from, T[lang].noDebts(customer.name));
     return;
   }
+  const itemsList = (unpaidTx ?? []).map((t: { item: string; amount: number }) => `${t.item} (${t.amount.toLocaleString()} Frw)`).join(", ");
 
   // Reserve the reminder_logs row BEFORE sending, using a temporary placeholder ID
   const { data: insertedLog } = await supabase.from("reminder_logs").insert({
@@ -900,7 +901,7 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     phone,
     "debt_reminder",
     "en",
-    [customer.name, shopName, total.toLocaleString()],
+    [customer.name, shopName, total.toLocaleString(), itemsList],
   );
 
   // Now update the placeholder row with the real message_id from Meta
@@ -1040,9 +1041,10 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
   let sentCount = 0;
 
   for (const customer of customers) {
-    const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
+    const { data: unpaidTx } = await supabase.from("transactions").select("amount, item").eq("customer_id", customer.id).eq("paid", false);
     const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
     if (total === 0) continue;
+    const itemsList = (unpaidTx ?? []).map((t: { item: string; amount: number }) => `${t.item} (${t.amount.toLocaleString()} Frw)`).join(", ");
 
     const { data: insertedLog } = await supabase.from("reminder_logs").insert({
       message_id: `pending_${customer.phone}_${Date.now()}`,
@@ -1060,7 +1062,7 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
         customer.phone,
         "debt_reminder",
         "en",
-        [customer.name, shopName, total.toLocaleString()],
+        [customer.name, shopName, total.toLocaleString(), itemsList],
       );
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
