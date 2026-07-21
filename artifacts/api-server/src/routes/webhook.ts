@@ -201,10 +201,6 @@ function cleanPhone(phone: string): string {
   return cleaned;
 }
 
-// isOwner now checks the Supabase `owners` table instead of a hardcoded array.
-// To add a new owner: insert a row in `owners` with just `phone` set (leave `name`
-// blank — the bot fills it in automatically the first time they text "HI").
-// To remove an owner: delete their row. No redeploy needed either way.
 async function isOwner(from: string): Promise<boolean> {
   const { data } = await supabase
     .from("owners")
@@ -214,10 +210,37 @@ async function isOwner(from: string): Promise<boolean> {
   return !!data;
 }
 
-// Default language is English ("en"). Kinyarwanda is opt-in via the language picker.
 async function getLang(from: string): Promise<Lang> {
   const { data } = await supabase.from("owners").select("language").eq("phone", cleanPhone(from)).single();
   return (data?.language as Lang) ?? "en";
+}
+
+// Maps owner language to the correct approved WhatsApp template name for
+// debt reminders. "debt_reminder" (English) has been Active for a while;
+// "debt_reminder_rw" (Kinyarwanda) was just submitted and may still be
+// pending Meta's review — sends will fail with a template-not-found error
+// until it clears, at which point this needs no further changes.
+function reminderTemplateName(lang: Lang): string {
+  return lang === "rw" ? "debt_reminder_rw" : "debt_reminder";
+}
+
+// Builds the single-string itemized list used as the reminder template's
+// {{4}} variable, e.g. "iPhone screen (3,000 Frw), Sugar (2,000 Frw)".
+// Pulls every unpaid transaction for the customer, oldest first, so the list
+// reads in the order items were actually added.
+async function buildItemizedList(customerId: string): Promise<string> {
+  const { data: unpaidTx } = await supabase
+    .from("transactions")
+    .select("item, amount")
+    .eq("customer_id", customerId)
+    .eq("paid", false)
+    .order("date", { ascending: true });
+
+  if (!unpaidTx || unpaidTx.length === 0) return "";
+
+  return unpaidTx
+    .map((t: { item: string; amount: number }) => `${t.item} (${t.amount.toLocaleString()} Frw)`)
+    .join(", ");
 }
 
 interface WhatsAppMessage {
@@ -289,10 +312,6 @@ router.post("/webhook", async (req: Request, res: Response) => {
           msg.interactive?.list_reply?.id ||
           "";
         if (!replyId) {
-          // WhatsApp occasionally fails to attach the interactive payload
-          // (Meta-side error code 131000 — "Unsupported webhook payload").
-          // Nothing to recover here since the button ID was never delivered —
-          // just let the owner know so they can retry instead of silence.
           const lang = await getLang(from);
           await sendWhatsAppMessage(from, T[lang].interactiveRetry);
           continue;
@@ -341,10 +360,6 @@ router.post("/webhook", async (req: Request, res: Response) => {
   }
 });
 
-// Now checks owner.language too. If the owner has never picked a language, we
-// send the bilingual onboarding language picker FIRST, before ever asking for
-// the shop name. Once language is set, shop name prompt is sent in the
-// correct language.
 async function getOrAskShopName(from: string, lang: Lang): Promise<string | null> {
   const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
   if (owner?.name) return owner.name;
@@ -358,9 +373,6 @@ async function getOrAskShopName(from: string, lang: Lang): Promise<string | null
   return null;
 }
 
-// Shown ONLY once, to a brand-new owner row (phone exists in `owners` but
-// `language` is not yet set). Bilingual text since we don't know their
-// preference yet — this always comes before the shop name question.
 async function sendOnboardingLanguagePicker(from: string): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -374,9 +386,6 @@ async function sendOnboardingLanguagePicker(from: string): Promise<void> {
   });
 }
 
-// Shown ONLY in two situations: right after a shop owner finishes signup
-// (setting their shop name), and whenever they type "MENU". One button bubble
-// (Add Debt, Change Language, Help) followed by the security tip.
 async function sendFirstTimeMenu(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -392,16 +401,11 @@ async function sendFirstTimeMenu(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppMessage(from, T[lang].securityTip);
 }
 
-// Sends the HELP explanation text, then falls through to the standard
-// persistent menu (Help is one of the regular actions, not the first-time UI).
 async function sendHelp(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppMessage(from, `${T[lang].helpTitle}\n\n${T[lang].helpBody}`);
   await sendPersistentMenu(from, lang);
 }
 
-// The menu shown after EVERY action (add debt, find customer, mark as paid,
-// send reminder, etc.) — two button bubbles since WhatsApp caps reply-buttons
-// at 3 per message (a hard Meta API limit), so 6 options need 2 bubbles.
 async function sendPersistentMenu(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -427,8 +431,6 @@ async function sendPersistentMenu(from: string, lang: Lang): Promise<void> {
   });
 }
 
-// Sub-menu shown when "Send Reminder" is pressed from the persistent menu —
-// lets the owner choose one specific customer or everyone at once.
 async function sendReminderChoice(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -442,8 +444,6 @@ async function sendReminderChoice(from: string, lang: Lang): Promise<void> {
   });
 }
 
-// Sub-menu shown after a phone number is entered for "Mark as Paid" — lets the
-// owner choose a partial payment (tracked with amount + item) or a full payment.
 async function sendMarkPaidChoice(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -457,8 +457,6 @@ async function sendMarkPaidChoice(from: string, lang: Lang): Promise<void> {
   });
 }
 
-// WhatsApp reply-buttons are capped at 3 per message (Meta API hard limit) —
-// this fits comfortably since it's just 2 language options.
 async function sendLanguagePicker(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -480,22 +478,11 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   }
   const lang = await getLang(from);
 
-  // Handles the onboarding language picker buttons. Saves the chosen language
-  // to Supabase, then immediately asks for the shop name in that same
-  // language — this is the very first step for a brand-new owner row.
-  //
-  // GUARD: WhatsApp keeps old button bubbles tappable forever. If someone
-  // already finished picking a language (and/or finished registering), the
-  // OTHER button from that same old bubble is still sitting there and can
-  // silently overwrite their language if tapped later. So before acting on
-  // this tap, check the owner's actual current state first.
   if (replyId === "onboard_lang_en" || replyId === "onboard_lang_rw") {
     const chosenLang: Lang = replyId === "onboard_lang_rw" ? "rw" : "en";
     const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
 
     if (owner?.language && owner?.name) {
-      // Fully registered already — this is a stale tap on an old onboarding
-      // bubble. Don't touch anything; point them to Change Language instead.
       const currentLang = owner.language as Lang;
       await sendWhatsAppMessage(from, T[currentLang].languageAlreadySetRegistered);
       await sendPersistentMenu(from, currentLang);
@@ -503,9 +490,6 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     }
 
     if (owner?.language && !owner?.name) {
-      // Language already picked, but registration (shop name) isn't done yet —
-      // this is a stale tap on the OTHER onboarding button. Don't switch
-      // language; just remind them to finish entering their shop name.
       const currentLang = owner.language as Lang;
       await sendWhatsAppMessage(from, T[currentLang].languageAlreadySetUnregistered);
       sessions[from] = { step: "setup_shop_name", data: {} };
@@ -513,7 +497,6 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
       return;
     }
 
-    // First time — no language chosen yet. Proceed as normal.
     await supabase.from("owners").update({ language: chosenLang }).eq("phone", cleanPhone(from));
     sessions[from] = { step: "setup_shop_name", data: {} };
     await sendWhatsAppMessage(from, T[chosenLang].askShopName);
@@ -558,15 +541,11 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
   if (replyId === "send_reminder") {
-    // Contextual — shown right after "Find Customer" already resolved a phone
-    // number, so it goes straight to that customer instead of re-asking.
     const phone = sessions[from]?.data["lastPhone"];
     if (phone) await sendReminder(from, phone, lang);
     return;
   }
   if (replyId === "send_reminder_menu") {
-    // Top-level "Send Reminder" from the persistent menu — we don't yet know
-    // which customer, so offer the Specific Number / Remind All choice.
     await sendReminderChoice(from, lang);
     return;
   }
@@ -645,10 +624,6 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
       }
       await supabase.from("owners").update(updateData).eq("phone", cleanPhone(from));
     } else {
-      // New signups get a 1-month free trial starting today, defaulting to English.
-      // NOTE: in practice this branch should rarely fire now, since isOwner()
-      // requires a pre-existing row and the language picker runs first — kept
-      // as a safety fallback.
       const trialEndsAt = new Date();
       trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
       await supabase.from("owners").insert({
@@ -666,8 +641,6 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
 
   const upper = text.toUpperCase();
 
-  // HELP is its own command — sends the explanation, then the standard
-  // persistent menu (Help is a regular action, not the first-time UI).
   if (upper === "HELP") {
     sessions[from] = undefined as any;
     const shopName = await getOrAskShopName(from, lang);
@@ -676,8 +649,6 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
     return;
   }
 
-  // MENU (and general greetings) show the first-time-style UI: one button
-  // bubble (Add Debt, Change Language, Help) + the security tip.
   if (["HI", "HELLO", "MENU", "START"].includes(upper)) {
     sessions[from] = undefined as any;
     const shopName = await getOrAskShopName(from, lang);
@@ -803,9 +774,6 @@ async function handleSession(from: string, text: string, session: Session, lang:
     await lookupCustomer(from, phone, lang);
     return;
   }
-  // Entry point for "Mark as Paid": just ask for the phone number. Once we find
-  // the customer, we no longer process an amount inline — instead we hand off
-  // to the Partially/Full Payment button choice (sendMarkPaidChoice).
   if (session.step === "paid_phone") {
     const phone = cleanPhone(text);
     const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
@@ -827,7 +795,6 @@ async function handleSession(from: string, text: string, session: Session, lang:
     await sendMarkPaidChoice(from, lang);
     return;
   }
-  // Step 1 of "Partially": ask how much is being paid.
   if (session.step === "partial_amount") {
     const amount = parseInt(text.replace(/\D/g, ""), 10);
     if (isNaN(amount) || amount <= 0) {
@@ -839,9 +806,6 @@ async function handleSession(from: string, text: string, session: Session, lang:
     await sendWhatsAppMessage(from, T[lang].askPartialItem);
     return;
   }
-  // Step 2 of "Partially": ask what item this payment is for, then apply it.
-  // Asked as a separate question from the amount (not combined into one prompt)
-  // so the owner can keep a clear record of what each payment was actually for.
   if (session.step === "partial_item") {
     const item = text.trim();
     const phone = session.data["markPaidPhone"];
@@ -857,8 +821,6 @@ async function handleSession(from: string, text: string, session: Session, lang:
     setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
     return;
   }
-  // Entry point for "Send Reminder" → "Specific Number": ask for the phone
-  // number, then send that one customer their reminder directly.
   if (session.step === "reminder_phone") {
     const phone = cleanPhone(text);
     sessions[from] = undefined as any;
@@ -869,22 +831,27 @@ async function handleSession(from: string, text: string, session: Session, lang:
 
 
 async function sendReminder(from: string, phone: string, lang: Lang): Promise<void> {
-  const { data: owner } = await supabase.from("owners").select("name").eq("phone", cleanPhone(from)).single();
+  const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
   const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
+  // Reminders go out in the shop OWNER's chosen language (already used as a
+  // proxy for the customer base's language), independent of whatever `lang`
+  // the current webhook request happens to carry.
+  const reminderLang: Lang = (owner?.language as Lang) ?? "en";
+
   const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
   if (!customer) {
     await sendWhatsAppMessage(from, T[lang].noCustomer(phone));
     return;
   }
-  const { data: unpaidTx } = await supabase.from("transactions").select("amount, item").eq("customer_id", customer.id).eq("paid", false);
+  const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
   const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
   if (total === 0) {
     await sendWhatsAppMessage(from, T[lang].noDebts(customer.name));
     return;
   }
-  const itemsList = (unpaidTx ?? []).map((t: { item: string; amount: number }) => `${t.item} (${t.amount.toLocaleString()} Frw)`).join(", ");
 
-  // Reserve the reminder_logs row BEFORE sending, using a temporary placeholder ID
+  const itemizedList = await buildItemizedList(customer.id);
+
   const { data: insertedLog } = await supabase.from("reminder_logs").insert({
     message_id: `pending_${from}_${Date.now()}`,
     owner_phone: cleanPhone(from),
@@ -894,22 +861,20 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     status: "pending",
   }).select().single();
 
-  // Uses the approved "debt_reminder" template instead of free-form text, since
-  // customers have not necessarily messaged the bot within the last 24h (or ever) —
-  // free-form text to them would fail with error 131047 outside that window.
+  // Uses the approved debt reminder template (English or Kinyarwanda,
+  // depending on the owner's language). Template now carries 4 variables:
+  // name, shop, itemized list, total.
   const messageId = await sendWhatsAppTemplateMessage(
     phone,
-    "debt_reminder",
-    "en",
-    [customer.name, shopName, total.toLocaleString(), itemsList],
+    reminderTemplateName(reminderLang),
+    reminderLang,
+    [customer.name, shopName, itemizedList, total.toLocaleString()],
   );
 
-  // Now update the placeholder row with the real message_id from Meta
   if (insertedLog) {
     const { error } = await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
     if (error) console.error("Failed to update reminder_logs message_id:", error);
   } else {
-    // fallback in case the reserve insert failed for some reason
     await supabase.from("reminder_logs").insert({
       message_id: messageId,
       owner_phone: cleanPhone(from),
@@ -1026,8 +991,9 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
 }
 
 async function sendReminderAll(from: string, lang: Lang): Promise<void> {
-  const { data: owner } = await supabase.from("owners").select("name").eq("phone", cleanPhone(from)).single();
+  const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
   const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
+  const reminderLang: Lang = (owner?.language as Lang) ?? "en";
 
   const { data: customers } = await supabase.from("customers").select("*").eq("shop_id", from);
 
@@ -1041,10 +1007,11 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
   let sentCount = 0;
 
   for (const customer of customers) {
-    const { data: unpaidTx } = await supabase.from("transactions").select("amount, item").eq("customer_id", customer.id).eq("paid", false);
+    const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
     const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
     if (total === 0) continue;
-    const itemsList = (unpaidTx ?? []).map((t: { item: string; amount: number }) => `${t.item} (${t.amount.toLocaleString()} Frw)`).join(", ");
+
+    const itemizedList = await buildItemizedList(customer.id);
 
     const { data: insertedLog } = await supabase.from("reminder_logs").insert({
       message_id: `pending_${customer.phone}_${Date.now()}`,
@@ -1058,11 +1025,13 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
     try {
       // Same template-based send as sendReminder — required since bulk reminders
       // almost always go to customers outside the 24h free-form messaging window.
+      // Template + language now match the owner's chosen language, with the
+      // itemized list as the 4th variable.
       const messageId = await sendWhatsAppTemplateMessage(
         customer.phone,
-        "debt_reminder",
-        "en",
-        [customer.name, shopName, total.toLocaleString(), itemsList],
+        reminderTemplateName(reminderLang),
+        reminderLang,
+        [customer.name, shopName, itemizedList, total.toLocaleString()],
       );
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
@@ -1169,8 +1138,6 @@ async function handleLegacyPaid(from: string, text: string, lang: Lang): Promise
     return;
   }
   if (partialAmount && !isNaN(partialAmount)) {
-    // Legacy typed shortcut (PAID <phone> <amount>) doesn't collect an item
-    // description like the button-driven flow does — labeled generically here.
     await applyPartialPayment(from, customer, partialAmount, lang, lang === "rw" ? "Ntabwo byaranzwe" : "Not specified");
   } else {
     await supabase.from("transactions").update({ paid: true }).eq("customer_id", customer.id).eq("paid", false);
