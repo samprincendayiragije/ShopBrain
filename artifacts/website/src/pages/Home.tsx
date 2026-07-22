@@ -1,5 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone } from "lucide-react";
+import { Link } from "wouter";
+import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole } from "lucide-react";
+
+const WHATSAPP_BUSINESS_NUMBER = "250795120043"; // no + or leading zero, used for wa.me links
+
+const businessTypes = [
+  "Grocery / Shop",
+  "Salon / Barber",
+  "Boutique / Clothing",
+  "Pharmacy",
+  "Restaurant / Bar",
+  "Other",
+];
 
 const navLinks = [
   { name: "About", href: "#about" },
@@ -38,7 +50,7 @@ export default function Home() {
           <a href="#hero" onClick={(e) => scrollToSection(e, "#hero")} className="text-2xl font-bold font-display tracking-tight text-primary">
             Shop Brain
           </a>
-          
+
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-8">
             {navLinks.map((link) => (
@@ -51,6 +63,13 @@ export default function Home() {
                 {link.name}
               </a>
             ))}
+            <Link
+              href="/admin"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-primary transition-colors border border-border rounded-md px-3 py-1.5"
+              data-testid="link-admin"
+            >
+              <LockKeyhole size={14} /> Admin
+            </Link>
           </nav>
 
           {/* Mobile Menu Toggle */}
@@ -78,6 +97,12 @@ export default function Home() {
                 {link.name}
               </a>
             ))}
+            <Link
+              href="/admin"
+              className="flex items-center gap-2 text-lg font-medium text-foreground py-2 border-b border-border/50"
+            >
+              <LockKeyhole size={18} /> Admin
+            </Link>
           </nav>
         </div>
       )}
@@ -135,35 +160,28 @@ export default function Home() {
               </p>
             </div>
 
-            <div id="how-it-works" className="grid md:grid-cols-3 gap-8 mt-12">
-              <div className="bg-background p-8 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow">
-                <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-6">
-                  <Smartphone size={24} />
-                </div>
-                <h4 className="text-xl font-bold mb-3 font-display">No App to Install</h4>
-                <p className="text-muted-foreground leading-relaxed">
-                  Forget about downloading heavy applications or learning new software. Shop Brain works directly through WhatsApp messages you already send every day.
-                </p>
-              </div>
-
-              <div className="bg-background p-8 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow">
-                <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-6">
-                  <Users size={24} />
-                </div>
-                <h4 className="text-xl font-bold mb-3 font-display">Customer Lookup</h4>
-                <p className="text-muted-foreground leading-relaxed">
-                  Instantly look up customers, record items owed, and keep an accurate running balance of debts without leaving your WhatsApp chat.
-                </p>
-              </div>
-
-              <div className="bg-background p-8 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow">
-                <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-6">
-                  <Shield size={24} />
-                </div>
-                <h4 className="text-xl font-bold mb-3 font-display">Mark as Paid</h4>
-                <p className="text-muted-foreground leading-relaxed">
-                  Easily log payments and update balances securely. Keep your records straight and build trust with your customers through transparent accounting.
-                </p>
+            <div id="how-it-works" className="mt-12">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[
+                  { icon: MessageCircle, step: "1", title: "Text the Bot", desc: "Message Shop Brain on WhatsApp like you would any contact — no install, no login." },
+                  { icon: ClipboardList, step: "2", title: "Add Customer Debt", desc: "Record what a customer owes in seconds, right inside the chat." },
+                  { icon: Bell, step: "3", title: "Bot Sends Reminder", desc: "Shop Brain follows up automatically, in English or Kinyarwanda." },
+                  { icon: CheckCircle2, step: "4", title: "Customer Pays", desc: "Mark the debt as paid and your balance updates instantly." },
+                ].map((item, idx) => (
+                  <div key={item.step} className="relative bg-background p-6 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow">
+                    <span className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shadow-sm">
+                      {item.step}
+                    </span>
+                    <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-5">
+                      <item.icon size={22} />
+                    </div>
+                    <h4 className="text-lg font-bold mb-2 font-display">{item.title}</h4>
+                    <p className="text-muted-foreground leading-relaxed text-sm">{item.desc}</p>
+                    {idx < 3 && (
+                      <ArrowRight className="hidden lg:block absolute top-1/2 -right-4 -translate-y-1/2 text-border" size={20} />
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -211,40 +229,11 @@ export default function Home() {
                 </div>
               </div>
             </div>
-            
+
             <div className="bg-card p-8 md:p-10 rounded-2xl border border-border shadow-xl">
-              <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
-                <div className="space-y-2">
-                  <label htmlFor="name" className="text-sm font-medium">Full Name</label>
-                  <input 
-                    type="text" 
-                    id="name" 
-                    className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow" 
-                    placeholder="Your name"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="phone" className="text-sm font-medium">Phone Number</label>
-                  <input 
-                    type="tel" 
-                    id="phone" 
-                    className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow" 
-                    placeholder="Your WhatsApp number"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="message" className="text-sm font-medium">Message</label>
-                  <textarea 
-                    id="message" 
-                    rows={4}
-                    className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow resize-none" 
-                    placeholder="How can we help?"
-                  ></textarea>
-                </div>
-                <button type="submit" className="w-full bg-primary text-primary-foreground py-3.5 rounded-md font-bold text-lg hover:bg-primary/90 transition-colors shadow-sm">
-                  Send Message
-                </button>
-              </form>
+              <h4 className="text-xl font-bold font-display mb-1">Request Access</h4>
+              <p className="text-sm text-muted-foreground mb-6">Submit your details and we'll open a WhatsApp chat pre-filled with your request.</p>
+              <RequestAccessForm />
             </div>
           </div>
         </section>
@@ -282,5 +271,93 @@ export default function Home() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function RequestAccessForm() {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [businessType, setBusinessType] = useState(businessTypes[0]);
+  const [message, setMessage] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const text = [
+      "Hi Shop Brain, I'd like to request access.",
+      `Name: ${name}`,
+      `Phone: ${phone}`,
+      `Business type: ${businessType}`,
+      message ? `Message: ${message}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const url = `https://wa.me/${WHATSAPP_BUSINESS_NUMBER}?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <form className="space-y-6" onSubmit={handleSubmit}>
+      <div className="space-y-2">
+        <label htmlFor="name" className="text-sm font-medium">Full Name</label>
+        <input
+          type="text"
+          id="name"
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+          placeholder="Your name"
+          data-testid="input-request-name"
+        />
+      </div>
+      <div className="space-y-2">
+        <label htmlFor="phone" className="text-sm font-medium">Phone Number</label>
+        <input
+          type="tel"
+          id="phone"
+          required
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+          placeholder="Your WhatsApp number"
+          data-testid="input-request-phone"
+        />
+      </div>
+      <div className="space-y-2">
+        <label htmlFor="business-type" className="text-sm font-medium">Business Type</label>
+        <select
+          id="business-type"
+          value={businessType}
+          onChange={(e) => setBusinessType(e.target.value)}
+          className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+          data-testid="select-request-business-type"
+        >
+          {businessTypes.map((type) => (
+            <option key={type} value={type}>{type}</option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-2">
+        <label htmlFor="message" className="text-sm font-medium">Message (optional)</label>
+        <textarea
+          id="message"
+          rows={4}
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow resize-none"
+          placeholder="Anything else we should know?"
+          data-testid="input-request-message"
+        ></textarea>
+      </div>
+      <button
+        type="submit"
+        className="w-full inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-md font-bold text-lg hover:bg-primary/90 transition-colors shadow-sm"
+        data-testid="button-request-access"
+      >
+        <MessageCircle size={20} /> Send via WhatsApp
+      </button>
+    </form>
   );
 }
