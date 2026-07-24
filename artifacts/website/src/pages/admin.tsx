@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "wouter";
-import { LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock, Pencil, Trash2, Ban, PlayCircle, X } from "lucide-react";
+import { LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock, Pencil, Trash2, Ban, PlayCircle, X, UserPlus } from "lucide-react";
 
 // Point this at your ShopBrain webhook backend, e.g.
 // https://shop-brain-webhook--ndayiragijesamu.replit.app/api
@@ -148,6 +148,8 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   const [error, setError] = useState<string | null>(null);
   const [actioningPhone, setActioningPhone] = useState<string | null>(null);
   const [editingOwner, setEditingOwner] = useState<Owner | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const fetchOwners = useCallback(async () => {
     if (!ADMIN_API_BASE) {
@@ -193,7 +195,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     }
   };
 
-  const saveEdit = async (phone: string, updates: { name?: string; language?: string }) => {
+  const saveEdit = async (phone: string, updates: { name?: string; language?: string; newPhone?: string }) => {
     if (!ADMIN_API_BASE) return;
     setActioningPhone(phone);
     try {
@@ -252,6 +254,29 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     }
   };
 
+  const createOwner = async (data: { phone: string; name: string; language: string; trialDays: number }) => {
+    if (!ADMIN_API_BASE) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch(`${ADMIN_API_BASE}/admin/owners`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-admin-password": password },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || "Failed to create owner.");
+      }
+      setShowAddModal(false);
+      await fetchOwners();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create owner.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const activeCount = owners.filter((o) => o.status === "active").length;
   const expiringCount = owners.filter((o) => o.status === "expiring").length;
   const expiredCount = owners.filter((o) => o.status === "expired").length;
@@ -266,6 +291,13 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             <p className="text-sm text-muted-foreground mt-1">{owners.length} registered shop{owners.length === 1 ? "" : "s"}</p>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="inline-flex items-center gap-2 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors rounded-md px-3 py-2"
+              data-testid="button-add-owner"
+            >
+              <UserPlus size={14} /> Add Owner
+            </button>
             <button
               onClick={fetchOwners}
               disabled={loading}
@@ -407,6 +439,14 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           onSave={(updates) => saveEdit(editingOwner.phone, updates)}
         />
       )}
+
+      {showAddModal && (
+        <AddOwnerModal
+          saving={creating}
+          onCancel={() => setShowAddModal(false)}
+          onSave={createOwner}
+        />
+      )}
     </div>
   );
 }
@@ -420,10 +460,11 @@ function EditOwnerModal({
   owner: Owner;
   saving: boolean;
   onCancel: () => void;
-  onSave: (updates: { name?: string; language?: string }) => void;
+  onSave: (updates: { name?: string; language?: string; newPhone?: string }) => void;
 }) {
   const [name, setName] = useState(owner.name ?? "");
   const [language, setLanguage] = useState(owner.language ?? "en");
+  const [phone, setPhone] = useState(owner.phone);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
@@ -458,7 +499,19 @@ function EditOwnerModal({
               <option value="rw">Kinyarwanda</option>
             </select>
           </div>
-          <p className="text-xs text-muted-foreground">Phone: {owner.phone} (not editable)</p>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Phone Number</label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              data-testid="input-edit-phone"
+            />
+            <p className="text-xs text-muted-foreground">
+              Changing this updates the owner's ID everywhere (their customers and reminder logs move with it).
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-3 mt-6">
@@ -470,12 +523,106 @@ function EditOwnerModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave({ name, language })}
+            onClick={() => onSave({ name, language, newPhone: phone !== owner.phone ? phone : undefined })}
             disabled={saving}
             className="flex-1 bg-primary text-primary-foreground py-2.5 rounded-md text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-60"
             data-testid="button-save-edit"
           >
             {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddOwnerModal({
+  saving,
+  onCancel,
+  onSave,
+}: {
+  saving: boolean;
+  onCancel: () => void;
+  onSave: (data: { phone: string; name: string; language: string; trialDays: number }) => void;
+}) {
+  const [phone, setPhone] = useState("");
+  const [name, setName] = useState("");
+  const [language, setLanguage] = useState("en");
+  const [trialDays, setTrialDays] = useState(30);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold font-display">Add New Owner</h2>
+          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground" data-testid="button-close-add-modal">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Phone Number</label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="e.g. 0788123456"
+              className="w-full px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              data-testid="input-add-phone"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Shop Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Mama Janet Shop"
+              className="w-full px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              data-testid="input-add-name"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Language</label>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              data-testid="select-add-language"
+            >
+              <option value="en">English</option>
+              <option value="rw">Kinyarwanda</option>
+            </select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Trial Length (days)</label>
+            <input
+              type="number"
+              min={1}
+              value={trialDays}
+              onChange={(e) => setTrialDays(Number(e.target.value))}
+              className="w-full px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              data-testid="input-add-trial-days"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={onCancel}
+            className="flex-1 border border-border py-2.5 rounded-md text-sm font-medium hover:bg-muted transition-colors"
+            data-testid="button-cancel-add"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave({ phone, name, language, trialDays })}
+            disabled={saving || !phone.trim() || !name.trim()}
+            className="flex-1 bg-primary text-primary-foreground py-2.5 rounded-md text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-60"
+            data-testid="button-save-add"
+          >
+            {saving ? "Creating..." : "Create"}
           </button>
         </div>
       </div>
