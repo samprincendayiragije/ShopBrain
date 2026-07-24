@@ -1,147 +1,305 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "wouter";
-import { LockKeyhole, ArrowLeft, Loader2 } from "lucide-react";
+import { LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-react";
 
-// Point this at the endpoint on your ShopBrain backend that checks the
-// submitted password/phone against the Supabase `owners` table and
-// returns { ok: true, token } on success. Set VITE_ADMIN_API_URL in your
-// .env (e.g. https://your-shopbrain-app.repl.co/api/admin/verify).
-const ADMIN_VERIFY_ENDPOINT = import.meta.env.VITE_ADMIN_API_URL as string | undefined;
-const SESSION_KEY = "shopbrain_admin_token";
+// Point this at your ShopBrain webhook backend, e.g.
+// https://shop-brain-webhook--ndayiragijesamu.replit.app/api
+const ADMIN_API_BASE = import.meta.env.VITE_ADMIN_API_URL as string | undefined;
+const SESSION_KEY = "shopbrain_admin_password";
+
+type OwnerStatus = "no_trial" | "active" | "expiring" | "expired";
+
+interface Owner {
+  phone: string;
+  name: string | null;
+  language: string | null;
+  createdAt: string;
+  trialEndsAt: string | null;
+  status: OwnerStatus;
+  customerCount: number;
+  totalOutstanding: number;
+}
+
+function statusBadge(status: OwnerStatus) {
+  const map: Record<OwnerStatus, { label: string; className: string; icon: React.ReactNode }> = {
+    active: { label: "Active", className: "bg-emerald-100 text-emerald-700", icon: <CheckCircle2 size={14} /> },
+    expiring: { label: "Expiring soon", className: "bg-amber-100 text-amber-700", icon: <Clock size={14} /> },
+    expired: { label: "Expired", className: "bg-red-100 text-red-700", icon: <XCircle size={14} /> },
+    no_trial: { label: "No trial set", className: "bg-muted text-muted-foreground", icon: <AlertTriangle size={14} /> },
+  };
+  const { label, className, icon } = map[status];
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${className}`}>
+      {icon} {label}
+    </span>
+  );
+}
 
 export default function Admin() {
-  const [token, setToken] = useState<string | null>(null);
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [password, setPassword] = useState<string | null>(null);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
     const stored = sessionStorage.getItem(SESSION_KEY);
-    if (stored) setToken(stored);
+    if (stored) setPassword(stored);
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setLoginError(null);
 
-    if (!ADMIN_VERIFY_ENDPOINT) {
-      setError(
-        "Admin API endpoint isn't configured yet. Set VITE_ADMIN_API_URL to your backend's owner-verification route."
-      );
+    if (!ADMIN_API_BASE) {
+      setLoginError("Admin API endpoint isn't configured. Set VITE_ADMIN_API_URL.");
       return;
     }
 
-    setLoading(true);
+    setLoggingIn(true);
     try {
-      const res = await fetch(ADMIN_VERIFY_ENDPOINT, {
+      const res = await fetch(`${ADMIN_API_BASE}/admin/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password: passwordInput }),
       });
-
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.message || "Invalid password.");
       }
-
-      const data = await res.json();
-      if (!data?.ok || !data?.token) {
-        throw new Error("Unexpected response from admin server.");
-      }
-
-      sessionStorage.setItem(SESSION_KEY, data.token);
-      setToken(data.token);
+      sessionStorage.setItem(SESSION_KEY, passwordInput);
+      setPassword(passwordInput);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed.");
+      setLoginError(err instanceof Error ? err.message : "Login failed.");
     } finally {
-      setLoading(false);
+      setLoggingIn(false);
     }
   };
 
   const handleLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
-    setToken(null);
-    setPassword("");
+    setPassword(null);
+    setPasswordInput("");
   };
 
-  if (token) {
+  if (!password) {
     return (
-      <div className="min-h-[100dvh] bg-background px-4 md:px-6 py-10">
-        <div className="container mx-auto max-w-4xl">
-          <div className="flex items-center justify-between mb-8">
-            <h1 className="text-2xl font-bold font-display">Shop Brain Admin</h1>
-            <button
-              onClick={handleLogout}
-              className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors border border-border rounded-md px-3 py-1.5"
-              data-testid="button-admin-logout"
-            >
-              Log out
-            </button>
-          </div>
-          <div className="bg-card border border-border rounded-2xl p-8 text-muted-foreground">
-            <p>
-              You're verified as an owner. This is a placeholder dashboard —
-              wire this area up to whatever admin views/actions ShopBrain
-              needs next (shop list, trial status, manual billing, etc.),
-              using the same token/backend for any further requests.
-            </p>
+      <div className="min-h-[100dvh] flex items-center justify-center bg-background px-4 md:px-6 py-10">
+        <div className="w-full max-w-sm">
+          <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors mb-6">
+            <ArrowLeft size={16} /> Back to site
+          </Link>
+
+          <div className="bg-card border border-border rounded-2xl p-8 shadow-xl">
+            <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-6">
+              <LockKeyhole size={22} />
+            </div>
+            <h1 className="text-xl font-bold font-display mb-1">Admin Access</h1>
+            <p className="text-sm text-muted-foreground mb-6">Enter the owner password to continue.</p>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="password" className="text-sm font-medium">Password</label>
+                <input
+                  type="password"
+                  id="password"
+                  required
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+                  placeholder="••••••••"
+                  data-testid="input-admin-password"
+                />
+              </div>
+
+              {loginError && (
+                <p className="text-sm text-destructive" data-testid="text-admin-error">{loginError}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loggingIn}
+                className="w-full inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3 rounded-md font-bold hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-60"
+                data-testid="button-admin-login"
+              >
+                {loggingIn ? <Loader2 size={18} className="animate-spin" /> : null}
+                {loggingIn ? "Checking..." : "Log In"}
+              </button>
+            </form>
           </div>
         </div>
       </div>
     );
   }
 
+  return <OwnersDashboard password={password} onLogout={handleLogout} />;
+}
+
+function OwnersDashboard({ password, onLogout }: { password: string; onLogout: () => void }) {
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actioningPhone, setActioningPhone] = useState<string | null>(null);
+
+  const fetchOwners = useCallback(async () => {
+    if (!ADMIN_API_BASE) {
+      setError("Admin API endpoint isn't configured. Set VITE_ADMIN_API_URL.");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${ADMIN_API_BASE}/admin/owners`, {
+        headers: { "x-admin-password": password },
+      });
+      if (!res.ok) throw new Error("Failed to load owners.");
+      const data = await res.json();
+      setOwners(data.owners ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load owners.");
+    } finally {
+      setLoading(false);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    fetchOwners();
+  }, [fetchOwners]);
+
+  const extend = async (phone: string, days: number) => {
+    if (!ADMIN_API_BASE) return;
+    setActioningPhone(phone);
+    try {
+      const res = await fetch(`${ADMIN_API_BASE}/admin/owners/${encodeURIComponent(phone)}/extend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-admin-password": password },
+        body: JSON.stringify({ days }),
+      });
+      if (!res.ok) throw new Error("Failed to update owner.");
+      await fetchOwners();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed.");
+    } finally {
+      setActioningPhone(null);
+    }
+  };
+
+  const activeCount = owners.filter((o) => o.status === "active").length;
+  const expiringCount = owners.filter((o) => o.status === "expiring").length;
+  const expiredCount = owners.filter((o) => o.status === "expired").length;
+  const totalOutstandingAll = owners.reduce((sum, o) => sum + o.totalOutstanding, 0);
+
   return (
-    <div className="min-h-[100dvh] flex items-center justify-center bg-background px-4 md:px-6 py-10">
-      <div className="w-full max-w-sm">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors mb-6"
-        >
-          <ArrowLeft size={16} /> Back to site
-        </Link>
-
-        <div className="bg-card border border-border rounded-2xl p-8 shadow-xl">
-          <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-6">
-            <LockKeyhole size={22} />
+    <div className="min-h-[100dvh] bg-background px-4 md:px-6 py-10">
+      <div className="container mx-auto max-w-6xl">
+        <div className="flex items-center justify-between mb-8 gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold font-display">Shop Brain Admin</h1>
+            <p className="text-sm text-muted-foreground mt-1">{owners.length} registered shop{owners.length === 1 ? "" : "s"}</p>
           </div>
-          <h1 className="text-xl font-bold font-display mb-1">Admin Access</h1>
-          <p className="text-sm text-muted-foreground mb-6">
-            Enter the owner password to continue.
-          </p>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium">Password</label>
-              <input
-                type="password"
-                id="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-                placeholder="••••••••"
-                data-testid="input-admin-password"
-              />
-            </div>
-
-            {error && (
-              <p className="text-sm text-destructive" data-testid="text-admin-error">
-                {error}
-              </p>
-            )}
-
+          <div className="flex items-center gap-3">
             <button
-              type="submit"
+              onClick={fetchOwners}
               disabled={loading}
-              className="w-full inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3 rounded-md font-bold hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-60"
-              data-testid="button-admin-login"
+              className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary transition-colors border border-border rounded-md px-3 py-2 disabled:opacity-60"
+              data-testid="button-refresh"
             >
-              {loading ? <Loader2 size={18} className="animate-spin" /> : null}
-              {loading ? "Checking..." : "Log In"}
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
             </button>
-          </form>
+            <button
+              onClick={onLogout}
+              className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors border border-border rounded-md px-3 py-2"
+              data-testid="button-admin-logout"
+            >
+              Log out
+            </button>
+          </div>
         </div>
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-card border border-border rounded-xl p-5">
+            <p className="text-xs text-muted-foreground mb-1">Active</p>
+            <p className="text-2xl font-bold font-display text-emerald-600">{activeCount}</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5">
+            <p className="text-xs text-muted-foreground mb-1">Expiring soon</p>
+            <p className="text-2xl font-bold font-display text-amber-600">{expiringCount}</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5">
+            <p className="text-xs text-muted-foreground mb-1">Expired</p>
+            <p className="text-2xl font-bold font-display text-red-600">{expiredCount}</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5">
+            <p className="text-xs text-muted-foreground mb-1">Total outstanding (all shops)</p>
+            <p className="text-2xl font-bold font-display">{totalOutstandingAll.toLocaleString()} Frw</p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mb-6 p-4 rounded-lg bg-red-50 text-red-700 text-sm" data-testid="text-dashboard-error">
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center py-20 text-muted-foreground">
+            <Loader2 className="animate-spin mr-2" size={20} /> Loading owners...
+          </div>
+        ) : owners.length === 0 ? (
+          <div className="text-center py-20 text-muted-foreground">No shop owners registered yet.</div>
+        ) : (
+          <div className="bg-card border border-border rounded-2xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/50 text-left">
+                  <th className="px-5 py-3 font-medium text-muted-foreground">Shop</th>
+                  <th className="px-5 py-3 font-medium text-muted-foreground">Phone</th>
+                  <th className="px-5 py-3 font-medium text-muted-foreground">Status</th>
+                  <th className="px-5 py-3 font-medium text-muted-foreground">Access until</th>
+                  <th className="px-5 py-3 font-medium text-muted-foreground">Customers</th>
+                  <th className="px-5 py-3 font-medium text-muted-foreground">Outstanding</th>
+                  <th className="px-5 py-3 font-medium text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {owners.map((owner) => (
+                  <tr key={owner.phone} className="border-b border-border last:border-0 hover:bg-muted/30" data-testid={`row-owner-${owner.phone}`}>
+                    <td className="px-5 py-4 font-medium">{owner.name ?? "—"}</td>
+                    <td className="px-5 py-4 text-muted-foreground">{owner.phone}</td>
+                    <td className="px-5 py-4">{statusBadge(owner.status)}</td>
+                    <td className="px-5 py-4 text-muted-foreground">
+                      {owner.trialEndsAt ? new Date(owner.trialEndsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                    </td>
+                    <td className="px-5 py-4">{owner.customerCount}</td>
+                    <td className="px-5 py-4">{owner.totalOutstanding.toLocaleString()} Frw</td>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={() => extend(owner.phone, 30)}
+                          disabled={actioningPhone === owner.phone}
+                          className="text-xs font-medium bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 transition-colors disabled:opacity-60"
+                          data-testid={`button-extend-${owner.phone}`}
+                        >
+                          {actioningPhone === owner.phone ? "..." : "+30 days"}
+                        </button>
+                        <a
+                          href={`https://wa.me/${owner.phone}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-medium border border-border px-3 py-1.5 rounded-md hover:bg-muted transition-colors"
+                          data-testid={`link-whatsapp-${owner.phone}`}
+                        >
+                          <MessageCircle size={12} /> Message
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
