@@ -40,7 +40,7 @@ router.post("/admin/verify", (req: Request, res: Response) => {
 router.get("/admin/owners", requireAdmin, async (_req: Request, res: Response) => {
   const { data: owners, error } = await supabase
     .from("owners")
-    .select("phone, name, language, trial_ends_at, created_at")
+    .select("phone, name, language, trial_ends_at, created_at, is_active")
     .order("created_at", { ascending: false });
 
   if (error || !owners) {
@@ -49,7 +49,7 @@ router.get("/admin/owners", requireAdmin, async (_req: Request, res: Response) =
   }
 
   const results = await Promise.all(
-    owners.map(async (owner: { phone: string; name: string | null; language: string | null; trial_ends_at: string | null; created_at: string }) => {
+    owners.map(async (owner: { phone: string; name: string | null; language: string | null; trial_ends_at: string | null; created_at: string; is_active: boolean }) => {
       const { data: customers } = await supabase
         .from("customers")
         .select("id")
@@ -85,6 +85,7 @@ router.get("/admin/owners", requireAdmin, async (_req: Request, res: Response) =
         createdAt: owner.created_at,
         trialEndsAt,
         status,
+        isActive: owner.is_active,
         customerCount: customerIds.length,
         totalOutstanding,
       };
@@ -119,6 +120,66 @@ router.post("/admin/owners/:phone/extend", requireAdmin, async (req: Request, re
   }
 
   res.json({ ok: true, trialEndsAt: base.toISOString() });
+});
+
+// PATCH /api/admin/owners/:phone
+// body: { name?: string, language?: "en" | "rw" } — edits an owner's basic info.
+router.patch("/admin/owners/:phone", requireAdmin, async (req: Request, res: Response) => {
+  const { phone } = req.params;
+  const { name, language } = req.body as { name?: string; language?: string };
+
+  const updates: Record<string, string> = {};
+  if (typeof name === "string" && name.trim().length > 0) updates["name"] = name.trim();
+  if (language === "en" || language === "rw") updates["language"] = language;
+
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ ok: false, message: "Nothing to update." });
+    return;
+  }
+
+  const { error } = await supabase.from("owners").update(updates).eq("phone", phone);
+  if (error) {
+    res.status(500).json({ ok: false, message: "Failed to update owner." });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+// POST /api/admin/owners/:phone/deactivate
+// Blocks the owner from using ShopBrain (isOwner() must check is_active too — see note below).
+router.post("/admin/owners/:phone/deactivate", requireAdmin, async (req: Request, res: Response) => {
+  const { phone } = req.params;
+  const { error } = await supabase.from("owners").update({ is_active: false }).eq("phone", phone);
+  if (error) {
+    res.status(500).json({ ok: false, message: "Failed to deactivate owner." });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+// POST /api/admin/owners/:phone/activate
+router.post("/admin/owners/:phone/activate", requireAdmin, async (req: Request, res: Response) => {
+  const { phone } = req.params;
+  const { error } = await supabase.from("owners").update({ is_active: true }).eq("phone", phone);
+  if (error) {
+    res.status(500).json({ ok: false, message: "Failed to activate owner." });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+// DELETE /api/admin/owners/:phone
+// Permanently removes the owner row. Their customers/transactions are left
+// in place (still tied to shop_id = phone) unless you also want a cascade —
+// ask if you want this to wipe customer data too.
+router.delete("/admin/owners/:phone", requireAdmin, async (req: Request, res: Response) => {
+  const { phone } = req.params;
+  const { error } = await supabase.from("owners").delete().eq("phone", phone);
+  if (error) {
+    res.status(500).json({ ok: false, message: "Failed to remove owner." });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 export default router;

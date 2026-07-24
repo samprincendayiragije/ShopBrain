@@ -204,10 +204,10 @@ function cleanPhone(phone: string): string {
 async function isOwner(from: string): Promise<boolean> {
   const { data } = await supabase
     .from("owners")
-    .select("phone")
+    .select("phone, is_active")
     .eq("phone", cleanPhone(from))
     .single();
-  return !!data;
+  return !!data && data.is_active !== false;
 }
 
 async function getLang(from: string): Promise<Lang> {

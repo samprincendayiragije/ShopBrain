@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "wouter";
-import { LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-react";
+import { LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock, Pencil, Trash2, Ban, PlayCircle, X } from "lucide-react";
 
 // Point this at your ShopBrain webhook backend, e.g.
 // https://shop-brain-webhook--ndayiragijesamu.replit.app/api
@@ -16,11 +16,19 @@ interface Owner {
   createdAt: string;
   trialEndsAt: string | null;
   status: OwnerStatus;
+  isActive: boolean;
   customerCount: number;
   totalOutstanding: number;
 }
 
-function statusBadge(status: OwnerStatus) {
+function statusBadge(status: OwnerStatus, isActive: boolean) {
+  if (!isActive) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">
+        <Ban size={14} /> Deactivated
+      </span>
+    );
+  }
   const map: Record<OwnerStatus, { label: string; className: string; icon: React.ReactNode }> = {
     active: { label: "Active", className: "bg-emerald-100 text-emerald-700", icon: <CheckCircle2 size={14} /> },
     expiring: { label: "Expiring soon", className: "bg-amber-100 text-amber-700", icon: <Clock size={14} /> },
@@ -139,6 +147,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actioningPhone, setActioningPhone] = useState<string | null>(null);
+  const [editingOwner, setEditingOwner] = useState<Owner | null>(null);
 
   const fetchOwners = useCallback(async () => {
     if (!ADMIN_API_BASE) {
@@ -176,6 +185,65 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         body: JSON.stringify({ days }),
       });
       if (!res.ok) throw new Error("Failed to update owner.");
+      await fetchOwners();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed.");
+    } finally {
+      setActioningPhone(null);
+    }
+  };
+
+  const saveEdit = async (phone: string, updates: { name?: string; language?: string }) => {
+    if (!ADMIN_API_BASE) return;
+    setActioningPhone(phone);
+    try {
+      const res = await fetch(`${ADMIN_API_BASE}/admin/owners/${encodeURIComponent(phone)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-admin-password": password },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error("Failed to save changes.");
+      setEditingOwner(null);
+      await fetchOwners();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed.");
+    } finally {
+      setActioningPhone(null);
+    }
+  };
+
+  const toggleActive = async (owner: Owner) => {
+    if (!ADMIN_API_BASE) return;
+    const endpoint = owner.isActive ? "deactivate" : "activate";
+    setActioningPhone(owner.phone);
+    try {
+      const res = await fetch(`${ADMIN_API_BASE}/admin/owners/${encodeURIComponent(owner.phone)}/${endpoint}`, {
+        method: "POST",
+        headers: { "x-admin-password": password },
+      });
+      if (!res.ok) throw new Error("Failed to update owner.");
+      await fetchOwners();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed.");
+    } finally {
+      setActioningPhone(null);
+    }
+  };
+
+  const removeOwner = async (owner: Owner) => {
+    if (!ADMIN_API_BASE) return;
+    const confirmed = window.confirm(
+      `Remove ${owner.name ?? owner.phone} permanently? This cannot be undone. Their customer records will remain but the owner login will no longer work.`
+    );
+    if (!confirmed) return;
+
+    setActioningPhone(owner.phone);
+    try {
+      const res = await fetch(`${ADMIN_API_BASE}/admin/owners/${encodeURIComponent(owner.phone)}`, {
+        method: "DELETE",
+        headers: { "x-admin-password": password },
+      });
+      if (!res.ok) throw new Error("Failed to remove owner.");
       await fetchOwners();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action failed.");
@@ -267,7 +335,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
                   <tr key={owner.phone} className="border-b border-border last:border-0 hover:bg-muted/30" data-testid={`row-owner-${owner.phone}`}>
                     <td className="px-5 py-4 font-medium">{owner.name ?? "—"}</td>
                     <td className="px-5 py-4 text-muted-foreground">{owner.phone}</td>
-                    <td className="px-5 py-4">{statusBadge(owner.status)}</td>
+                    <td className="px-5 py-4">{statusBadge(owner.status, owner.isActive)}</td>
                     <td className="px-5 py-4 text-muted-foreground">
                       {owner.trialEndsAt ? new Date(owner.trialEndsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                     </td>
@@ -292,6 +360,35 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
                         >
                           <MessageCircle size={12} /> Message
                         </a>
+                        <button
+                          onClick={() => setEditingOwner(owner)}
+                          disabled={actioningPhone === owner.phone}
+                          className="inline-flex items-center gap-1 text-xs font-medium border border-border px-3 py-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-60"
+                          data-testid={`button-edit-${owner.phone}`}
+                        >
+                          <Pencil size={12} /> Edit
+                        </button>
+                        <button
+                          onClick={() => toggleActive(owner)}
+                          disabled={actioningPhone === owner.phone}
+                          className={`inline-flex items-center gap-1 text-xs font-medium border px-3 py-1.5 rounded-md transition-colors disabled:opacity-60 ${
+                            owner.isActive
+                              ? "border-amber-300 text-amber-700 hover:bg-amber-50"
+                              : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                          }`}
+                          data-testid={`button-toggle-active-${owner.phone}`}
+                        >
+                          {owner.isActive ? <Ban size={12} /> : <PlayCircle size={12} />}
+                          {owner.isActive ? "Deactivate" : "Activate"}
+                        </button>
+                        <button
+                          onClick={() => removeOwner(owner)}
+                          disabled={actioningPhone === owner.phone}
+                          className="inline-flex items-center gap-1 text-xs font-medium border border-red-300 text-red-700 px-3 py-1.5 rounded-md hover:bg-red-50 transition-colors disabled:opacity-60"
+                          data-testid={`button-remove-${owner.phone}`}
+                        >
+                          <Trash2 size={12} /> Remove
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -300,6 +397,87 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             </table>
           </div>
         )}
+      </div>
+
+      {editingOwner && (
+        <EditOwnerModal
+          owner={editingOwner}
+          saving={actioningPhone === editingOwner.phone}
+          onCancel={() => setEditingOwner(null)}
+          onSave={(updates) => saveEdit(editingOwner.phone, updates)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditOwnerModal({
+  owner,
+  saving,
+  onCancel,
+  onSave,
+}: {
+  owner: Owner;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: (updates: { name?: string; language?: string }) => void;
+}) {
+  const [name, setName] = useState(owner.name ?? "");
+  const [language, setLanguage] = useState(owner.language ?? "en");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold font-display">Edit Shop</h2>
+          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground" data-testid="button-close-edit-modal">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Shop Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              data-testid="input-edit-name"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Language</label>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+              data-testid="select-edit-language"
+            >
+              <option value="en">English</option>
+              <option value="rw">Kinyarwanda</option>
+            </select>
+          </div>
+          <p className="text-xs text-muted-foreground">Phone: {owner.phone} (not editable)</p>
+        </div>
+
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={onCancel}
+            className="flex-1 border border-border py-2.5 rounded-md text-sm font-medium hover:bg-muted transition-colors"
+            data-testid="button-cancel-edit"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave({ name, language })}
+            disabled={saving}
+            className="flex-1 bg-primary text-primary-foreground py-2.5 rounded-md text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-60"
+            data-testid="button-save-edit"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
       </div>
     </div>
   );
