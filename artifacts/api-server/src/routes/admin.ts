@@ -122,26 +122,101 @@ router.post("/admin/owners/:phone/extend", requireAdmin, async (req: Request, re
   res.json({ ok: true, trialEndsAt: base.toISOString() });
 });
 
+// POST /api/admin/owners
+// body: { phone: string, name: string, language?: "en" | "rw", trialDays?: number }
+// Manually creates a new ShopBrain owner (e.g. onboarding a shop yourself
+// instead of them going through the WhatsApp welcome flow).
+router.post("/admin/owners", requireAdmin, async (req: Request, res: Response) => {
+  const { phone, name, language, trialDays } = req.body as {
+    phone?: string;
+    name?: string;
+    language?: string;
+    trialDays?: number;
+  };
+
+  if (!phone || !phone.trim()) {
+    res.status(400).json({ ok: false, message: "Phone number is required." });
+    return;
+  }
+  if (!name || !name.trim()) {
+    res.status(400).json({ ok: false, message: "Shop name is required." });
+    return;
+  }
+
+  const cleanedPhone = phone.replace(/\D/g, "").replace(/^0/, "250");
+  const lang = language === "rw" ? "rw" : "en";
+  const days = Number(trialDays) || 30;
+
+  const { data: existing } = await supabase.from("owners").select("phone").eq("phone", cleanedPhone).single();
+  if (existing) {
+    res.status(409).json({ ok: false, message: "An owner with this phone number already exists." });
+    return;
+  }
+
+  const trialEndsAt = new Date();
+  trialEndsAt.setDate(trialEndsAt.getDate() + days);
+
+  const { error } = await supabase.from("owners").insert({
+    phone: cleanedPhone,
+    name: name.trim(),
+    language: lang,
+    trial_ends_at: trialEndsAt.toISOString(),
+    is_active: true,
+  });
+
+  if (error) {
+    res.status(500).json({ ok: false, message: "Failed to create owner." });
+    return;
+  }
+
+  res.json({ ok: true, phone: cleanedPhone });
+});
+
 // PATCH /api/admin/owners/:phone
-// body: { name?: string, language?: "en" | "rw" } — edits an owner's basic info.
+// body: { name?: string, language?: "en" | "rw", newPhone?: string } — edits
+// an owner's info. newPhone renames the owner's phone/ID and cascades that
+// change to every table that stores it as a string reference (customers,
+// reminder_logs) so the shop's existing data stays linked correctly.
 router.patch("/admin/owners/:phone", requireAdmin, async (req: Request, res: Response) => {
   const { phone } = req.params;
-  const { name, language } = req.body as { name?: string; language?: string };
+  const { name, language, newPhone } = req.body as { name?: string; language?: string; newPhone?: string };
+
+  if (newPhone && newPhone.trim()) {
+    const cleanedNewPhone = newPhone.replace(/\D/g, "").replace(/^0/, "250");
+    if (cleanedNewPhone !== phone) {
+      const { data: existing } = await supabase.from("owners").select("phone").eq("phone", cleanedNewPhone).single();
+      if (existing) {
+        res.status(409).json({ ok: false, message: "Another owner already uses that phone number." });
+        return;
+      }
+
+      // Cascade: owners.phone is referenced as a plain string in
+      // customers.shop_id and reminder_logs.owner_phone, so all three need
+      // updating together for the shop's data to stay attached.
+      const { error: ownerErr } = await supabase.from("owners").update({ phone: cleanedNewPhone }).eq("phone", phone);
+      if (ownerErr) {
+        res.status(500).json({ ok: false, message: "Failed to update phone number." });
+        return;
+      }
+      await supabase.from("customers").update({ shop_id: cleanedNewPhone }).eq("shop_id", phone);
+      await supabase.from("reminder_logs").update({ owner_phone: cleanedNewPhone }).eq("owner_phone", phone);
+    }
+  }
+
+  const currentPhone = newPhone ? newPhone.replace(/\D/g, "").replace(/^0/, "250") : phone;
 
   const updates: Record<string, string> = {};
   if (typeof name === "string" && name.trim().length > 0) updates["name"] = name.trim();
   if (language === "en" || language === "rw") updates["language"] = language;
 
-  if (Object.keys(updates).length === 0) {
-    res.status(400).json({ ok: false, message: "Nothing to update." });
-    return;
+  if (Object.keys(updates).length > 0) {
+    const { error } = await supabase.from("owners").update(updates).eq("phone", currentPhone);
+    if (error) {
+      res.status(500).json({ ok: false, message: "Failed to update owner." });
+      return;
+    }
   }
 
-  const { error } = await supabase.from("owners").update(updates).eq("phone", phone);
-  if (error) {
-    res.status(500).json({ ok: false, message: "Failed to update owner." });
-    return;
-  }
   res.json({ ok: true });
 });
 
