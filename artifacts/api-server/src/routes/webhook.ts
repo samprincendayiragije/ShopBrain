@@ -23,9 +23,9 @@ const T = {
     askPhone: "➕ *Add Debt*\n\nWhat is the customer's phone number?\n\ne.g. 0788123456",
     askName: "What is the customer's name?",
     askItem: "What item did they take?",
-    askAmount: "How much do they owe? (in Frw, numbers only)",
-    invalidPhone: "❌ That's not a valid number — phone numbers must be digits only. Please enter it again:",
-    invalidAmount: "❌ That's not a valid amount — enter numbers only (Frw), e.g. 5000:",
+    askAmount: "How much do they owe? (in Frw)",
+    invalidPhone: "❌ Invalid number. Please enter a valid phone number:",
+    invalidAmount: "❌ Invalid amount. Please enter a number e.g. 5000",
     debtSaved: (name: string, phone: string, item: string, amount: number, total: number) =>
       `✅ *Debt Saved!*\n\n👤 ${name} (${phone})\n📦 Item: ${item}\n💰 Added: ${amount.toLocaleString()} Frw\n📊 Total owed: ${total.toLocaleString()} Frw`,
     noCustomer: (phone: string) => `❌ No customer found for ${phone}.`,
@@ -43,9 +43,9 @@ const T = {
     reminderFailed: (phone: string) => `❌ Reminder not sent — *+${phone}* is not on WhatsApp`,
     reminderFailedGeneric: (name: string, code: number) => `❌ Reminder failed for *${name}* (error code: ${code}) — please try again`,
     noDebts: (name: string) => `✅ ${name} has no outstanding debts. No reminder sent.`,
-    findCustomerPrompt: "🔍 *Find Customer*\n\nEnter the customer's *name or phone number*:",
+    findCustomerPrompt: "🔍 *Find Customer*\n\nEnter the customer's phone number:",
     markPaidPrompt: "✅ *Mark as Paid*\n\nEnter the customer's phone number:",
-    askPartialAmount: "💰 How much is the customer paying? (numbers only)",
+    askPartialAmount: "💰 How much is the customer paying?",
     askPartialItem: "📦 What is this payment for?",
     whatToDo: "What would you like to do?",
     existingCustomer: (name: string) => `👤 Existing customer: *${name}*\n\nWhat item did they take?`,
@@ -88,8 +88,8 @@ const T = {
 
 *Using the buttons:*
 ➕ Add Debt — record a new customer debt
-🔍 Find Customer — look up a customer by name or number
-✅ Mark as Paid — search by number or name, then choose Partially or Full Payment
+🔍 Find Customer — look up a customer's balance
+✅ Mark as Paid — enter their number, then choose Partially or Full Payment
 🔔 Send Reminder — remind one customer, or everyone at once
 🌐 Change Language — switch Kinyarwanda/English
 
@@ -101,17 +101,6 @@ const T = {
 • MENU — show the quick-action buttons again
 • HELP — show this message again`,
     securityTip: `🔒 *Security Tip — Protect your data:*\n\nLock this ShopBrain chat so only you can open it.\n\n*How to do it:*\n1. Long press this chat in your WhatsApp inbox\n2. Tap the lock icon 🔒\n3. It will now require your fingerprint or Face ID to open\n\nYour customer data stays private even if someone picks up your phone.`,
-    // --- new: search / duplicate handling ---
-    duplicateName: (name: string) => `❌ A customer named *"${name}"* already exists. Please use another name:`,
-    duplicatePhone: (phone: string) => `❌ A customer with number *${phone}* already exists. Please use another number:`,
-    searchNoMatches: "❌ No customer found with that name or number. Try again:",
-    searchMultipleHeader: (count: number) => `🔍 Found *${count}* customers matching that name — tap one:`,
-    searchByChoice: "How do you want to find the customer?",
-    searchByNumber: "📱 By Number",
-    searchByName: "🔤 By Name",
-    askNameSearch: "Enter the customer's name:",
-    askNumberSearch: "Enter the customer's phone number (numbers only):",
-    markPaidBtnNumberName: "✅ Mark as Paid",
   },
   rw: {
      welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
@@ -121,9 +110,9 @@ const T = {
     askPhone: "➕ *Ongeraho Umwenda*\n\nAndika nimero y'umukiriya?\n\nUrugero: 0788123456",
     askName: "Andika izina ry'umukiriya?",
     askItem: "Igicuruzwa atwaye?",
-    askAmount: "Agusigayemo angahe? (muri Frw, imibare gusa)",
-    invalidPhone: "❌ Iyi si nimero yemewe — nimero igomba kuba imibare gusa. Ongera uyandike:",
-    invalidAmount: "❌ Uyu si umubare wemewe — andika imibare gusa (Frw), urugero 5000:",
+    askAmount: "Agusigayemo angahe? (muri Frw)",
+    invalidPhone: "❌ Nimero si yo. Andika nimero y'umukiriya ikurikira:",
+    invalidAmount: "❌ Umubare si wo. Andika umubare urugero 5000",
     debtSaved: (name: string, phone: string, item: string, amount: number, total: number) =>
       `✅ *Umwenda Wabitswe!*\n\n👤 ${name} (${phone})\n📦 Igicuruzwa: ${item}\n💰 Byongewe: ${amount.toLocaleString()} Frw\n📊 Asigayemo: ${total.toLocaleString()} Frw`,
     noCustomer: (phone: string) => `❌ Uyu mukiriya ntago yanditse muri sisteme ${phone}.`,
@@ -141,9 +130,9 @@ const T = {
     reminderFailed: (phone: string) => `❌ Ubutumwa ntabwo bwoherejwe — *+${phone}* ntago bafite WhatsApp`,
     reminderFailedGeneric: (name: string, code: number) => `❌ Ubutumwa bwanze kuri *${name}* (code: ${code}) — gerageza nanone`,
     noDebts: (name: string) => `✅ ${name} ntagomba kwishyura. Nta butumwa bwoherejwe.`,
-    findCustomerPrompt: "🔍 *Shakisha Umukiriya*\n\nAndika *izina cyangwa nimero* y'umukiriya:",
+    findCustomerPrompt: "🔍 *Shakisha Umukiriya*\n\nAndika nimero y'umukiriya:",
     markPaidPrompt: "✅ *Emeza Kwishyura*\n\nAndika nimero y'umukiriya:",
-    askPartialAmount: "💰 Umukiriya ariha angahe? (imibare gusa)",
+    askPartialAmount: "💰 Umukiriya ariha angahe?",
     askPartialItem: "📦 Ni iyihe kiguzi cy'iri shyura?",
     whatToDo: "Urashaka gukora iki?",
     existingCustomer: (name: string) => `👤 Umukiriya warahise: *${name}*\n\nIgicuruzwa atwaye?`,
@@ -186,8 +175,8 @@ const T = {
 
 *Gukoresha buto:*
 ➕ Ongeraho Umwenda — andika umwenda mushya
-🔍 Shakisha Umukiriya — shakisha ukoresheje izina cyangwa nimero
-✅ Emeza Kwishyura — shakisha ukoresheje nimero cyangwa izina, hanyuma uhitemo Igice cyangwa Byose
+🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo
+✅ Emeza Kwishyura — andika nimero, hanyuma uhitemo Igice cyangwa Byose
 🔔 Kwibutsa — wibutsa umukiriya umwe, cyangwa bose icyarimwe
 🌐 Guhindura Ururimi — hindura Ikinyarwanda/Icyongereza
 
@@ -199,17 +188,6 @@ const T = {
 • MENU — garuka kuri buto z'ibanze
 • HELP — reba ubu butumwa nanone`,
     securityTip: `🔒 *Ubutumwa bw'Umutekano:*\n\nFunga iki gikorwa cya ShopBrain kugira ngo wowe gusa ubashobore kukibona.\n\n*Uko bikorwa:*\n1. Fata iki gikorwa mu rutonde rwa WhatsApp\n2. Kanda ikimenyetso cy'isuri 🔒\n3. Bizasaba igikumwe cyawe cyangwa ubuso bwawe\n\nAmakuru y'abakiriya bawe azaba ari mu mutekano.`,
-    // --- new: search / duplicate handling ---
-    duplicateName: (name: string) => `❌ Umukiriya witwa *"${name}"* asanzwe yanditswe. Koresha irindi zina:`,
-    duplicatePhone: (phone: string) => `❌ Nimero *${phone}* isanzwe yanditswe ku mukiriya undi. Koresha indi nimero:`,
-    searchNoMatches: "❌ Nta mukiriya ubonetse kuri iryo zina cyangwa iyo nimero. Gerageza nanone:",
-    searchMultipleHeader: (count: number) => `🔍 Habonetse abakiriya *${count}* bafite iryo zina — kanda umwe:`,
-    searchByChoice: "Ushaka gushakisha umukiriya ute?",
-    searchByNumber: "📱 Ukoresheje Nimero",
-    searchByName: "🔤 Ukoresheje Izina",
-    askNameSearch: "Andika izina ry'umukiriya:",
-    askNumberSearch: "Andika nimero y'umukiriya (imibare gusa):",
-    markPaidBtnNumberName: "✅ Emeza Kwishyura",
   },
 };
 
@@ -221,12 +199,6 @@ function cleanPhone(phone: string): string {
     cleaned = "250" + cleaned.slice(1);
   }
   return cleaned;
-}
-
-// A search term counts as a phone number if, once stripped of non-digits,
-// it's long enough to plausibly be one. Otherwise we treat it as a name.
-function looksLikePhone(term: string): boolean {
-  return term.replace(/\D/g, "").length >= 7;
 }
 
 async function isOwner(from: string): Promise<boolean> {
@@ -269,32 +241,6 @@ async function buildItemizedList(customerId: string): Promise<string> {
   return unpaidTx
     .map((t: { item: string; amount: number }) => `${t.item} (${t.amount.toLocaleString()} Frw)`)
     .join(", ");
-}
-
-// Returns true if a customer with this exact name (case-insensitive) is
-// already registered under this shop. Used to block duplicate names on
-// Add Debt, since customers are otherwise looked up by phone alone and a
-// name clash would make name-search ambiguous.
-async function nameExists(shopId: string, name: string): Promise<boolean> {
-  const { data } = await supabase
-    .from("customers")
-    .select("id")
-    .eq("shop_id", shopId)
-    .ilike("name", name.trim());
-  return !!data && data.length > 0;
-}
-
-// Core search used by Find Customer and by the Mark-as-Paid "by name" path.
-// If `term` looks like a phone number, matches on phone (exact, cleaned).
-// Otherwise does a case-insensitive partial match on name.
-async function searchCustomers(shopId: string, term: string): Promise<any[]> {
-  if (looksLikePhone(term)) {
-    const phone = cleanPhone(term);
-    const { data } = await supabase.from("customers").select("*").eq("shop_id", shopId).eq("phone", phone);
-    return data ?? [];
-  }
-  const { data } = await supabase.from("customers").select("*").eq("shop_id", shopId).ilike("name", `%${term.trim()}%`);
-  return data ?? [];
 }
 
 interface WhatsAppMessage {
@@ -498,21 +444,6 @@ async function sendReminderChoice(from: string, lang: Lang): Promise<void> {
   });
 }
 
-// New: Mark as Paid now starts with a By Number / By Name choice instead of
-// jumping straight to a phone-number prompt.
-async function sendMarkPaidSearchChoice(from: string, lang: Lang): Promise<void> {
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: T[lang].searchByChoice },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "mark_paid_by_number", title: T[lang].searchByNumber } },
-        { type: "reply", reply: { id: "mark_paid_by_name", title: T[lang].searchByName } },
-      ],
-    },
-  });
-}
-
 async function sendMarkPaidChoice(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -534,30 +465,6 @@ async function sendLanguagePicker(from: string, lang: Lang): Promise<void> {
       buttons: [
         { type: "reply", reply: { id: "lang_rw", title: "Ikinyarwanda" } },
         { type: "reply", reply: { id: "lang_en", title: "Icyongereza" } },
-      ],
-    },
-  });
-}
-
-// New: shows a tappable list when a name search returns more than one
-// customer. Falls back to plain numbered text if the list can't be sent
-// (WhatsApp list rows are capped at 10).
-async function sendCustomerMatchList(from: string, lang: Lang, matches: any[], purpose: "markpaid" | "reminder" | "find"): Promise<void> {
-  if (matches.length > 10) matches = matches.slice(0, 10);
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "list",
-    body: { text: T[lang].searchMultipleHeader(matches.length) },
-    action: {
-      button: lang === "rw" ? "Hitamo" : "Select",
-      sections: [
-        {
-          title: lang === "rw" ? "Abakiriya" : "Customers",
-          rows: matches.map((c) => ({
-            id: `select_${purpose}_${c.id}`,
-            title: c.name,
-            description: c.phone ? c.phone : (lang === "rw" ? "nta nimero" : "no number"),
-          })),
-        },
       ],
     },
   });
@@ -621,7 +528,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   }
 
   if (replyId === "find_customer") {
-    sessions[from] = { step: "find_search", data: {} };
+    sessions[from] = { step: "find_phone", data: {} };
     await sendWhatsAppMessage(from, T[lang].findCustomerPrompt);
     return;
   }
@@ -671,46 +578,22 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
   if (replyId === "mark_paid") {
-    await sendMarkPaidSearchChoice(from, lang);
-    return;
-  }
-  if (replyId === "mark_paid_by_number") {
     sessions[from] = { step: "paid_phone", data: {} };
-    await sendWhatsAppMessage(from, T[lang].askNumberSearch);
-    return;
-  }
-  if (replyId === "mark_paid_by_name") {
-    sessions[from] = { step: "paid_name", data: {} };
-    await sendWhatsAppMessage(from, T[lang].askNameSearch);
-    return;
-  }
-  if (replyId.startsWith("select_markpaid_")) {
-    const customerId = replyId.replace("select_markpaid_", "");
-    await proceedToMarkPaidChoice(from, customerId, lang);
-    return;
-  }
-  if (replyId.startsWith("select_find_")) {
-    const customerId = replyId.replace("select_find_", "");
-    await showCustomerById(from, customerId, lang);
+    await sendWhatsAppMessage(from, T[lang].markPaidPrompt);
     return;
   }
   if (replyId === "mark_paid_partial") {
     const phone = sessions[from]?.data["markPaidPhone"];
-    const customerId = sessions[from]?.data["markPaidCustomerId"];
-    sessions[from] = { step: "partial_amount", data: { markPaidPhone: phone ?? "", markPaidCustomerId: customerId ?? "" } };
+    sessions[from] = { step: "partial_amount", data: { markPaidPhone: phone ?? "" } };
     await sendWhatsAppMessage(from, T[lang].askPartialAmount);
     return;
   }
   if (replyId === "mark_paid_full") {
     const phone = sessions[from]?.data["markPaidPhone"];
-    const customerId = sessions[from]?.data["markPaidCustomerId"];
-    const customer = customerId
-      ? (await supabase.from("customers").select("*").eq("id", customerId).single()).data
-      : phone
-      ? (await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single()).data
-      : null;
+    if (!phone) return;
+    const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
     if (!customer) {
-      await sendWhatsAppMessage(from, T[lang].noCustomer(phone ?? ""));
+      await sendWhatsAppMessage(from, T[lang].noCustomer(phone));
       await sendPersistentMenu(from, lang);
       return;
     }
@@ -732,38 +615,6 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     await showAllCustomers(from, lang);
     return;
   }
-}
-
-// After a customer is resolved (either single number match or picked from a
-// name-search list), move straight into the Partially/Full Payment choice —
-// but first make sure they actually have something outstanding.
-async function proceedToMarkPaidChoice(from: string, customerId: string, lang: Lang): Promise<void> {
-  const { data: customer } = await supabase.from("customers").select("*").eq("id", customerId).single();
-  if (!customer) {
-    await sendWhatsAppMessage(from, T[lang].noCustomerText);
-    await sendPersistentMenu(from, lang);
-    return;
-  }
-  const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
-  const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
-  if (total === 0) {
-    sessions[from] = undefined as any;
-    await sendWhatsAppMessage(from, T[lang].noUnpaid(customer.name));
-    await sendPersistentMenu(from, lang);
-    return;
-  }
-  sessions[from] = { step: "idle", data: { markPaidPhone: customer.phone ?? "", markPaidCustomerId: customer.id } };
-  await sendMarkPaidChoice(from, lang);
-}
-
-async function showCustomerById(from: string, customerId: string, lang: Lang): Promise<void> {
-  const { data: customer } = await supabase.from("customers").select("*").eq("id", customerId).single();
-  if (!customer) {
-    await sendWhatsAppMessage(from, T[lang].noCustomerText);
-    await sendPersistentMenu(from, lang);
-    return;
-  }
-  await lookupCustomerRecord(from, customer, lang);
 }
 
 async function handleMessage(from: string, text: string, req: Request): Promise<void> {
@@ -879,19 +730,11 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
 
 async function handleSession(from: string, text: string, session: Session, lang: Lang, req: Request): Promise<void> {
   if (session.step === "add_phone") {
-    // Numeric-only guard for phone entry, with a short reason on rejection.
-    if (!/^[\d+\s-]+$/.test(text.trim())) {
-      await sendWhatsAppMessage(from, T[lang].invalidPhone);
-      return;
-    }
     const phone = cleanPhone(text);
     if (phone.length < 9) {
       await sendWhatsAppMessage(from, T[lang].invalidPhone);
       return;
     }
-    // Duplicate-number guard: if this number is already registered, block
-    // it here too (existing-customer flow below handles the legitimate
-    // "add another debt for the same customer" case separately).
     session.data["phone"] = phone;
     session.step = "add_name";
     const { data: existing } = await supabase.from("customers").select("name").eq("phone", phone).eq("shop_id", from).single();
@@ -905,12 +748,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
     return;
   }
   if (session.step === "add_name") {
-    const name = text.trim();
-    if (await nameExists(from, name)) {
-      await sendWhatsAppMessage(from, T[lang].duplicateName(name));
-      return;
-    }
-    session.data["name"] = name;
+    session.data["name"] = text;
     session.step = "add_item";
     await sendWhatsAppMessage(from, T[lang].askItem);
     return;
@@ -922,10 +760,6 @@ async function handleSession(from: string, text: string, session: Session, lang:
     return;
   }
   if (session.step === "add_amount") {
-    if (!/^\d+$/.test(text.replace(/\s/g, ""))) {
-      await sendWhatsAppMessage(from, T[lang].invalidAmount);
-      return;
-    }
     const amount = parseInt(text.replace(/\D/g, ""), 10);
     if (isNaN(amount) || amount <= 0) {
       await sendWhatsAppMessage(from, T[lang].invalidAmount);
@@ -962,18 +796,13 @@ async function handleSession(from: string, text: string, session: Session, lang:
     setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
     return;
   }
-  // Combined Find Customer search — accepts a name or a phone number.
-  if (session.step === "find_search") {
-    sessions[from] = undefined as any;
-    await runSearchAndRespond(from, text, lang, "find");
+  if (session.step === "find_phone") {
+    const phone = cleanPhone(text);
+    sessions[from] = { step: "idle", data: { lastPhone: phone } };
+    await lookupCustomer(from, phone, lang);
     return;
   }
-  // Mark as Paid — By Number
   if (session.step === "paid_phone") {
-    if (!/^[\d+\s-]+$/.test(text.trim())) {
-      await sendWhatsAppMessage(from, T[lang].invalidPhone);
-      return;
-    }
     const phone = cleanPhone(text);
     const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
     if (!customer) {
@@ -982,21 +811,19 @@ async function handleSession(from: string, text: string, session: Session, lang:
       await sendPersistentMenu(from, lang);
       return;
     }
-    sessions[from] = undefined as any;
-    await proceedToMarkPaidChoice(from, customer.id, lang);
-    return;
-  }
-  // Mark as Paid — By Name
-  if (session.step === "paid_name") {
-    sessions[from] = undefined as any;
-    await runSearchAndRespond(from, text, lang, "markpaid");
+    const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
+    const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
+    if (total === 0) {
+      sessions[from] = undefined as any;
+      await sendWhatsAppMessage(from, T[lang].noUnpaid(customer.name));
+      await sendPersistentMenu(from, lang);
+      return;
+    }
+    sessions[from] = { step: "idle", data: { markPaidPhone: phone } };
+    await sendMarkPaidChoice(from, lang);
     return;
   }
   if (session.step === "partial_amount") {
-    if (!/^\d+$/.test(text.replace(/\s/g, ""))) {
-      await sendWhatsAppMessage(from, T[lang].invalidAmount);
-      return;
-    }
     const amount = parseInt(text.replace(/\D/g, ""), 10);
     if (isNaN(amount) || amount <= 0) {
       await sendWhatsAppMessage(from, T[lang].invalidAmount);
@@ -1010,12 +837,9 @@ async function handleSession(from: string, text: string, session: Session, lang:
   if (session.step === "partial_item") {
     const item = text.trim();
     const phone = session.data["markPaidPhone"];
-    const customerId = session.data["markPaidCustomerId"];
     const amount = parseInt(session.data["partialAmount"] ?? "0", 10);
     sessions[from] = undefined as any;
-    const customer = customerId
-      ? (await supabase.from("customers").select("*").eq("id", customerId).single()).data
-      : (await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single()).data;
+    const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
     if (!customer) {
       await sendWhatsAppMessage(from, T[lang].noCustomer(phone ?? ""));
       await sendPersistentMenu(from, lang);
@@ -1033,26 +857,6 @@ async function handleSession(from: string, text: string, session: Session, lang:
   }
 }
 
-// Shared by Find Customer and Mark-as-Paid-by-name: runs the search, then
-// either shows "no matches", shows the single match directly, or presents a
-// tappable list when there's more than one.
-async function runSearchAndRespond(from: string, term: string, lang: Lang, purpose: "markpaid" | "find"): Promise<void> {
-  const matches = await searchCustomers(from, term);
-  if (matches.length === 0) {
-    await sendWhatsAppMessage(from, T[lang].searchNoMatches);
-    await sendPersistentMenu(from, lang);
-    return;
-  }
-  if (matches.length === 1) {
-    if (purpose === "markpaid") {
-      await proceedToMarkPaidChoice(from, matches[0].id, lang);
-    } else {
-      await lookupCustomerRecord(from, matches[0], lang);
-    }
-    return;
-  }
-  await sendCustomerMatchList(from, lang, matches, purpose);
-}
 
 async function sendReminder(from: string, phone: string, lang: Lang): Promise<void> {
   const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
@@ -1147,20 +951,13 @@ async function lookupCustomer(from: string, phone: string, lang: Lang): Promise<
     await sendPersistentMenu(from, lang);
     return;
   }
-  await lookupCustomerRecord(from, customer, lang);
-}
-
-// Shared rendering for a resolved customer record, used by both phone-based
-// and name-based lookups so Find Customer behaves identically either way.
-async function lookupCustomerRecord(from: string, customer: any, lang: Lang): Promise<void> {
   const { data: transactions } = await supabase.from("transactions").select("*").eq("customer_id", customer.id).order("date", { ascending: false });
   const unpaid = (transactions ?? []).filter((t: { paid: boolean }) => !t.paid);
   const totalOwed = unpaid.reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
   const lastTx = transactions?.[0];
   const lastDate = lastTx ? new Date(lastTx.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "N/A";
-  const phoneLabel = customer.phone ?? (lang === "rw" ? "nta nimero" : "no number");
-  sessions[from] = { step: "idle", data: { lastPhone: customer.phone ?? "" } };
-  await sendWhatsAppMessage(from, `👤 *${customer.name}*\n📞 ${phoneLabel}\n📦 Last item: ${lastTx?.item ?? "N/A"}\n💰 Total owed: ${totalOwed.toLocaleString()} Frw\n📅 Last visit: ${lastDate}`);
+  sessions[from] = { step: "idle", data: { lastPhone: phone } };
+  await sendWhatsAppMessage(from, `👤 *${customer.name}*\n📞 ${phone}\n📦 Last item: ${lastTx?.item ?? "N/A"}\n💰 Total owed: ${totalOwed.toLocaleString()} Frw\n📅 Last visit: ${lastDate}`);
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
     body: { text: T[lang].whatToDo },
@@ -1343,10 +1140,6 @@ async function handleLegacyAdd(from: string, text: string, lang: Lang): Promise<
   const amount = parseInt(parts[4]!, 10);
   if (isNaN(amount)) {
     await sendWhatsAppMessage(from, T[lang].invalidAmount);
-    return;
-  }
-  if (await nameExists(from, name)) {
-    await sendWhatsAppMessage(from, T[lang].duplicateName(name));
     return;
   }
   let { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
