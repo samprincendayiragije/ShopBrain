@@ -471,6 +471,15 @@ async function sendLanguagePicker(from: string, lang: Lang): Promise<void> {
 }
 
 async function handleInteractive(from: string, replyId: string, req: Request): Promise<void> {
+  if (!(await isOwner(from))) {
+    const langCheck = await getLang(from);
+    await sendWhatsAppMessage(from, T[langCheck].ownerOnly);
+    return;
+  }
+
+  // FIX: lang must be declared before any branch below uses it.
+  const lang = await getLang(from);
+
   if (replyId === "add_debt") {
     sessions[from] = { step: "add_phone", data: {} };
     await sendWhatsAppInteractiveMessage(from, {
@@ -492,8 +501,6 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     await sendWhatsAppMessage(from, T[lang].askName);
     return;
   }
-  
-  const lang = await getLang(from);
 
   if (replyId === "onboard_lang_en" || replyId === "onboard_lang_rw") {
     const chosenLang: Lang = replyId === "onboard_lang_rw" ? "rw" : "en";
@@ -520,11 +527,6 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
 
-  if (replyId === "add_debt") {
-    sessions[from] = { step: "add_phone", data: {} };
-    await sendWhatsAppMessage(from, T[lang].askPhone);
-    return;
-  }
   if (replyId === "find_customer") {
     sessions[from] = { step: "find_phone", data: {} };
     await sendWhatsAppMessage(from, T[lang].findCustomerPrompt);
@@ -764,12 +766,19 @@ async function handleSession(from: string, text: string, session: Session, lang:
       return;
     }
     const { phone, name, item } = session.data as Record<string, string>;
-    const phoneValue = phone ? phone : null;
-    
+    // phone may be "" (customer chose "No Number") — store null in that case
+    const phoneValue: string | null = phone ? phone : null;
+
     sessions[from] = undefined as any;
-    let { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
+
+    let customer: any = null;
+    if (phoneValue) {
+      const { data: existingCustomer } = await supabase.from("customers").select("*").eq("phone", phoneValue).eq("shop_id", from).single();
+      customer = existingCustomer;
+    }
     if (!customer) {
-      const { data: newCustomer, error } = await supabase.from("customers").insert({ phoneValue, name, shop_id: from }).select().single();
+      // FIX: was inserting a literal `phoneValue` column instead of setting `phone`.
+      const { data: newCustomer, error } = await supabase.from("customers").insert({ phone: phoneValue, name, shop_id: from }).select().single();
       if (error || !newCustomer) {
         await sendWhatsAppMessage(from, T[lang].somethingWrong);
         return;
@@ -783,7 +792,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
     }
     const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
     const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
-    await sendWhatsAppMessage(from, T[lang].debtSaved(customer.name, phone || (lang === "rw" ? "nta nimero" : "no number"), item, amount, total));
+    await sendWhatsAppMessage(from, T[lang].debtSaved(customer.name, phoneValue || (lang === "rw" ? "nta nimero" : "no number"), item, amount, total));
     setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
     return;
   }
@@ -998,7 +1007,7 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
     const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
     const date = new Date(customer.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     const debtStatus = total > 0 ? `${total.toLocaleString()} Frw` : T[lang].cleared;
-    lines.push(`👤 *${customer.name}*\n📞 ${customer.phone}\n💰 ${T[lang].owes}: ${debtStatus}\n📅 ${T[lang].registered}: ${date}`);
+    lines.push(`👤 *${customer.name}*\n📞 ${customer.phone ?? (lang === "rw" ? "nta nimero" : "no number")}\n💰 ${T[lang].owes}: ${debtStatus}\n📅 ${T[lang].registered}: ${date}`);
   }
   const chunkSize = 5;
   for (let i = 0; i < lines.length; i += chunkSize) {
@@ -1026,6 +1035,9 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
   let sentCount = 0;
 
   for (const customer of customers) {
+    // FIX: skip customers with no phone — nothing to send a WhatsApp reminder to.
+    if (!customer.phone) continue;
+
     const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
     const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
     if (total === 0) continue;
@@ -1087,7 +1099,8 @@ async function showTotalDebt(from: string, lang: Lang): Promise<void> {
   let grandTotal = 0;
 
   for (const customer of customers) {
-    if (!customer.phone) continue;
+    // NOTE: total-debt summary intentionally includes no-phone customers —
+    // only reminder sending should skip them, not the debt totals.
     const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
     const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
     if (total > 0) {
