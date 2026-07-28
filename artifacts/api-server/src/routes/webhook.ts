@@ -98,9 +98,20 @@ const T = {
 • REMIND ALL — remind every customer who owes you
 • REMIND <phone> — remind one specific customer
 • @ALL — list every customer you've registered
+• MOMO — set up your MTN MoMo payment details for reminders
 • MENU — show the quick-action buttons again
 • HELP — show this message again`,
     securityTip: `🔒 *Security Tip — Protect your data:*\n\nLock this ShopBrain chat so only you can open it.\n\n*How to do it:*\n1. Long press this chat in your WhatsApp inbox\n2. Tap the lock icon 🔒\n3. It will now require your fingerprint or Face ID to open\n\nYour customer data stays private even if someone picks up your phone.`,
+    // --- MoMo setup ---
+    momoIntro: "💳 *MoMo Payment Setup*\n\nThis lets your customers see exactly where to send money when they get a reminder.\n\nWhat is your MTN MoMo phone number?\n\ne.g. 0788123456",
+    momoInvalidNumber: "❌ Invalid number. Please enter your MoMo phone number:",
+    momoAskCode: "Do you have an MTN MoMo Merchant/Business code? (optional)\n\nType it now, or tap Skip if you don't have one.",
+    momoAskReceiverName: "What name shows up on MTN when someone sends money to this number/code?\n\n⚠️ This must match exactly what MTN displays — usually your registered ID name.\n\ne.g. NIYONZIMA ALICE",
+    momoReceiverTooShort: "❌ Too short. Please enter the exact name that shows on MTN:",
+    momoAskNickname: "What do your customers usually call your shop? (so they recognize it even if the MTN name looks different)\n\ne.g. Chez Alice",
+    momoSaved: (number: string, name: string) =>
+      `✅ *MoMo details saved!*\n\n📱 ${number}\n👤 ${name}\n\nThis will now appear on every payment reminder sent to your customers.`,
+    momoSkip: "⏭️ Skip",
   },
   rw: {
      welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
@@ -185,9 +196,20 @@ const T = {
 • REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amadeni
 • REMIND <nimero> — wibutsa umukiriya umwe
 • @ALL — reba abakiriya bawe bose
+• MOMO — shyiraho amakuru ya MTN MoMo azagaragara ku butumwa
 • MENU — garuka kuri buto z'ibanze
 • HELP — reba ubu butumwa nanone`,
     securityTip: `🔒 *Ubutumwa bw'Umutekano:*\n\nFunga iki gikorwa cya ShopBrain kugira ngo wowe gusa ubashobore kukibona.\n\n*Uko bikorwa:*\n1. Fata iki gikorwa mu rutonde rwa WhatsApp\n2. Kanda ikimenyetso cy'isuri 🔒\n3. Bizasaba igikumwe cyawe cyangwa ubuso bwawe\n\nAmakuru y'abakiriya bawe azaba ari mu mutekano.`,
+    // --- MoMo setup ---
+    momoIntro: "💳 *Gushyiraho MoMo*\n\nIbi bituma abakiriya babona neza aho koherereza amafaranga igihe babonye ubutumwa bwo kwibutsa.\n\nNimero yawe ya MTN MoMo ni iyihe?\n\nUrugero: 0788123456",
+    momoInvalidNumber: "❌ Nimero si yo. Andika nimero yawe ya MoMo:",
+    momoAskCode: "Ufite kode ya MTN MoMo Merchant/Business? (Ntibisabwa)\n\nAndike ubu, cyangwa ukande Skip niba udafite.",
+    momoAskReceiverName: "Ni irihe zina rigaragara kuri MTN igihe umuntu akoherereza iyi nimero/kode amafaranga?\n\n⚠️ Iri zina rigomba guhuza neza n'irigaragara kuri MTN.\n\nUrugero: NIYONZIMA ALICE",
+    momoReceiverTooShort: "❌ Rifupi cyane. Andika izina nyaryo rigaragara kuri MTN:",
+    momoAskNickname: "Abakiriya bawe bakunze kwita iki iduka ryawe? (kugira ngo baryumve n'igihe izina rya MTN ryaba ritandukanye)\n\nUrugero: Chez Alice",
+    momoSaved: (number: string, name: string) =>
+      `✅ *Amakuru ya MoMo yabitswe!*\n\n📱 ${number}\n👤 ${name}\n\nAzagaragara kuri buri butumwa bwo kwibutsa abakiriya bawe.`,
+    momoSkip: "⏭️ Simbuka",
   },
 };
 
@@ -241,6 +263,25 @@ async function buildItemizedList(customerId: string): Promise<string> {
   return unpaidTx
     .map((t: { item: string; amount: number }) => `${t.item} (${t.amount.toLocaleString()} Frw)`)
     .join(", ");
+}
+
+// Builds the single-string MoMo payment block used as the reminder
+// template's {{5}} variable. Returns "" if the owner hasn't set up MoMo
+// details yet, so the template's MoMo section variable is simply blank
+// (template body copy/bolding is fixed at Meta approval time — this just
+// fills the variable, it can't add its own bold/color formatting).
+function buildMomoBlock(owner: {
+  momo_number?: string | null;
+  momo_code?: string | null;
+  momo_receiver_name?: string | null;
+  shop_nickname?: string | null;
+}): string {
+  if (!owner.momo_number) return "";
+
+  const codeLine = owner.momo_code ? `Kode ya MOMO: ${owner.momo_code}\n` : "";
+  const nickname = owner.shop_nickname ? ` (Iyi ni MOMO ya "${owner.shop_nickname}")` : "";
+
+  return `${owner.momo_number}\n${codeLine}Amazina agaragara kuri MOMO: ${owner.momo_receiver_name ?? ""}${nickname}`;
 }
 
 interface WhatsAppMessage {
@@ -470,6 +511,56 @@ async function sendLanguagePicker(from: string, lang: Lang): Promise<void> {
   });
 }
 
+// --- MoMo setup flow ---
+async function startMomoSetup(from: string, lang: Lang): Promise<void> {
+  sessions[from] = { step: "momo_number", data: {} };
+  await sendWhatsAppMessage(from, T[lang].momoIntro);
+}
+
+async function askMomoCode(from: string, lang: Lang): Promise<void> {
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].momoAskCode },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "momo_code_skip", title: T[lang].momoSkip } },
+      ],
+    },
+  });
+}
+
+async function askMomoNickname(from: string, lang: Lang): Promise<void> {
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].momoAskNickname },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "momo_nickname_skip", title: T[lang].momoSkip } },
+      ],
+    },
+  });
+}
+
+async function saveMomoDetails(from: string, lang: Lang): Promise<void> {
+  const session = sessions[from];
+  if (!session) return;
+  const { momo_number, momo_code, momo_receiver_name, shop_nickname } = session.data;
+  sessions[from] = undefined as any;
+
+  await supabase
+    .from("owners")
+    .update({
+      momo_number: momo_number ?? null,
+      momo_code: momo_code || null,
+      momo_receiver_name: momo_receiver_name ?? null,
+      shop_nickname: shop_nickname || null,
+    })
+    .eq("phone", cleanPhone(from));
+
+  await sendWhatsAppMessage(from, T[lang].momoSaved(momo_number ?? "", momo_receiver_name ?? ""));
+  setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+}
+
 async function handleInteractive(from: string, replyId: string, req: Request): Promise<void> {
   if (!(await isOwner(from))) {
     const langCheck = await getLang(from);
@@ -499,6 +590,21 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     sessions[from]!.data["phone"] = ""; // empty = no phone
     sessions[from]!.step = "add_name";
     await sendWhatsAppMessage(from, T[lang].askName);
+    return;
+  }
+
+  if (replyId === "momo_code_skip") {
+    if (sessions[from]?.step !== "momo_code") return; // stale button tap, ignore
+    sessions[from]!.data["momo_code"] = "";
+    sessions[from]!.step = "momo_name";
+    await sendWhatsAppMessage(from, T[lang].momoAskReceiverName);
+    return;
+  }
+
+  if (replyId === "momo_nickname_skip") {
+    if (sessions[from]?.step !== "momo_nickname") return; // stale button tap, ignore
+    sessions[from]!.data["shop_nickname"] = "";
+    await saveMomoDetails(from, lang);
     return;
   }
 
@@ -686,6 +792,11 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
     return;
   }
 
+  if (upper === "MOMO") {
+    await startMomoSetup(from, lang);
+    return;
+  }
+
   if (upper === "REMIND ALL" || upper === "KWIBUTSA BOSE") {
     await sendReminderAll(from, lang);
     return;
@@ -855,11 +966,49 @@ async function handleSession(from: string, text: string, session: Session, lang:
     await sendReminder(from, phone, lang);
     return;
   }
+  // --- MoMo setup steps ---
+  if (session.step === "momo_number") {
+    const number = cleanPhone(text);
+    if (number.length < 9) {
+      await sendWhatsAppMessage(from, T[lang].momoInvalidNumber);
+      return;
+    }
+    session.data["momo_number"] = number;
+    session.step = "momo_code";
+    await askMomoCode(from, lang);
+    return;
+  }
+  if (session.step === "momo_code") {
+    session.data["momo_code"] = text.trim();
+    session.step = "momo_name";
+    await sendWhatsAppMessage(from, T[lang].momoAskReceiverName);
+    return;
+  }
+  if (session.step === "momo_name") {
+    const receiverName = text.trim();
+    if (receiverName.length < 2) {
+      await sendWhatsAppMessage(from, T[lang].momoReceiverTooShort);
+      return;
+    }
+    session.data["momo_receiver_name"] = receiverName.toUpperCase();
+    session.step = "momo_nickname";
+    await askMomoNickname(from, lang);
+    return;
+  }
+  if (session.step === "momo_nickname") {
+    session.data["shop_nickname"] = text.trim();
+    await saveMomoDetails(from, lang);
+    return;
+  }
 }
 
 
 async function sendReminder(from: string, phone: string, lang: Lang): Promise<void> {
-  const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
+  const { data: owner } = await supabase
+    .from("owners")
+    .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname")
+    .eq("phone", cleanPhone(from))
+    .single();
   const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
   // Reminders go out in the shop OWNER's chosen language (already used as a
   // proxy for the customer base's language), independent of whatever `lang`
@@ -879,6 +1028,7 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   }
 
   const itemizedList = await buildItemizedList(customer.id);
+  const momoBlock = buildMomoBlock(owner ?? {});
 
   const { data: insertedLog } = await supabase.from("reminder_logs").insert({
     message_id: `pending_${from}_${Date.now()}`,
@@ -890,13 +1040,13 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   }).select().single();
 
   // Uses the approved debt reminder template (English or Kinyarwanda,
-  // depending on the owner's language). Template now carries 4 variables:
-  // name, shop, itemized list, total.
+  // depending on the owner's language). Template now carries 5 variables:
+  // name, shop, itemized list, total, MoMo payment block.
   const messageId = await sendWhatsAppTemplateMessage(
     phone,
     reminderTemplateName(reminderLang),
     reminderLang,
-    [customer.name, shopName, itemizedList, total.toLocaleString()],
+    [customer.name, shopName, itemizedList, total.toLocaleString(), momoBlock],
   );
 
   if (insertedLog) {
@@ -1019,9 +1169,14 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
 }
 
 async function sendReminderAll(from: string, lang: Lang): Promise<void> {
-  const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", cleanPhone(from)).single();
+  const { data: owner } = await supabase
+    .from("owners")
+    .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname")
+    .eq("phone", cleanPhone(from))
+    .single();
   const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
   const reminderLang: Lang = (owner?.language as Lang) ?? "en";
+  const momoBlock = buildMomoBlock(owner ?? {});
 
   const { data: customers } = await supabase.from("customers").select("*").eq("shop_id", from);
 
@@ -1057,12 +1212,12 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
       // Same template-based send as sendReminder — required since bulk reminders
       // almost always go to customers outside the 24h free-form messaging window.
       // Template + language now match the owner's chosen language, with the
-      // itemized list as the 4th variable.
+      // itemized list and MoMo payment block as the 4th/5th variables.
       const messageId = await sendWhatsAppTemplateMessage(
         customer.phone,
         reminderTemplateName(reminderLang),
         reminderLang,
-        [customer.name, shopName, itemizedList, total.toLocaleString()],
+        [customer.name, shopName, itemizedList, total.toLocaleString(), momoBlock],
       );
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
