@@ -1028,7 +1028,14 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   }
 
   const itemizedList = await buildItemizedList(customer.id);
+  // MOMO TEMP DISABLE: momoBlock is computed but NOT sent below — the live
+  // Meta template is still the 4-variable version. Sending a 5th variable
+  // against a 4-variable approved template gets rejected by the Meta API,
+  // which was silently breaking reminders. Once the updated template
+  // (with {{5}}) is approved in Meta Business Manager, add momoBlock back
+  // into the array passed to sendWhatsAppTemplateMessage below.
   const momoBlock = buildMomoBlock(owner ?? {});
+  void momoBlock;
 
   const { data: insertedLog } = await supabase.from("reminder_logs").insert({
     message_id: `pending_${from}_${Date.now()}`,
@@ -1040,13 +1047,14 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   }).select().single();
 
   // Uses the approved debt reminder template (English or Kinyarwanda,
-  // depending on the owner's language). Template now carries 5 variables:
-  // name, shop, itemized list, total, MoMo payment block.
+  // depending on the owner's language). Template currently has 4 variables:
+  // name, shop, itemized list, total. (MoMo block re-added once template
+  // {{5}} is approved — see MOMO TEMP DISABLE note above.)
   const messageId = await sendWhatsAppTemplateMessage(
     phone,
     reminderTemplateName(reminderLang),
     reminderLang,
-    [customer.name, shopName, itemizedList, total.toLocaleString(), momoBlock],
+    [customer.name, shopName, itemizedList, total.toLocaleString()],
   );
 
   if (insertedLog) {
@@ -1176,7 +1184,10 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
     .single();
   const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
   const reminderLang: Lang = (owner?.language as Lang) ?? "en";
+  // MOMO TEMP DISABLE: see matching note in sendReminder() above — not sent
+  // below until the 5-variable template is approved by Meta.
   const momoBlock = buildMomoBlock(owner ?? {});
+  void momoBlock;
 
   const { data: customers } = await supabase.from("customers").select("*").eq("shop_id", from);
 
@@ -1188,6 +1199,7 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
   const lines: string[] = [];
   let grandTotal = 0;
   let sentCount = 0;
+  let failedCount = 0;
 
   for (const customer of customers) {
     // FIX: skip customers with no phone — nothing to send a WhatsApp reminder to.
@@ -1211,13 +1223,13 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
     try {
       // Same template-based send as sendReminder — required since bulk reminders
       // almost always go to customers outside the 24h free-form messaging window.
-      // Template + language now match the owner's chosen language, with the
-      // itemized list and MoMo payment block as the 4th/5th variables.
+      // Template + language now match the owner's chosen language. (MoMo block
+      // temporarily not sent — see MOMO TEMP DISABLE note above.)
       const messageId = await sendWhatsAppTemplateMessage(
         customer.phone,
         reminderTemplateName(reminderLang),
         reminderLang,
-        [customer.name, shopName, itemizedList, total.toLocaleString(), momoBlock],
+        [customer.name, shopName, itemizedList, total.toLocaleString()],
       );
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
@@ -1226,10 +1238,22 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
       grandTotal += total;
       sentCount++;
     } catch (err) {
+      req.log.error({ err, customerPhone: customer.phone }, "Bulk reminder send failed");
       lines.push(`❌ ${customer.name} — failed`);
+      failedCount++;
     }
 
     await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  if (sentCount === 0 && failedCount > 0) {
+    // FIX: distinguish "nothing to send" from "sends failed" — previously
+    // both cases showed remindAllNone ("No customers with outstanding
+    // debts"), which was misleading when debts existed but every send threw.
+    await sendWhatsAppMessage(from, lang === "rw"
+      ? "❌ Ubutumwa ntabwo bwoherejwe — hari ikibazo. Reba raporo cyangwa gerageza nanone."
+      : "❌ Reminders failed to send — please check your template/setup and try again.");
+    return;
   }
 
   if (sentCount === 0) {
