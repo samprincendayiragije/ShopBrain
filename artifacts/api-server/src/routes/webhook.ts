@@ -1028,14 +1028,8 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   }
 
   const itemizedList = await buildItemizedList(customer.id);
-  // MOMO TEMP DISABLE: momoBlock is computed but NOT sent below — the live
-  // Meta template is still the 4-variable version. Sending a 5th variable
-  // against a 4-variable approved template gets rejected by the Meta API,
-  // which was silently breaking reminders. Once the updated template
-  // (with {{5}}) is approved in Meta Business Manager, add momoBlock back
-  // into the array passed to sendWhatsAppTemplateMessage below.
+
   const momoBlock = buildMomoBlock(owner ?? {});
-  void momoBlock;
 
   const { data: insertedLog } = await supabase.from("reminder_logs").insert({
     message_id: `pending_${from}_${Date.now()}`,
@@ -1054,7 +1048,7 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     phone,
     reminderTemplateName(reminderLang),
     reminderLang,
-    [customer.name, shopName, itemizedList, total.toLocaleString()],
+    [customer.name, shopName, itemizedList, total.toLocaleString(), momoBlock],
   );
 
   if (insertedLog) {
@@ -1184,10 +1178,8 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
     .single();
   const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
   const reminderLang: Lang = (owner?.language as Lang) ?? "en";
-  // MOMO TEMP DISABLE: see matching note in sendReminder() above — not sent
-  // below until the 5-variable template is approved by Meta.
+
   const momoBlock = buildMomoBlock(owner ?? {});
-  void momoBlock;
 
   const { data: customers } = await supabase.from("customers").select("*").eq("shop_id", from);
 
@@ -1229,7 +1221,7 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
         customer.phone,
         reminderTemplateName(reminderLang),
         reminderLang,
-        [customer.name, shopName, itemizedList, total.toLocaleString()],
+        [customer.name, shopName, itemizedList, total.toLocaleString(), momoBlock],
       );
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
