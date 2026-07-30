@@ -680,7 +680,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
   if (replyId === "reminder_all_choice") {
-    await sendReminderAll(from, lang);
+    await sendReminderAll(from, lang, req);
     return;
   }
   if (replyId === "mark_paid") {
@@ -1170,7 +1170,7 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
-async function sendReminderAll(from: string, lang: Lang): Promise<void> {
+  async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<void> {
   const { data: owner } = await supabase
     .from("owners")
     .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname")
