@@ -1221,7 +1221,7 @@ async function sendReminderAll(from: string, lang: Lang): Promise<void> {
         customer.phone,
         reminderTemplateName(reminderLang),
         reminderLang,
-        [customer.name, shopName, itemizedList, total.toLocaleString(), momoBlock],
+        [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock],
       );
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
