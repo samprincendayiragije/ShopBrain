@@ -1048,7 +1048,7 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     phone,
     reminderTemplateName(reminderLang),
     reminderLang,
-    [customer.name, shopName, itemizedList, total.toLocaleString(), momoBlock],
+    [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock],
   );
 
   if (insertedLog) {
