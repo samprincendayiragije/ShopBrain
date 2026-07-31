@@ -276,12 +276,14 @@ function buildMomoBlock(owner: {
   momo_receiver_name?: string | null;
   shop_nickname?: string | null;
 }): string {
-  if (!owner.momo_number) return "";
+  if (!owner.momo_number) {
+    return "No MoMo details on file.";
+  }
 
-  const codeLine = owner.momo_code ? `Kode ya MOMO: ${owner.momo_code}\n` : "";
-  const nickname = owner.shop_nickname ? ` (Iyi ni MOMO ya "${owner.shop_nickname}")` : "";
+  const codeLine = owner.momo_code ? `MoMo Code: ${owner.momo_code}\n` : "";
+  const nickname = owner.shop_nickname ? ` (This is MoMo for "${owner.shop_nickname}")` : "";
 
-  return `${owner.momo_number}\n${codeLine}Amazina agaragara kuri MOMO: ${owner.momo_receiver_name ?? ""}${nickname}`;
+  return `${owner.momo_number}\n${codeLine}Name shown on MoMo: ${owner.momo_receiver_name ?? ""}${nickname}`;
 }
 
 interface WhatsAppMessage {
