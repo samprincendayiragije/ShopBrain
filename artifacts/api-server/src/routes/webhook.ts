@@ -714,7 +714,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
   if (replyId === "remind_all_btn") {
-    await sendReminderAll(from, lang);
+    await sendReminderAll(from, lang, req);
     return;
   }
   if (replyId === "view_all_customers") {
@@ -798,7 +798,7 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
   }
 
   if (upper === "REMIND ALL" || upper === "KWIBUTSA BOSE") {
-    await sendReminderAll(from, lang);
+    await sendReminderAll(from, lang, req);
     return;
   }
 
