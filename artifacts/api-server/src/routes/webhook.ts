@@ -1056,7 +1056,7 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   const messageId = await sendWhatsAppTemplateMessage(
     phone,
     reminderTemplateName(reminderLang),
-    reminderLang,
+    metaLanguageCode(reminderLang),
     [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock],
   );
 
