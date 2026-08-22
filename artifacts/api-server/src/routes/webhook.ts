@@ -287,10 +287,10 @@ function buildMomoBlock(owner: {
     return "No MoMo details on file.";
   }
 
-  const codeLine = owner.momo_code ? `MoMo Code: ${owner.momo_code}\n` : "";
+  const codeLine = owner.momo_code ? `MoMo Code: ${owner.momo_code}. ` : "";
   const nickname = owner.shop_nickname ? ` (This is MoMo for "${owner.shop_nickname}")` : "";
 
-  return `${owner.momo_number}\n${codeLine}Name shown on MoMo: ${owner.momo_receiver_name ?? ""}${nickname}`;
+  return `${owner.momo_number}. ${codeLine}Name shown on MoMo: ${owner.momo_receiver_name ?? ""}${nickname}`;
 }
 
 interface WhatsAppMessage {
