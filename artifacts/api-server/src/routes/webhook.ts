@@ -246,6 +246,13 @@ function reminderTemplateName(lang: Lang): string {
   return lang === "rw" ? "debt_reminder_rw" : "debt_reminder";
 }
 
+// Maps our internal Lang to the exact locale code Meta has the template
+// registered under. Confirm these against WhatsApp Manager → template details
+// before deploying — they must match exactly or sends fail with error 132001.
+function metaLanguageCode(lang: Lang): string {
+  return lang === "rw" ? "rw_RW" : "en_US";
+}
+
 // Builds the single-string itemized list used as the reminder template's
 // {{4}} variable, e.g. "iPhone screen (3,000 Frw), Sugar (2,000 Frw)".
 // Pulls every unpaid transaction for the customer, oldest first, so the list
@@ -1222,7 +1229,7 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
       const messageId = await sendWhatsAppTemplateMessage(
         customer.phone,
         reminderTemplateName(reminderLang),
-        reminderLang,
+        metaLanguageCode(reminderLang),
         [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock],
       );
       if (insertedLog) {
