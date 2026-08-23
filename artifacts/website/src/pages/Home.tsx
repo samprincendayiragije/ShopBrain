@@ -1,15 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "wouter";
-import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole, QrCode, Globe } from "lucide-react";
+import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole } from "lucide-react";
 
 // This is Shop Brain's HUMAN business line — Sam replies personally here.
 // Kept separate from the automated bot number (used inside webhook.ts) so
 // new contacts build trust with a real person before using the bot.
 const WHATSAPP_BUSINESS_NUMBER = "250799627713"; // no + or leading zero, used for wa.me links
-
-// The live site URL, shown as plain text next to the website QR code so
-// people who can't/won't scan can still type or tap it.
-const SITE_URL = "https://shop-brain-webhook--ndayiragijesamu.replit.app";
 
 const businessTypes = [
   "Grocery / Shop",
@@ -168,7 +164,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-8 max-w-2xl mx-auto">
+            <div className="max-w-sm mx-auto">
               {/* WhatsApp QR */}
               <div className="bg-background rounded-2xl border border-border shadow-sm p-6 flex flex-col items-center text-center">
                 <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-xl overflow-hidden border border-border mb-5 bg-white">
@@ -193,33 +189,6 @@ export default function Home() {
                   data-testid="link-whatsapp-fallback"
                 >
                   wa.me/{WHATSAPP_BUSINESS_NUMBER}
-                </a>
-              </div>
-
-              {/* Website QR */}
-              <div className="bg-background rounded-2xl border border-border shadow-sm p-6 flex flex-col items-center text-center">
-                <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-xl overflow-hidden border border-border mb-5 bg-white">
-                  <img
-                    src={`${import.meta.env.BASE_URL}images/qr-website.png`}
-                    alt="QR code to visit the Shop Brain website"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-                <div className="flex items-center gap-2 text-primary font-bold mb-2">
-                  <Globe size={20} />
-                  <span>Scan to visit our website</span>
-                </div>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Read more about Shop Brain before reaching out.
-                </p>
-                <a
-                  href={SITE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium text-primary hover:underline break-all"
-                  data-testid="link-website-fallback"
-                >
-                  {SITE_URL.replace("https://", "")}
                 </a>
               </div>
             </div>
