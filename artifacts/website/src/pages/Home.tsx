@@ -2,10 +2,13 @@ import React, { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole } from "lucide-react";
 
-// This is Shop Brain's HUMAN business line — Sam replies personally here.
-// Kept separate from the automated bot number (used inside webhook.ts) so
-// new contacts build trust with a real person before using the bot.
-const WHATSAPP_BUSINESS_NUMBER = "250799627713"; // no + or leading zero, used for wa.me links
+// The bot number — this is what the QR code and Get Started button send
+// people to, since that's the actual ShopBrain system.
+const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // no + or leading zero, used for wa.me links
+
+// Sam's personal/support line — shown separately (footer/contact) for
+// anyone who has questions or gets confused before/after messaging the bot.
+const SUPPORT_NUMBER = "250799627713";
 
 const businessTypes = [
   "Grocery / Shop",
@@ -249,8 +252,9 @@ export default function Home() {
                     <Phone size={24} />
                   </div>
                   <div>
-                    <h5 className="font-bold text-lg">WhatsApp</h5>
+                    <h5 className="font-bold text-lg">Questions? Message us directly</h5>
                     <p className="text-muted-foreground mt-1 text-lg">+250 799 627 713</p>
+                    <p className="text-sm text-muted-foreground mt-1">For support and questions — not the ShopBrain bot itself.</p>
                   </div>
                 </div>
 
@@ -311,6 +315,9 @@ export default function Home() {
           <div className="text-2xl font-bold font-display tracking-tight text-white">
             Shop Brain
           </div>
+          <p className="text-background/70 font-medium">
+            Questions? Message us: <a href={`https://wa.me/${SUPPORT_NUMBER}`} target="_blank" rel="noopener noreferrer" className="text-white hover:underline">+250 799 627 713</a>
+          </p>
           <p className="text-background/70 font-medium">
             Shop Brain Ltd — Registered in Rwanda.
           </p>
