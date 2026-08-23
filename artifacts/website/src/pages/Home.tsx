@@ -1,8 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "wouter";
-import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole } from "lucide-react";
+import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole, QrCode, Globe } from "lucide-react";
 
-const WHATSAPP_BUSINESS_NUMBER = "250795120043"; // no + or leading zero, used for wa.me links
+// This is Shop Brain's HUMAN business line — Sam replies personally here.
+// Kept separate from the automated bot number (used inside webhook.ts) so
+// new contacts build trust with a real person before using the bot.
+const WHATSAPP_BUSINESS_NUMBER = "250799627713"; // no + or leading zero, used for wa.me links
+
+// The live site URL, shown as plain text next to the website QR code so
+// people who can't/won't scan can still type or tap it.
+const SITE_URL = "https://shop-brain-webhook--ndayiragijesamu.replit.app";
 
 const businessTypes = [
   "Grocery / Shop",
@@ -16,6 +23,7 @@ const businessTypes = [
 const navLinks = [
   { name: "About", href: "#about" },
   { name: "How it Works", href: "#how-it-works" },
+  { name: "Get Started", href: "#get-started" },
   { name: "Contact", href: "#contact" },
   { name: "Privacy", href: "#privacy" },
 ];
@@ -120,11 +128,11 @@ export default function Home() {
               </p>
               <div className="flex flex-wrap items-center gap-4 pt-4">
                 <a 
-                  href="#contact" 
-                  onClick={(e) => scrollToSection(e, "#contact")}
+                  href="#get-started" 
+                  onClick={(e) => scrollToSection(e, "#get-started")}
                   className="inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-md font-medium hover:bg-primary/90 transition-colors shadow-sm"
                 >
-                  Contact Us <ArrowRight size={18} />
+                  Get Started <ArrowRight size={18} />
                 </a>
                 <a 
                   href="#about"
@@ -149,8 +157,77 @@ export default function Home() {
           </div>
         </section>
 
+        {/* Get Started / QR Section */}
+        <section id="get-started" className="py-20 md:py-28 bg-card px-4 md:px-6 border-y border-border">
+          <div className="container mx-auto max-w-5xl">
+            <div className="max-w-2xl mx-auto text-center mb-12">
+              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">Get Started</h2>
+              <h3 className="text-3xl md:text-4xl font-display font-bold mb-4">Scan to chat, or scan to learn more.</h3>
+              <p className="text-lg text-muted-foreground leading-relaxed">
+                No app to install. Choose one below to get going in seconds.
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-8 max-w-2xl mx-auto">
+              {/* WhatsApp QR */}
+              <div className="bg-background rounded-2xl border border-border shadow-sm p-6 flex flex-col items-center text-center">
+                <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-xl overflow-hidden border border-border mb-5 bg-white">
+                  <img
+                    src={`${import.meta.env.BASE_URL}images/qr-whatsapp.png`}
+                    alt="QR code to chat with Shop Brain on WhatsApp"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+                <div className="flex items-center gap-2 text-primary font-bold mb-2">
+                  <MessageCircle size={20} />
+                  <span>Scan to chat with Shop Brain</span>
+                </div>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Opens a WhatsApp chat with our team directly.
+                </p>
+                <a
+                  href={`https://wa.me/${WHATSAPP_BUSINESS_NUMBER}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-medium text-primary hover:underline break-all"
+                  data-testid="link-whatsapp-fallback"
+                >
+                  wa.me/{WHATSAPP_BUSINESS_NUMBER}
+                </a>
+              </div>
+
+              {/* Website QR */}
+              <div className="bg-background rounded-2xl border border-border shadow-sm p-6 flex flex-col items-center text-center">
+                <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-xl overflow-hidden border border-border mb-5 bg-white">
+                  <img
+                    src={`${import.meta.env.BASE_URL}images/qr-website.png`}
+                    alt="QR code to visit the Shop Brain website"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+                <div className="flex items-center gap-2 text-primary font-bold mb-2">
+                  <Globe size={20} />
+                  <span>Scan to visit our website</span>
+                </div>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Read more about Shop Brain before reaching out.
+                </p>
+                <a
+                  href={SITE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-medium text-primary hover:underline break-all"
+                  data-testid="link-website-fallback"
+                >
+                  {SITE_URL.replace("https://", "")}
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* About / How it Works Section */}
-        <section id="about" className="py-20 md:py-32 bg-card px-4 md:px-6 border-y border-border">
+        <section id="about" className="py-20 md:py-32 px-4 md:px-6">
           <div className="container mx-auto max-w-6xl">
             <div className="max-w-3xl mb-16">
               <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">About Shop Brain</h2>
@@ -168,7 +245,7 @@ export default function Home() {
                   { icon: Bell, step: "3", title: "Bot Sends Reminder", desc: "Shop Brain follows up automatically, in English or Kinyarwanda." },
                   { icon: CheckCircle2, step: "4", title: "Customer Pays", desc: "Mark the debt as paid and your balance updates instantly." },
                 ].map((item, idx) => (
-                  <div key={item.step} className="relative bg-background p-6 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow">
+                  <div key={item.step} className="relative bg-card p-6 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow">
                     <span className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shadow-sm">
                       {item.step}
                     </span>
@@ -188,7 +265,7 @@ export default function Home() {
         </section>
 
         {/* Contact Section */}
-        <section id="contact" className="py-20 md:py-32 px-4 md:px-6">
+        <section id="contact" className="py-20 md:py-32 bg-card px-4 md:px-6 border-y border-border">
           <div className="container mx-auto max-w-6xl grid md:grid-cols-2 gap-16 items-center">
             <div>
               <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">Get in Touch</h2>
@@ -203,8 +280,8 @@ export default function Home() {
                     <Phone size={24} />
                   </div>
                   <div>
-                    <h5 className="font-bold text-lg">Phone</h5>
-                    <p className="text-muted-foreground mt-1 text-lg">+250 795 120 043</p>
+                    <h5 className="font-bold text-lg">WhatsApp</h5>
+                    <p className="text-muted-foreground mt-1 text-lg">+250 799 627 713</p>
                   </div>
                 </div>
 
@@ -230,7 +307,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="bg-card p-8 md:p-10 rounded-2xl border border-border shadow-xl">
+            <div className="bg-background p-8 md:p-10 rounded-2xl border border-border shadow-xl">
               <h4 className="text-xl font-bold font-display mb-1">Request Access</h4>
               <p className="text-sm text-muted-foreground mb-6">Submit your details and we'll open a WhatsApp chat pre-filled with your request.</p>
               <RequestAccessForm />
