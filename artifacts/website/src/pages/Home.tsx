@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole } from "lucide-react";
+import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole, Instagram } from "lucide-react";
 
 // The bot number — this is what the QR code and Get Started button send
 // people to, since that's the actual ShopBrain system.
@@ -9,6 +9,8 @@ const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // no + or leading zero, used f
 // Sam's personal/support line — shown separately (footer/contact) for
 // anyone who has questions or gets confused before/after messaging the bot.
 const SUPPORT_NUMBER = "250799627713";
+
+const INSTAGRAM_URL = "https://www.instagram.com/shopbrain_kigali";
 
 const businessTypes = [
   "Grocery / Shop",
@@ -26,6 +28,50 @@ const navLinks = [
   { name: "Contact", href: "#contact" },
   { name: "Privacy", href: "#privacy" },
 ];
+
+// Reveals an element with a fade + slide-up the first time it scrolls into
+// view, then leaves it alone. Respects reduced-motion by skipping straight
+// to visible.
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReduced) {
+      setVisible(true);
+      return;
+    }
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.15 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return { ref, visible };
+}
+
+function Reveal({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
+  const { ref, visible } = useReveal<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      className={`transition-all duration-700 ease-out ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"} ${className}`}
+      style={{ transitionDelay: visible ? `${delay}ms` : "0ms" }}
+    >
+      {children}
+    </div>
+  );
+}
 
 export default function Home() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -159,15 +205,15 @@ export default function Home() {
         {/* Get Started / QR Section */}
         <section id="get-started" className="py-20 md:py-28 bg-card px-4 md:px-6 border-y border-border">
           <div className="container mx-auto max-w-5xl">
-            <div className="max-w-2xl mx-auto text-center mb-12">
+            <Reveal className="max-w-2xl mx-auto text-center mb-12">
               <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">Get Started</h2>
               <h3 className="text-3xl md:text-4xl font-display font-bold mb-4">Scan to chat, or scan to learn more.</h3>
               <p className="text-lg text-muted-foreground leading-relaxed">
                 No app to install. Choose one below to get going in seconds.
               </p>
-            </div>
+            </Reveal>
 
-            <div className="max-w-sm mx-auto">
+            <Reveal className="max-w-sm mx-auto" delay={150}>
               {/* WhatsApp QR */}
               <div className="bg-background rounded-2xl border border-border shadow-sm p-6 flex flex-col items-center text-center">
                 <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-xl overflow-hidden border border-border mb-5 bg-white">
@@ -194,20 +240,20 @@ export default function Home() {
                   wa.me/{WHATSAPP_BUSINESS_NUMBER}
                 </a>
               </div>
-            </div>
+            </Reveal>
           </div>
         </section>
 
         {/* About / How it Works Section */}
         <section id="about" className="py-20 md:py-32 px-4 md:px-6">
           <div className="container mx-auto max-w-6xl">
-            <div className="max-w-3xl mb-16">
+            <Reveal className="max-w-3xl mb-16">
               <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">About Shop Brain</h2>
               <h3 className="text-3xl md:text-4xl font-display font-bold mb-6">A practical tool for real businesses.</h3>
               <p className="text-lg text-muted-foreground leading-relaxed">
                 Shop Brain is a WhatsApp-based debt tracking tool designed specifically for small shop owners. We understand that running a business is demanding, so we built a solution that fits seamlessly into your daily routine. It works in both English and Kinyarwanda.
               </p>
-            </div>
+            </Reveal>
 
             <div id="how-it-works" className="mt-12">
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -217,19 +263,21 @@ export default function Home() {
                   { icon: Bell, step: "3", title: "Bot Sends Reminder", desc: "Shop Brain follows up automatically, in English or Kinyarwanda." },
                   { icon: CheckCircle2, step: "4", title: "Customer Pays", desc: "Mark the debt as paid and your balance updates instantly." },
                 ].map((item, idx) => (
-                  <div key={item.step} className="relative bg-card p-6 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow">
-                    <span className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shadow-sm">
-                      {item.step}
-                    </span>
-                    <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-5">
-                      <item.icon size={22} />
+                  <Reveal key={item.step} delay={idx * 120}>
+                    <div className="relative bg-card p-6 rounded-xl border border-border shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 h-full">
+                      <span className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shadow-sm">
+                        {item.step}
+                      </span>
+                      <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-5">
+                        <item.icon size={22} />
+                      </div>
+                      <h4 className="text-lg font-bold mb-2 font-display">{item.title}</h4>
+                      <p className="text-muted-foreground leading-relaxed text-sm">{item.desc}</p>
+                      {idx < 3 && (
+                        <ArrowRight className="hidden lg:block absolute top-1/2 -right-4 -translate-y-1/2 text-border" size={20} />
+                      )}
                     </div>
-                    <h4 className="text-lg font-bold mb-2 font-display">{item.title}</h4>
-                    <p className="text-muted-foreground leading-relaxed text-sm">{item.desc}</p>
-                    {idx < 3 && (
-                      <ArrowRight className="hidden lg:block absolute top-1/2 -right-4 -translate-y-1/2 text-border" size={20} />
-                    )}
-                  </div>
+                  </Reveal>
                 ))}
               </div>
             </div>
@@ -239,7 +287,7 @@ export default function Home() {
         {/* Contact Section */}
         <section id="contact" className="py-20 md:py-32 bg-card px-4 md:px-6 border-y border-border">
           <div className="container mx-auto max-w-6xl grid md:grid-cols-2 gap-16 items-center">
-            <div>
+            <Reveal>
               <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">Get in Touch</h2>
               <h3 className="text-3xl md:text-4xl font-display font-bold mb-6">We're here to help you grow.</h3>
               <p className="text-lg text-muted-foreground leading-relaxed mb-10">
@@ -278,19 +326,19 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-            </div>
+            </Reveal>
 
-            <div className="bg-background p-8 md:p-10 rounded-2xl border border-border shadow-xl">
+            <Reveal delay={150} className="bg-background p-8 md:p-10 rounded-2xl border border-border shadow-xl">
               <h4 className="text-xl font-bold font-display mb-1">Request Access</h4>
               <p className="text-sm text-muted-foreground mb-6">Submit your details and we'll open a WhatsApp chat pre-filled with your request.</p>
               <RequestAccessForm />
-            </div>
+            </Reveal>
           </div>
         </section>
 
         {/* Privacy Policy */}
         <section id="privacy" className="py-20 bg-muted px-4 md:px-6">
-          <div className="container mx-auto max-w-4xl bg-card p-8 md:p-12 rounded-2xl border border-border shadow-sm">
+          <Reveal className="container mx-auto max-w-4xl bg-card p-8 md:p-12 rounded-2xl border border-border shadow-sm">
             <h2 className="text-2xl md:text-3xl font-display font-bold mb-8 text-foreground flex items-center gap-3">
               <Shield className="text-primary" /> Privacy Policy
             </h2>
@@ -305,22 +353,91 @@ export default function Home() {
                 <a href="mailto:Ndayiragijesamuelprince@gmail.com" className="text-primary hover:underline font-medium text-lg break-all">Ndayiragijesamuelprince@gmail.com</a>
               </div>
             </div>
-          </div>
+          </Reveal>
         </section>
       </main>
 
       {/* Footer */}
-      <footer className="bg-foreground text-background py-12 px-4 md:px-6">
-        <div className="container mx-auto max-w-6xl flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="text-2xl font-bold font-display tracking-tight text-white">
-            Shop Brain
+      <footer className="bg-foreground text-background pt-16 pb-8 px-4 md:px-6">
+        <div className="container mx-auto max-w-6xl">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-10 pb-12 border-b border-white/10">
+            {/* Brand */}
+            <div className="lg:col-span-2">
+              <div className="text-2xl font-bold font-display tracking-tight text-white mb-3">
+                Shop Brain
+              </div>
+              <p className="text-background/60 leading-relaxed max-w-sm mb-6">
+                A WhatsApp-based debt tracking tool built for small shop owners in Rwanda. No app to install — just message and go.
+              </p>
+              <div className="flex items-center gap-3">
+                <a
+                  href={INSTAGRAM_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Shop Brain on Instagram"
+                  className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-primary hover:scale-110 transition-all duration-300"
+                  data-testid="link-instagram"
+                >
+                  <Instagram size={18} />
+                </a>
+                <a
+                  href={`https://wa.me/${SUPPORT_NUMBER}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Message Shop Brain support on WhatsApp"
+                  className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-primary hover:scale-110 transition-all duration-300"
+                  data-testid="link-footer-whatsapp"
+                >
+                  <MessageCircle size={18} />
+                </a>
+              </div>
+            </div>
+
+            {/* Quick links */}
+            <div>
+              <h6 className="text-sm font-bold uppercase tracking-wider text-background/50 mb-4">Explore</h6>
+              <ul className="space-y-3">
+                {navLinks.map((link) => (
+                  <li key={link.name}>
+                    <a
+                      href={link.href}
+                      onClick={(e) => scrollToSection(e, link.href)}
+                      className="text-background/70 hover:text-white transition-colors"
+                    >
+                      {link.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Contact */}
+            <div>
+              <h6 className="text-sm font-bold uppercase tracking-wider text-background/50 mb-4">Contact</h6>
+              <ul className="space-y-3 text-background/70">
+                <li>
+                  <a href={`https://wa.me/${SUPPORT_NUMBER}`} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors break-all">
+                    +250 799 627 713
+                  </a>
+                </li>
+                <li>
+                  <a href="mailto:Ndayiragijesamuelprince@gmail.com" className="hover:text-white transition-colors break-all">
+                    Ndayiragijesamuelprince@gmail.com
+                  </a>
+                </li>
+                <li className="text-background/60">Kigese, Ruyenzi, Rwanda</li>
+              </ul>
+            </div>
           </div>
-          <p className="text-background/70 font-medium">
-            Questions? Message us: <a href={`https://wa.me/${SUPPORT_NUMBER}`} target="_blank" rel="noopener noreferrer" className="text-white hover:underline">+250 799 627 713</a>
-          </p>
-          <p className="text-background/70 font-medium">
-            Shop Brain Ltd — Registered in Rwanda.
-          </p>
+
+          <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-background/50 text-sm">
+              © {new Date().getFullYear()} Shop Brain Ltd — Registered in Rwanda.
+            </p>
+            <p className="text-background/50 text-sm">
+              Built in Kigali 🇷🇼
+            </p>
+          </div>
         </div>
       </footer>
     </div>
