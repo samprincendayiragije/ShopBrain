@@ -14,6 +14,12 @@ interface Session {
 
 const sessions: Record<string, Session> = {};
 
+// NOTE: `owners` table needs a new `contact_phone` column (text, nullable) —
+// this is the number customers should use to reach the shop owner directly,
+// distinct from the WhatsApp Business bot number. Add via Supabase before
+// deploying:
+//   alter table owners add column contact_phone text;
+
 const T = {
   en: {
     welcome: "👋 Welcome to *ShopBrain*\nWhat would you like to do?",
@@ -92,6 +98,9 @@ const T = {
 ✅ Mark as Paid — enter their number, then choose Partially or Full Payment
 🔔 Send Reminder — remind one customer, or everyone at once
 🌐 Change Language — switch Kinyarwanda/English
+💳 MoMo — set up payment details, or set the number customers can reach you on
+💰 Total — see your total outstanding debt
+➕ More — see everything else, including your full customer list
 
 *Typed shortcuts (optional):*
 • TOTAL — see your total outstanding debt
@@ -112,6 +121,16 @@ const T = {
     momoSaved: (number: string, name: string) =>
       `✅ *MoMo details saved!*\n\n📱 ${number}\n👤 ${name}\n\nThis will now appear on every payment reminder sent to your customers.`,
     momoSkip: "⏭️ Skip",
+    // --- New: bubble 3 (MoMo menu / Total / More) ---
+    momoBtn: "💳 MoMo",
+    totalBtn: "💰 Total",
+    moreBtn: "➕ More",
+    momoMenuStart: "💳 Setup/Update MoMo",
+    momoMenuContact: "📞 Set Contact Number",
+    contactNumberPrompt: "How can customers reach you directly?\n\nEnter a phone number, or tap No Number if you'd rather not share one.",
+    contactNumberSaved: "✅ Contact number saved! Customers will now be told how to reach you.",
+    contactNumberSkip: "⏭️ No Number",
+    allCustomersBtn: "📋 All Customers",
   },
   rw: {
      welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
@@ -190,6 +209,9 @@ const T = {
 ✅ Emeza Kwishyura — andika nimero, hanyuma uhitemo Igice cyangwa Byose
 🔔 Kwibutsa — wibutsa umukiriya umwe, cyangwa bose icyarimwe
 🌐 Guhindura Ururimi — hindura Ikinyarwanda/Icyongereza
+💳 MoMo — shyiraho amakuru y'ubwishyu, cyangwa shyiraho nimero abakiriya bakuvugana
+💰 Igiteranyo — reba igiteranyo cy'amadeni yose
+➕ Ibindi — reba ibindi byose, hamwe n'urutonde rw'abakiriya bawe bose
 
 *Amabwiriza wandika (ntibisabwa):*
 • TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amadeni yose
@@ -210,6 +232,16 @@ const T = {
     momoSaved: (number: string, name: string) =>
       `✅ *Amakuru ya MoMo yabitswe!*\n\n📱 ${number}\n👤 ${name}\n\nAzagaragara kuri buri butumwa bwo kwibutsa abakiriya bawe.`,
     momoSkip: "⏭️ Simbuka",
+    // --- New: bubble 3 (MoMo menu / Total / More) ---
+    momoBtn: "💳 MoMo",
+    totalBtn: "💰 Igiteranyo",
+    moreBtn: "➕ Ibindi",
+    momoMenuStart: "💳 Shyiraho MoMo",
+    momoMenuContact: "📞 Nimero yo Kuvugana",
+    contactNumberPrompt: "Ese abakiriya bazakubona bate?\n\nAndika nimero, cyangwa kanda Nta Nimero niba udashaka gutanga imwe.",
+    contactNumberSaved: "✅ Nimero yabitswe! Abakiriya bazamenyeshwa uko bakuvugana.",
+    contactNumberSkip: "⏭️ Nta Nimero",
+    allCustomersBtn: "📋 Abakiriya Bose",
   },
 };
 
@@ -479,6 +511,44 @@ async function sendPersistentMenu(from: string, lang: Lang): Promise<void> {
       ],
     },
   });
+  // Bubble 3 — MoMo (incl. Set Contact Number), Total, More (catch-all)
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: "\u200B" },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "momo_menu", title: T[lang].momoBtn } },
+        { type: "reply", reply: { id: "show_total", title: T[lang].totalBtn } },
+        { type: "reply", reply: { id: "more_menu", title: T[lang].moreBtn } },
+      ],
+    },
+  });
+}
+
+async function sendMomoMenu(from: string, lang: Lang): Promise<void> {
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].whatToDo },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "momo_start", title: T[lang].momoMenuStart } },
+        { type: "reply", reply: { id: "set_contact_number", title: T[lang].momoMenuContact } },
+      ],
+    },
+  });
+}
+
+async function sendMoreMenu(from: string, lang: Lang): Promise<void> {
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].whatToDo },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "view_all_customers", title: T[lang].allCustomersBtn } },
+        { type: "reply", reply: { id: "help_btn", title: "❓ Help" } },
+      ],
+    },
+  });
 }
 
 async function sendReminderChoice(from: string, lang: Lang): Promise<void> {
@@ -570,6 +640,30 @@ async function saveMomoDetails(from: string, lang: Lang): Promise<void> {
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
+// --- Set Contact Number flow ---
+async function startContactNumberSetup(from: string, lang: Lang): Promise<void> {
+  sessions[from] = { step: "contact_number", data: {} };
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].contactNumberPrompt },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "contact_number_skip", title: T[lang].contactNumberSkip } },
+      ],
+    },
+  });
+}
+
+async function saveContactNumber(from: string, lang: Lang, contactPhone: string | null): Promise<void> {
+  sessions[from] = undefined as any;
+  await supabase
+    .from("owners")
+    .update({ contact_phone: contactPhone })
+    .eq("phone", cleanPhone(from));
+  await sendWhatsAppMessage(from, T[lang].contactNumberSaved);
+  setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+}
+
 async function handleInteractive(from: string, replyId: string, req: Request): Promise<void> {
   if (!(await isOwner(from))) {
     const langCheck = await getLang(from);
@@ -614,6 +708,32 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     if (sessions[from]?.step !== "momo_nickname") return; // stale button tap, ignore
     sessions[from]!.data["shop_nickname"] = "";
     await saveMomoDetails(from, lang);
+    return;
+  }
+
+  if (replyId === "momo_menu") {
+    await sendMomoMenu(from, lang);
+    return;
+  }
+
+  if (replyId === "momo_start") {
+    await startMomoSetup(from, lang);
+    return;
+  }
+
+  if (replyId === "set_contact_number") {
+    await startContactNumberSetup(from, lang);
+    return;
+  }
+
+  if (replyId === "contact_number_skip") {
+    if (sessions[from]?.step !== "contact_number") return; // stale button tap, ignore
+    await saveContactNumber(from, lang, null);
+    return;
+  }
+
+  if (replyId === "more_menu") {
+    await sendMoreMenu(from, lang);
     return;
   }
 
@@ -1007,6 +1127,16 @@ async function handleSession(from: string, text: string, session: Session, lang:
   if (session.step === "momo_nickname") {
     session.data["shop_nickname"] = text.trim();
     await saveMomoDetails(from, lang);
+    return;
+  }
+  // --- Set Contact Number step ---
+  if (session.step === "contact_number") {
+    const number = cleanPhone(text);
+    if (number.length < 9) {
+      await sendWhatsAppMessage(from, T[lang].invalidPhone);
+      return;
+    }
+    await saveContactNumber(from, lang, number);
     return;
   }
 }
