@@ -131,6 +131,7 @@ const T = {
     contactNumberSaved: "✅ Contact number saved! Customers will now be told how to reach you.",
     contactNumberSkip: "⏭️ No Number",
     allCustomersBtn: "📋 All Customers",
+    securityBtn: "🔒 Security",
   },
   rw: {
      welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
@@ -242,6 +243,7 @@ const T = {
     contactNumberSaved: "✅ Nimero yabitswe! Abakiriya bazamenyeshwa uko bakuvugana.",
     contactNumberSkip: "⏭️ Nta Nimero",
     allCustomersBtn: "📋 Abakiriya Bose",
+    securityBtn: "🔒 Umutekano",
   },
 };
 
@@ -468,19 +470,52 @@ async function sendOnboardingLanguagePicker(from: string): Promise<void> {
   });
 }
 
-async function sendFirstTimeMenu(from: string, lang: Lang): Promise<void> {
+// Shared 3-bubble button layout, in the agreed order:
+// Add Debt, Mark as Paid, Find Customer | Send Reminder, MoMo, Total |
+// Security, Change Language, More.
+// `firstBubbleText` lets callers use a greeting on first registration vs.
+// a plain "what would you like to do" on every later visit.
+async function sendMenuButtons(from: string, lang: Lang, firstBubbleText: string): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
-    body: { text: T[lang].welcome },
+    body: { text: firstBubbleText },
     action: {
       buttons: [
         { type: "reply", reply: { id: "add_debt", title: T[lang].addDebt } },
-        { type: "reply", reply: { id: "change_language", title: T[lang].changeLanguage } },
-        { type: "reply", reply: { id: "help_btn", title: "❓ Help" } },
+        { type: "reply", reply: { id: "mark_paid", title: T[lang].markPaidBtn } },
+        { type: "reply", reply: { id: "find_customer", title: T[lang].findCustomer } },
       ],
     },
   });
-  await sendWhatsAppMessage(from, T[lang].securityTip);
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: "\u200B" },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "send_reminder_menu", title: T[lang].sendReminder } },
+        { type: "reply", reply: { id: "momo_menu", title: T[lang].momoBtn } },
+        { type: "reply", reply: { id: "show_total", title: T[lang].totalBtn } },
+      ],
+    },
+  });
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: "\u200B" },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "security_info", title: T[lang].securityBtn } },
+        { type: "reply", reply: { id: "change_language", title: T[lang].changeLanguage } },
+        { type: "reply", reply: { id: "more_menu", title: T[lang].moreBtn } },
+      ],
+    },
+  });
+}
+
+// Right after registration, the owner now sees the SAME full menu as every
+// later visit — no separate stripped-down first-time bubble, and no more
+// auto-sent security tip (that now only fires when the owner taps Security).
+async function sendFirstTimeMenu(from: string, lang: Lang): Promise<void> {
+  await sendMenuButtons(from, lang, T[lang].welcome);
 }
 
 async function sendHelp(from: string, lang: Lang): Promise<void> {
@@ -489,40 +524,7 @@ async function sendHelp(from: string, lang: Lang): Promise<void> {
 }
 
 async function sendPersistentMenu(from: string, lang: Lang): Promise<void> {
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: T[lang].whatToDo },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "add_debt", title: T[lang].addDebt } },
-        { type: "reply", reply: { id: "find_customer", title: T[lang].findCustomer } },
-        { type: "reply", reply: { id: "mark_paid", title: T[lang].markPaidBtn } },
-      ],
-    },
-  });
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: "\u200B" },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "change_language", title: T[lang].changeLanguage } },
-        { type: "reply", reply: { id: "send_reminder_menu", title: T[lang].sendReminder } },
-        { type: "reply", reply: { id: "help_btn", title: "❓ Help" } },
-      ],
-    },
-  });
-  // Bubble 3 — MoMo (incl. Set Contact Number), Total, More (catch-all)
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: "\u200B" },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "momo_menu", title: T[lang].momoBtn } },
-        { type: "reply", reply: { id: "show_total", title: T[lang].totalBtn } },
-        { type: "reply", reply: { id: "more_menu", title: T[lang].moreBtn } },
-      ],
-    },
-  });
+  await sendMenuButtons(from, lang, T[lang].whatToDo);
 }
 
 async function sendMomoMenu(from: string, lang: Lang): Promise<void> {
@@ -734,6 +736,13 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
 
   if (replyId === "more_menu") {
     await sendMoreMenu(from, lang);
+    return;
+  }
+
+  if (replyId === "security_info") {
+    // Sends the tip alone — no menu resend. Nothing else goes out until the
+    // owner sends another message or taps another button.
+    await sendWhatsAppMessage(from, T[lang].securityTip);
     return;
   }
 
