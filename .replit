@@ -27,3 +27,15 @@ WHATSAPP_VERIFY_TOKEN = "ShopBrain_kigali_2026"
 
 [nix]
 packages = ["twelf", "psmisc", "wget"]
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
+localPort = 19161
+externalPort = 80
