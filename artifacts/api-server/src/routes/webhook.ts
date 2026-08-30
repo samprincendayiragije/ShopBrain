@@ -1154,7 +1154,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
 async function sendReminder(from: string, phone: string, lang: Lang): Promise<void> {
   const { data: owner } = await supabase
     .from("owners")
-    .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname")
+    .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname, contact_phone")
     .eq("phone", cleanPhone(from))
     .single();
   const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
@@ -1162,6 +1162,10 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   // proxy for the customer base's language), independent of whatever `lang`
   // the current webhook request happens to carry.
   const reminderLang: Lang = (owner?.language as Lang) ?? "en";
+  // Falls back to the owner's own WhatsApp bot number if they haven't set a
+  // separate contact_phone via the Set Contact Number flow yet — the
+  // template's 6th variable is never left blank.
+  const contactPhone = owner?.contact_phone || cleanPhone(from);
 
   const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
   if (!customer) {
@@ -1196,7 +1200,7 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     phone,
     reminderTemplateName(reminderLang),
     metaLanguageCode(reminderLang),
-    [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock],
+    [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone],
   );
 
   if (insertedLog) {
@@ -1321,11 +1325,12 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
   async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<void> {
   const { data: owner } = await supabase
     .from("owners")
-    .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname")
+    .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname, contact_phone")
     .eq("phone", cleanPhone(from))
     .single();
   const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
   const reminderLang: Lang = (owner?.language as Lang) ?? "en";
+  const contactPhone = owner?.contact_phone || cleanPhone(from);
 
   const momoBlock = buildMomoBlock(owner ?? {});
 
@@ -1369,7 +1374,7 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
         customer.phone,
         reminderTemplateName(reminderLang),
         metaLanguageCode(reminderLang),
-        [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock],
+        [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone],
       );
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
