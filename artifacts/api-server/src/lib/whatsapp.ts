@@ -1,12 +1,10 @@
 const PHONE_NUMBER_ID = process.env["WHATSAPP_PHONE_NUMBER_ID"];
 const ACCESS_TOKEN = process.env["WHATSAPP_ACCESS_TOKEN"];
-
 if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
   throw new Error(
     "WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN are required",
   );
 }
-
 export async function sendWhatsAppMessage(
   to: string,
   text: string,
@@ -32,7 +30,6 @@ export async function sendWhatsAppMessage(
   const data = await res.json() as { messages: Array<{ id: string }> };
   return data.messages[0].id;
 }
-
 export async function sendWhatsAppInteractiveMessage(
   to: string,
   interactive: object,
@@ -54,6 +51,38 @@ export async function sendWhatsAppInteractiveMessage(
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`WhatsApp API error ${res.status}: ${body}`);
+  }
+}
+
+/**
+ * Marks an incoming message as read (blue checkmarks) and shows the
+ * "typing..." indicator to the sender while the bot works on its reply.
+ * `messageId` is the WhatsApp message id of the incoming message (msg.id
+ * from the webhook payload) — NOT the reply we're about to send.
+ *
+ * Fire-and-forget by design: callers should not await-block their reply on
+ * this, and a failure here should never stop the bot from actually
+ * responding. Swallow errors internally rather than throwing.
+ */
+export async function markMessageAsRead(messageId: string): Promise<void> {
+  try {
+    const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: messageId,
+        typing_indicator: { type: "text" },
+      }),
+    });
+  } catch {
+    // Never let a failed read-receipt/typing-indicator call block or crash
+    // message handling — this is a UX nicety, not a critical path.
   }
 }
 
