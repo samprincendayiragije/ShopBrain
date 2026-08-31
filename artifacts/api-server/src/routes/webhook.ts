@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { sendWhatsAppMessage, sendWhatsAppInteractiveMessage, sendWhatsAppTemplateMessage } from "../lib/whatsapp.js";
+import { sendWhatsAppMessage, sendWhatsAppInteractiveMessage, sendWhatsAppTemplateMessage, markMessageAsRead } from "../lib/whatsapp.js";
 import { supabase } from "../lib/supabase.js";
 
 const router: IRouter = Router();
@@ -58,6 +58,8 @@ const T = {
     noHistory: (name: string) => `📋 No transactions found for ${name}.`,
     historyHeader: (name: string) => `📋 *Debt History — ${name}*`,
     totalOwed: (total: number) => `💰 *Total owed: ${total.toLocaleString()} Frw*`,
+    customerSummary: (name: string, phone: string, lastItem: string, totalOwed: number, lastVisit: string) =>
+      `👤 *${name}*\n📞 ${phone}\n📦 Last item: ${lastItem}\n💰 Total owed: ${totalOwed.toLocaleString()} Frw\n📅 Last visit: ${lastVisit}`,
     noCustomers: "📋 You have no registered customers yet.",
     allCustomersHeader: (count: number) => `📋 *All Customers (${count})*\n\n`,
     allCustomersContinued: "📋 *Continued...*\n\n",
@@ -149,7 +151,7 @@ const T = {
     noCustomer: (phone: string) => `❌ Uyu mukiriya ntago yanditse muri sisteme ${phone}.`,
     noCustomerText: "❌ Uyu mukiriya ntago yanditse muri sisteme.",
     allPaid: (name: string) => `✅ Amadeni yose yabazwe nkayishyuwe kuri *${name}*.`,
-    viewHistory: "📋 Reba amadeni",
+    viewHistory: "📋 Raporo y'ideni",
     sendReminder: "🔔 kwibutsa",
     markPaidBtn: "✅ Emeza Kwishyura",
     reminderSent: (name: string) => `⏳ Ubutumwa bwoherejwe kuri *${name}* — tegereza ko bakiriye...`,
@@ -168,11 +170,13 @@ const T = {
     whatToDo: "Urashaka gukora iki?",
     existingCustomer: (name: string) => `👤 Umukiriya warahise: *${name}*\n\nIgicuruzwa atwaye?`,
     noHistory: (name: string) => `📋 Nta makuru yabonetse kuri ${name}.`,
-    historyHeader: (name: string) => `📋 *Urutonde rw'Amadeni — ${name}*`,
+    historyHeader: (name: string) => `📋 *Raporo y'ideni — ${name}*`,
     totalOwed: (total: number) => `💰 *Asigayemo: ${total.toLocaleString()} Frw*`,
+    customerSummary: (name: string, phone: string, lastItem: string, totalOwed: number, lastVisit: string) =>
+      `👤 *${name}*\n📞 ${phone}\n📦 Igicuruzwa giherutse: ${lastItem}\n💰 Ideni ryose: ${totalOwed.toLocaleString()} Frw\n📅 Aheruka: ${lastVisit}`,
     noCustomers: "📋 Nta bakiriya wanditse.",
     allCustomersHeader: (count: number) => `📋 *Abakiriya Bose (${count})*\n\n`,
-    allCustomersContinued: "📋 *Bikomeza...*\n\n",
+    allCustomersContinued: "📋 *Gukomeza...*\n\n",
     owes: "Asigayemo",
     registered: "Yanditse",
     cleared: "Yishyuye ✅",
@@ -226,10 +230,10 @@ const T = {
     // --- MoMo setup ---
     momoIntro: "💳 *Gushyiraho MoMo*\n\nIbi bituma abakiriya babona neza aho koherereza amafaranga igihe babonye ubutumwa bwo kwibutsa.\n\nNimero yawe ya MTN MoMo ni iyihe?\n\nUrugero: 0788123456",
     momoInvalidNumber: "❌ Nimero si yo. Andika nimero yawe ya MoMo:",
-    momoAskCode: "Ufite kode ya MTN MoMo Merchant/Business? (Ntibisabwa)\n\nAndike ubu, cyangwa ukande Skip niba udafite.",
-    momoAskReceiverName: "Ni irihe zina rigaragara kuri MTN igihe umuntu akoherereza iyi nimero/kode amafaranga?\n\n⚠️ Iri zina rigomba guhuza neza n'irigaragara kuri MTN.\n\nUrugero: NIYONZIMA ALICE",
+    momoAskCode: "Ufite kode ya MTN MoMo Merchant/Business? (Niba ari ngombwa)\n\nYandike hano, cyangwa ukande simbuka niba utayifite.",
+    momoAskReceiverName: "Ni irihe zina rigaragara kuri MTN igihe umuntu yohereza kuri iyi nimero/code amafaranga?\n\n⚠️ Iri zina rigomba guhuza neza n'irigaragara kuri MTN.\n\nUrugero: NIYONZIMA ALICE",
     momoReceiverTooShort: "❌ Rifupi cyane. Andika izina nyaryo rigaragara kuri MTN:",
-    momoAskNickname: "Abakiriya bawe bakunze kwita iki iduka ryawe? (kugira ngo baryumve n'igihe izina rya MTN ryaba ritandukanye)\n\nUrugero: Chez Alice",
+    momoAskNickname: "Abakiriya bazi iduka ryawe kuyahe mazina? (kugira ngo baryumve n'igihe izina rya MTN ryaba ritandukanye)\n\nUrugero: Chez Alice",
     momoSaved: (number: string, name: string) =>
       `✅ *Amakuru ya MoMo yabitswe!*\n\n📱 ${number}\n👤 ${name}\n\nAzagaragara kuri buri butumwa bwo kwibutsa abakiriya bawe.`,
     momoSkip: "⏭️ Simbuka",
@@ -307,27 +311,37 @@ async function buildItemizedList(customerId: string): Promise<string> {
 }
 
 // Builds the single-string MoMo payment block used as the reminder
-// template's {{5}} variable. Returns "" if the owner hasn't set up MoMo
-// details yet, so the template's MoMo section variable is simply blank
-// (template body copy/bolding is fixed at Meta approval time — this just
-// fills the variable, it can't add its own bold/color formatting).
+// template's {{5}} variable. Returns a language-appropriate "no MoMo on
+// file" line if the owner hasn't set up MoMo details yet. Wording depends
+// on which reminder template (English or Kinyarwanda) this is feeding —
+// pass the same `lang` used to pick reminderTemplateName()/metaLanguageCode().
+// (Template body copy/bolding is fixed at Meta approval time — this just
+// fills the variable, it can't add its own bold/color formatting.)
 function buildMomoBlock(owner: {
   momo_number?: string | null;
   momo_code?: string | null;
   momo_receiver_name?: string | null;
   shop_nickname?: string | null;
-}): string {
+}, lang: Lang): string {
+  if (lang === "rw") {
+    if (!owner.momo_number) {
+      return "Nta makuru ya MoMo abitswe.";
+    }
+    const codeLine = owner.momo_code ? `Kode ya MOMO: ${owner.momo_code}. ` : "";
+    const nickname = owner.shop_nickname ? ` (Iyi ni MOMO ya "${owner.shop_nickname}")` : "";
+    return `${owner.momo_number}. ${codeLine}Amazina agaragara kuri MOMO: ${owner.momo_receiver_name ?? ""}${nickname}`;
+  }
+
   if (!owner.momo_number) {
     return "No MoMo details on file.";
   }
-
   const codeLine = owner.momo_code ? `MoMo Code: ${owner.momo_code}. ` : "";
   const nickname = owner.shop_nickname ? ` (This is MoMo for "${owner.shop_nickname}")` : "";
-
   return `${owner.momo_number}. ${codeLine}Name shown on MoMo: ${owner.momo_receiver_name ?? ""}${nickname}`;
 }
 
 interface WhatsAppMessage {
+  id: string;
   from: string;
   text?: { body: string };
   interactive?: {
@@ -389,6 +403,14 @@ router.post("/webhook", async (req: Request, res: Response) => {
 
   for (const msg of messages) {
     const from = msg.from;
+    // Mark as read + show the typing indicator immediately, before any DB
+    // work, so the sender sees feedback right away instead of silence.
+    // Best-effort: never let a read-receipt failure block the real reply.
+    try {
+      await markMessageAsRead(msg.id);
+    } catch (err) {
+      req.log.warn({ err, from }, "Failed to mark message as read");
+    }
     try {
       if (msg.type === "interactive") {
         const replyId =
@@ -1181,7 +1203,7 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
 
   const itemizedList = await buildItemizedList(customer.id);
 
-  const momoBlock = buildMomoBlock(owner ?? {});
+  const momoBlock = buildMomoBlock(owner ?? {}, reminderLang);
 
   const { data: insertedLog } = await supabase.from("reminder_logs").insert({
     message_id: `pending_${from}_${Date.now()}`,
@@ -1261,7 +1283,7 @@ async function lookupCustomer(from: string, phone: string, lang: Lang): Promise<
   const lastTx = transactions?.[0];
   const lastDate = lastTx ? new Date(lastTx.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "N/A";
   sessions[from] = { step: "idle", data: { lastPhone: phone } };
-  await sendWhatsAppMessage(from, `👤 *${customer.name}*\n📞 ${phone}\n📦 Last item: ${lastTx?.item ?? "N/A"}\n💰 Total owed: ${totalOwed.toLocaleString()} Frw\n📅 Last visit: ${lastDate}`);
+  await sendWhatsAppMessage(from, T[lang].customerSummary(customer.name, phone, lastTx?.item ?? "N/A", totalOwed, lastDate));
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
     body: { text: T[lang].whatToDo },
@@ -1332,7 +1354,7 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
   const reminderLang: Lang = (owner?.language as Lang) ?? "en";
   const contactPhone = owner?.contact_phone || cleanPhone(from);
 
-  const momoBlock = buildMomoBlock(owner ?? {});
+  const momoBlock = buildMomoBlock(owner ?? {}, reminderLang);
 
   const { data: customers } = await supabase.from("customers").select("*").eq("shop_id", from);
 
