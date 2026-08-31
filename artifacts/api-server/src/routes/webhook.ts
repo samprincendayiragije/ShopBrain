@@ -173,7 +173,7 @@ const T = {
     historyHeader: (name: string) => `📋 *Raporo y'ideni — ${name}*`,
     totalOwed: (total: number) => `💰 *Asigayemo: ${total.toLocaleString()} Frw*`,
     customerSummary: (name: string, phone: string, lastItem: string, totalOwed: number, lastVisit: string) =>
-      `👤 *${name}*\n📞 ${phone}\n📦 Igicuruzwa giherutse: ${lastItem}\n💰 Ideni ryose: ${totalOwed.toLocaleString()} Frw\n📅 Aheruka: ${lastVisit}`,
+      `👤 *${name}*\n📞 ${phone}\n📦 Igicuruzwa giherutse: ${lastItem}\n💰 Ideni ryose: ${totalOwed.toLocaleString()} Frw\n📅 Itariki: ${lastVisit}`,
     noCustomers: "📋 Nta bakiriya wanditse.",
     allCustomersHeader: (count: number) => `📋 *Abakiriya Bose (${count})*\n\n`,
     allCustomersContinued: "📋 *Gukomeza...*\n\n",
