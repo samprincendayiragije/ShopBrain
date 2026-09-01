@@ -173,7 +173,7 @@ const T = {
     historyHeader: (name: string) => `📋 *Raporo y'ideni — ${name}*`,
     totalOwed: (total: number) => `💰 *Asigayemo: ${total.toLocaleString()} Frw*`,
     customerSummary: (name: string, phone: string, lastItem: string, totalOwed: number, lastVisit: string) =>
-      `👤 *${name}*\n📞 ${phone}\n📦 Igicuruzwa giherutse: ${lastItem}\n💰 Ideni ryose: ${totalOwed.toLocaleString()} Frw\n📅 Itariki: ${lastVisit}`,
+      `👤 *${name}*\n📞 ${phone}\n📦 Igicuruzwa giherutse: ${lastItem}\n💰 Ideni ryose: ${totalOwed.toLocaleString()} Frw\n📅 Aheruka: ${lastVisit}`,
     noCustomers: "📋 Nta bakiriya wanditse.",
     allCustomersHeader: (count: number) => `📋 *Abakiriya Bose (${count})*\n\n`,
     allCustomersContinued: "📋 *Gukomeza...*\n\n",
@@ -281,7 +281,7 @@ async function getLang(from: string): Promise<Lang> {
 // pending Meta's review — sends will fail with a template-not-found error
 // until it clears, at which point this needs no further changes.
 function reminderTemplateName(lang: Lang): string {
-  return lang === "rw" ? "debt_reminder_rw" : "debt_reminder";
+  return lang === "rw" ? "debt_reminder_rw_v2" : "debt_reminder";
 }
 
 // Maps our internal Lang to the exact locale code Meta has the template
@@ -688,6 +688,30 @@ async function saveContactNumber(from: string, lang: Lang, contactPhone: string 
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
+// Shared by the "paid_phone" typed-number flow and the Mark as Paid button
+// shortcut (when a customer is already known from context, e.g. Find
+// Customer lookup) — looks up the customer, checks they have an unpaid
+// balance, then shows the Partial/Full Payment choice.
+async function startMarkPaidForPhone(from: string, phone: string, lang: Lang): Promise<void> {
+  const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
+  if (!customer) {
+    sessions[from] = undefined as any;
+    await sendWhatsAppMessage(from, T[lang].noCustomer(phone));
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
+  const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
+  if (total === 0) {
+    sessions[from] = undefined as any;
+    await sendWhatsAppMessage(from, T[lang].noUnpaid(customer.name));
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  sessions[from] = { step: "idle", data: { markPaidPhone: phone } };
+  await sendMarkPaidChoice(from, lang);
+}
+
 async function handleInteractive(from: string, replyId: string, req: Request): Promise<void> {
   if (!(await isOwner(from))) {
     const langCheck = await getLang(from);
@@ -844,6 +868,16 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
   if (replyId === "mark_paid") {
+    // If tapped from a customer lookup card (Find Customer, etc.), the
+    // phone is already known — skip straight to Partial/Full Payment for
+    // that customer instead of asking again. Only prompt for a number when
+    // Mark as Paid is tapped with no customer already in context (e.g. from
+    // the main menu).
+    const knownPhone = sessions[from]?.data["lastPhone"];
+    if (knownPhone) {
+      await startMarkPaidForPhone(from, knownPhone, lang);
+      return;
+    }
     sessions[from] = { step: "paid_phone", data: {} };
     await sendWhatsAppMessage(from, T[lang].markPaidPrompt);
     return;
@@ -1075,23 +1109,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
   }
   if (session.step === "paid_phone") {
     const phone = cleanPhone(text);
-    const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
-    if (!customer) {
-      sessions[from] = undefined as any;
-      await sendWhatsAppMessage(from, T[lang].noCustomer(text));
-      await sendPersistentMenu(from, lang);
-      return;
-    }
-    const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
-    const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
-    if (total === 0) {
-      sessions[from] = undefined as any;
-      await sendWhatsAppMessage(from, T[lang].noUnpaid(customer.name));
-      await sendPersistentMenu(from, lang);
-      return;
-    }
-    sessions[from] = { step: "idle", data: { markPaidPhone: phone } };
-    await sendMarkPaidChoice(from, lang);
+    await startMarkPaidForPhone(from, phone, lang);
     return;
   }
   if (session.step === "partial_amount") {
@@ -1215,14 +1233,18 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   }).select().single();
 
   // Uses the approved debt reminder template (English or Kinyarwanda,
-  // depending on the owner's language). Template currently has 4 variables:
-  // name, shop, itemized list, total. (MoMo block re-added once template
-  // {{5}} is approved — see MOMO TEMP DISABLE note above.)
+  // depending on the owner's language). English (debt_reminder) has 6
+  // variables. Kinyarwanda (debt_reminder_rw_v2) has 7 — {{6}} and {{7}}
+  // are both the contact number, repeated, because the template editor
+  // rejected reusing {{6}} twice in the body.
+  const reminderVars = reminderLang === "rw"
+    ? [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone, contactPhone]
+    : [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone];
   const messageId = await sendWhatsAppTemplateMessage(
     phone,
     reminderTemplateName(reminderLang),
     metaLanguageCode(reminderLang),
-    [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone],
+    reminderVars,
   );
 
   if (insertedLog) {
@@ -1390,13 +1412,16 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
     try {
       // Same template-based send as sendReminder — required since bulk reminders
       // almost always go to customers outside the 24h free-form messaging window.
-      // Template + language now match the owner's chosen language. (MoMo block
-      // temporarily not sent — see MOMO TEMP DISABLE note above.)
+      // English (debt_reminder) has 6 variables; Kinyarwanda (debt_reminder_rw_v2)
+      // has 7 — {{6}} and {{7}} are both the contact number, repeated.
+      const bulkReminderVars = reminderLang === "rw"
+        ? [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone, contactPhone]
+        : [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone];
       const messageId = await sendWhatsAppTemplateMessage(
         customer.phone,
         reminderTemplateName(reminderLang),
         metaLanguageCode(reminderLang),
-        [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone],
+        bulkReminderVars,
       );
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
