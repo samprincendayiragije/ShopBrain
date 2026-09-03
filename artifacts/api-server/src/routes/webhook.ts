@@ -288,7 +288,7 @@ function reminderTemplateName(lang: Lang): string {
 // registered under. Confirm these against WhatsApp Manager → template details
 // before deploying — they must match exactly or sends fail with error 132001.
 function metaLanguageCode(lang: Lang): string {
-  return lang === "rw" ? "rw" : "en";
+  return lang === "rw" ? "rw_RW" : "en";
 }
 
 // Builds the single-string itemized list used as the reminder template's
