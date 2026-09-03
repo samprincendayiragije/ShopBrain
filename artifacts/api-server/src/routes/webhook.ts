@@ -306,8 +306,8 @@ async function buildItemizedList(customerId: string): Promise<string> {
   if (!unpaidTx || unpaidTx.length === 0) return "";
 
   return unpaidTx
-    .map((t: { item: string; amount: number }) => `${t.item} (${t.amount.toLocaleString()} Frw)`)
-    .join(", ");
+  .map((t: { item: string; amount: number }) => `*${t.item}* (${t.amount.toLocaleString()} Frw)`)
+  .join(", ");
 }
 
 // Builds the single-string MoMo payment block used as the reminder
