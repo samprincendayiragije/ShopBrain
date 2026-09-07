@@ -463,7 +463,7 @@ function RequestAccessForm() {
       .filter(Boolean)
       .join("\n");
 
-    const url = `https://wa.me/${WHATSAPP_BUSINESS_NUMBER}?text=${encodeURIComponent(text)}`;
+    const url = `https://wa.me/${SUPPORT_NUMBER}?text=${encodeURIComponent(text)}`;
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
