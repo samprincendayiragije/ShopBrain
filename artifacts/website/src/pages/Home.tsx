@@ -8,7 +8,7 @@ const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // no + or leading zero, used f
 
 // Sam's personal/support line — shown separately (footer/contact) for
 // anyone who has questions or gets confused before/after messaging the bot.
-const SUPPORT_NUMBER = "250799627713";
+const SUPPORT_NUMBER = "250795120043";
 
 const INSTAGRAM_URL = "https://www.instagram.com/shopbrain_kigali";
 
