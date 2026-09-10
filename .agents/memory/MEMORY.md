@@ -1,0 +1,1 @@
+- [Publish duplicate-block failures](publish-duplicate-block-failures.md) — duplicate appended source blocks can make otherwise valid builds fail with hundreds of redeclaration errors.
