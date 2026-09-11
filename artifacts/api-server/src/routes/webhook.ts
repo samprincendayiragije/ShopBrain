@@ -277,6 +277,17 @@ function cleanPhone(phone: string): string {
   return cleaned;
 }
 
+// Formats a date/timestamp into a full "DD Mon HH:MM:SS" string in the
+// owner's local time, e.g. "26 Aug 14:03:27" — used for the customer
+// lookup card's "Last visit" / "Aheruka" field so owners see exactly when
+// (not just which day) the last transaction happened.
+function formatFullTimestamp(dateInput: string | Date): string {
+  const d = new Date(dateInput);
+  const datePart = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const timePart = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return `${datePart} ${timePart}`;
+}
+
 async function isOwner(from: string): Promise<boolean> {
   const { data } = await supabase
     .from("owners")
@@ -1411,7 +1422,9 @@ async function lookupCustomer(from: string, phone: string, lang: Lang): Promise<
   const unpaid = (transactions ?? []).filter((t: { paid: boolean }) => !t.paid);
   const totalOwed = unpaid.reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
   const lastTx = transactions?.[0];
-  const lastDate = lastTx ? new Date(lastTx.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "N/A";
+  // FIX: now includes hour/minute/second, not just the date, so owners can
+  // see exactly when the last visit happened, not just which day.
+  const lastDate = lastTx ? formatFullTimestamp(lastTx.date) : "N/A";
   sessions[from] = { step: "idle", data: { lastPhone: phone } };
   await sendWhatsAppMessage(from, T[lang].customerSummary(customer.name, phone, lastTx?.item ?? "N/A", totalOwed, lastDate));
   await sendWhatsAppInteractiveMessage(from, {
