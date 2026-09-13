@@ -1119,12 +1119,17 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
     return;
   }
 
+  // Only treat this as a phone-lookup attempt if the ORIGINAL text looks
+  // like a phone number (digits/spaces/+/- only, reasonable length) — not
+  // just "has 9+ digits somewhere," which was matching random pasted text
+  // (receipts, MoMo SMS forwards, long numeric IDs) and echoing a huge
+  // garbled digit string back via noCustomer().
+  const looksLikePhone = /^[\d\s+\-()]{7,15}$/.test(text.trim());
   const possiblePhone = cleanPhone(text);
-  if (possiblePhone.length >= 9) {
+  if (looksLikePhone && possiblePhone.length >= 9 && possiblePhone.length <= 12) {
     await lookupCustomer(from, possiblePhone, lang);
     return;
   }
-
   const shopName = await getOrAskShopName(from, lang);
   if (!shopName) return;
   await sendPersistentMenu(from, lang);
