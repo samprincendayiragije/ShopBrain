@@ -281,10 +281,14 @@ function cleanPhone(phone: string): string {
 // owner's local time, e.g. "26 Aug 14:03:27" — used for the customer
 // lookup card's "Last visit" / "Aheruka" field so owners see exactly when
 // (not just which day) the last transaction happened.
+// Explicitly pinned to Africa/Kigali (UTC+2, no DST) rather than relying on
+// whatever timezone the server host happens to run in — Replit/Railway etc.
+// commonly default to UTC, which silently shifted displayed times by 2
+// hours from what Kigali-based owners actually expect to see.
 function formatFullTimestamp(dateInput: string | Date): string {
   const d = new Date(dateInput);
-  const datePart = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-  const timePart = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const datePart = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Africa/Kigali" });
+  const timePart = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "Africa/Kigali" });
   return `${datePart} ${timePart}`;
 }
 
