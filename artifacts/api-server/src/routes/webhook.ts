@@ -1473,9 +1473,11 @@ async function showDebtHistory(from: string, phone: string, lang: Lang): Promise
     return;
   }
   const lines = transactions.map((t: { item: string; amount: number; paid: boolean; date: string }) => {
-    const date = new Date(t.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    const d = new Date(t.date);
+    const datePart = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Africa/Kigali" });
+    const timePart = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Kigali" });
     const status = t.paid ? "✅ Paid" : "❌ Unpaid";
-    return `• ${t.item} — ${t.amount.toLocaleString()} Frw — ${date} — ${status}`;
+    return `• ${t.item} — ${t.amount.toLocaleString()} Frw — ${datePart} ${timePart} — ${status}`;
   });
   const unpaid = transactions.filter((t: { paid: boolean }) => !t.paid);
   const total = unpaid.reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
