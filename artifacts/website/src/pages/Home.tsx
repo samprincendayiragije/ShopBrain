@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Menu, X, ArrowRight, Shield, Smartphone, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole, Instagram } from "lucide-react";
+import { Menu, X, ArrowRight, Shield, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole, Instagram, ChevronDown, Check } from "lucide-react";
 
 // The bot number — this is what the QR code and Get Started button send
 // people to, since that's the actual ShopBrain system.
@@ -12,26 +12,204 @@ const SUPPORT_NUMBER = "250795120043";
 
 const INSTAGRAM_URL = "https://www.instagram.com/shopbrain_kigali";
 
-const businessTypes = [
-  "Grocery / Shop",
-  "Salon / Barber",
-  "Boutique / Clothing",
-  "Pharmacy",
-  "Restaurant / Bar",
-  "Other",
+// ---------------------------------------------------------------------------
+// Language
+// ---------------------------------------------------------------------------
+
+type Lang = "rw" | "en" | "fr";
+
+const LANGUAGES: { code: Lang; label: string; flag: string }[] = [
+  { code: "rw", label: "Kinyarwanda", flag: "🇷🇼" },
+  { code: "en", label: "English", flag: "🇬🇧" },
+  { code: "fr", label: "Français", flag: "🇫🇷" },
 ];
 
-const navLinks = [
-  { name: "About", href: "#about" },
-  { name: "How it Works", href: "#how-it-works" },
-  { name: "Get Started", href: "#get-started" },
-  { name: "Contact", href: "#contact" },
-  { name: "Privacy", href: "#privacy" },
-];
+const copy: Record<Lang, {
+  nav: { about: string; how: string; getStarted: string; contact: string; privacy: string; admin: string };
+  hero: { title: string; body: string; cta: string; learnMore: string };
+  getStarted: { eyebrow: string; title: string; body: string; scanTitle: string; scanBody: string };
+  about: { eyebrow: string; title: string; body: string };
+  steps: { title: string; desc: string }[];
+  contact: { eyebrow: string; title: string; body: string; questions: string; questionsNote: string; email: string; address: string };
+  form: { title: string; body: string; name: string; namePh: string; phone: string; phonePh: string; type: string; message: string; messagePh: string; submit: string };
+  businessTypes: string[];
+  privacy: { title: string };
+  footer: { tagline: string; explore: string; contactHeading: string; builtIn: string };
+}> = {
+  rw: {
+    nav: { about: "Ibiranga", how: "Uko Bikora", getStarted: "Tangira", contact: "Twandikire", privacy: "Ibanga", admin: "Ubuyobozi" },
+    hero: {
+      title: "Genzura imyenda y'abakiriya ukoresheje WhatsApp.",
+      body: "Shop Brain ikora ibikoresho by'ubucuruzi binyuze mu butumwa, bifasha abanyabucuruzi bato n'abadafite gahunda igenga kugenzura imyenda, kohereza inyibutsa z'ubwishyu, no gucunga umubano n'abakiriya — byose biboneka kuri WhatsApp.",
+      cta: "Tangira",
+      learnMore: "Menya Byinshi",
+    },
+    getStarted: {
+      eyebrow: "Tangira",
+      title: "Koresha kode uganire, cyangwa umenye byinshi.",
+      body: "Nta porogaramu ukeneye gushyiramo. Hitamo kimwe hepfo utangire mu masegonda make.",
+      scanTitle: "Koresha kode uganire na Shop Brain",
+      scanBody: "Ifungura ikiganiro cya WhatsApp n'itsinda ryacu ako kanya.",
+    },
+    about: {
+      eyebrow: "Ibyerekeye Shop Brain",
+      title: "Igikoresho gifatika ku bucuruzi nyabwo.",
+      body: "Shop Brain ni igikoresho cyo kugenzura imyenda binyuze kuri WhatsApp, cyakorewe abanyabucuruzi bato. Turazi ko gucunga ubucuruzi bisaba umwanya, ni yo mpamvu twakoze igisubizo cyinjira mu mikorere yawe ya buri munsi. Gikora mu Cyongereza no mu Kinyarwanda.",
+    },
+    steps: [
+      { title: "Andikira Roboti", desc: "Ohereza ubutumwa kuri Shop Brain kuri WhatsApp nk'uko wandikira undi muntu — nta gushyiramo, nta kwiyandikisha." },
+      { title: "Ongeraho Umwenda", desc: "Andika icyo umukiriya abereyemo mu masegonda make, uri mu kiganiro." },
+      { title: "Roboti Yohereza Inyibutsa", desc: "Shop Brain ikurikirana ku bwayo, mu Cyongereza cyangwa mu Kinyarwanda." },
+      { title: "Umukiriya Yishyura", desc: "Shyira ko umwenda wishyuwe, konti yawe ihite ivugurura." },
+    ],
+    contact: {
+      eyebrow: "Twandikire",
+      title: "Turi hano kugira ngo dufashe ubucuruzi bwawe gukura.",
+      body: "Niba ufite ibibazo ku miterere ya Shop Brain mu iduka ryawe, cyangwa ukeneye ubufasha kuri konti yawe, itsinda ryacu riteguye kugufasha.",
+      questions: "Ibibazo? Twandikire ako kanya",
+      questionsNote: "Kubufasha n'ibibazo — ntabwo ari roboti ya ShopBrain ubwayo.",
+      email: "Imeyili",
+      address: "Aderesi",
+    },
+    form: {
+      title: "Saba Kwinjira",
+      body: "Ohereza amakuru yawe, hazafungura ikiganiro kuri WhatsApp cyuzuyemo icyo usaba.",
+      name: "Amazina Yombi",
+      namePh: "Amazina yawe",
+      phone: "Numero ya Telefone",
+      phonePh: "Numero yawe ya WhatsApp",
+      type: "Ubwoko bw'Ubucuruzi",
+      message: "Ubutumwa (si ngombwa)",
+      messagePh: "Ikindi wifuza kutumenyesha?",
+      submit: "Ohereza kuri WhatsApp",
+    },
+    businessTypes: ["Iduka / Uduka", "Salon / Umucuzi", "Imyenda", "Farumasi", "Resitora / Bar", "Ikindi"],
+    privacy: { title: "Politiki y'Ibanga" },
+    footer: {
+      tagline: "Igikoresho cyo kugenzura imyenda kuri WhatsApp, cyakorewe abanyabucuruzi bato mu Rwanda. Nta porogaramu — andika gusa utangire.",
+      explore: "Reba",
+      contactHeading: "Twandikire",
+      builtIn: "Byakozwe i Kigali 🇷🇼",
+    },
+  },
+  en: {
+    nav: { about: "About", how: "How it Works", getStarted: "Get Started", contact: "Contact", privacy: "Privacy", admin: "Admin" },
+    hero: {
+      title: "Manage customer debts through WhatsApp.",
+      body: "Shop Brain builds messaging-based business management tools that help small and informal shop owners in Rwanda track debts, send payment reminders, and manage customer relationships — accessible directly through WhatsApp.",
+      cta: "Get Started",
+      learnMore: "Learn More",
+    },
+    getStarted: {
+      eyebrow: "Get Started",
+      title: "Scan to chat, or scan to learn more.",
+      body: "No app to install. Choose one below to get going in seconds.",
+      scanTitle: "Scan to chat with Shop Brain",
+      scanBody: "Opens a WhatsApp chat with our team directly.",
+    },
+    about: {
+      eyebrow: "About Shop Brain",
+      title: "A practical tool for real businesses.",
+      body: "Shop Brain is a WhatsApp-based debt tracking tool designed specifically for small shop owners. We understand that running a business is demanding, so we built a solution that fits seamlessly into your daily routine. It works in both English and Kinyarwanda.",
+    },
+    steps: [
+      { title: "Text the Bot", desc: "Message Shop Brain on WhatsApp like you would any contact — no install, no login." },
+      { title: "Add Customer Debt", desc: "Record what a customer owes in seconds, right inside the chat." },
+      { title: "Bot Sends Reminder", desc: "Shop Brain follows up automatically, in English or Kinyarwanda." },
+      { title: "Customer Pays", desc: "Mark the debt as paid and your balance updates instantly." },
+    ],
+    contact: {
+      eyebrow: "Get in Touch",
+      title: "We're here to help you grow.",
+      body: "Whether you have questions about setting up Shop Brain for your store, or need support with your account, our team is ready to assist you.",
+      questions: "Questions? Message us directly",
+      questionsNote: "For support and questions — not the ShopBrain bot itself.",
+      email: "Email",
+      address: "Address",
+    },
+    form: {
+      title: "Request Access",
+      body: "Submit your details and we'll open a WhatsApp chat pre-filled with your request.",
+      name: "Full Name",
+      namePh: "Your name",
+      phone: "Phone Number",
+      phonePh: "Your WhatsApp number",
+      type: "Business Type",
+      message: "Message (optional)",
+      messagePh: "Anything else we should know?",
+      submit: "Send via WhatsApp",
+    },
+    businessTypes: ["Grocery / Shop", "Salon / Barber", "Boutique / Clothing", "Pharmacy", "Restaurant / Bar", "Other"],
+    privacy: { title: "Privacy Policy" },
+    footer: {
+      tagline: "A WhatsApp-based debt tracking tool built for small shop owners in Rwanda. No app to install — just message and go.",
+      explore: "Explore",
+      contactHeading: "Contact",
+      builtIn: "Built in Kigali 🇷🇼",
+    },
+  },
+  fr: {
+    nav: { about: "À propos", how: "Comment ça marche", getStarted: "Commencer", contact: "Contact", privacy: "Confidentialité", admin: "Admin" },
+    hero: {
+      title: "Gérez les dettes de vos clients via WhatsApp.",
+      body: "Shop Brain conçoit des outils de gestion par messagerie qui aident les petits commerçants et boutiques informelles du Rwanda à suivre les dettes, envoyer des rappels de paiement et gérer la relation client — le tout directement sur WhatsApp.",
+      cta: "Commencer",
+      learnMore: "En savoir plus",
+    },
+    getStarted: {
+      eyebrow: "Commencer",
+      title: "Scannez pour discuter, ou pour en savoir plus.",
+      body: "Aucune application à installer. Choisissez une option ci-dessous pour démarrer en quelques secondes.",
+      scanTitle: "Scannez pour discuter avec Shop Brain",
+      scanBody: "Ouvre directement une conversation WhatsApp avec notre équipe.",
+    },
+    about: {
+      eyebrow: "À propos de Shop Brain",
+      title: "Un outil pratique pour de vrais commerces.",
+      body: "Shop Brain est un outil de suivi des dettes basé sur WhatsApp, conçu spécifiquement pour les petits commerçants. Nous savons que gérer un commerce demande du temps, c'est pourquoi nous avons conçu une solution qui s'intègre à votre routine quotidienne. Disponible en anglais et en kinyarwanda.",
+    },
+    steps: [
+      { title: "Écrivez au bot", desc: "Envoyez un message à Shop Brain sur WhatsApp comme à n'importe quel contact — aucune installation, aucune connexion." },
+      { title: "Ajoutez une dette", desc: "Enregistrez ce qu'un client vous doit en quelques secondes, directement dans la conversation." },
+      { title: "Le bot envoie un rappel", desc: "Shop Brain relance automatiquement, en anglais ou en kinyarwanda." },
+      { title: "Le client paie", desc: "Marquez la dette comme payée et votre solde se met à jour instantanément." },
+    ],
+    contact: {
+      eyebrow: "Contactez-nous",
+      title: "Nous sommes là pour vous aider à grandir.",
+      body: "Que vous ayez des questions sur la mise en place de Shop Brain pour votre commerce, ou besoin d'assistance pour votre compte, notre équipe est prête à vous aider.",
+      questions: "Des questions ? Écrivez-nous directement",
+      questionsNote: "Pour le support et les questions — pas le bot ShopBrain lui-même.",
+      email: "E-mail",
+      address: "Adresse",
+    },
+    form: {
+      title: "Demander l'accès",
+      body: "Envoyez vos informations et nous ouvrirons une discussion WhatsApp pré-remplie avec votre demande.",
+      name: "Nom complet",
+      namePh: "Votre nom",
+      phone: "Numéro de téléphone",
+      phonePh: "Votre numéro WhatsApp",
+      type: "Type de commerce",
+      message: "Message (facultatif)",
+      messagePh: "Autre chose à nous signaler ?",
+      submit: "Envoyer via WhatsApp",
+    },
+    businessTypes: ["Épicerie / Boutique", "Salon / Coiffeur", "Boutique de vêtements", "Pharmacie", "Restaurant / Bar", "Autre"],
+    privacy: { title: "Politique de confidentialité" },
+    footer: {
+      tagline: "Un outil de suivi des dettes basé sur WhatsApp, conçu pour les petits commerçants du Rwanda. Aucune application — écrivez et c'est parti.",
+      explore: "Explorer",
+      contactHeading: "Contact",
+      builtIn: "Conçu à Kigali 🇷🇼",
+    },
+  },
+};
 
-// Reveals an element with a fade + slide-up the first time it scrolls into
-// view, then leaves it alone. Respects reduced-motion by skipping straight
-// to visible.
+// ---------------------------------------------------------------------------
+// Reveal-on-scroll helper
+// ---------------------------------------------------------------------------
+
 function useReveal<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const [visible, setVisible] = useState(false);
@@ -73,9 +251,248 @@ function Reveal({ children, className = "", delay = 0 }: { children: React.React
   );
 }
 
+// ---------------------------------------------------------------------------
+// Language selector
+// ---------------------------------------------------------------------------
+
+function LanguageSelector({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const current = LANGUAGES.find((l) => l.code === lang)!;
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1.5 rounded-md border border-border hover:bg-muted transition-colors"
+        aria-label="Select language"
+        data-testid="button-language-selector"
+      >
+        <span className="text-base leading-none">{current.flag}</span>
+        <span className="hidden sm:inline">{current.label}</span>
+        <ChevronDown size={14} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-44 bg-background border border-border rounded-md shadow-lg overflow-hidden z-50">
+          {LANGUAGES.map((l) => (
+            <button
+              key={l.code}
+              onClick={() => {
+                setLang(l.code);
+                setOpen(false);
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm hover:bg-muted transition-colors text-left"
+              data-testid={`option-language-${l.code}`}
+            >
+              <span className="text-base leading-none">{l.flag}</span>
+              <span className="flex-1">{l.label}</span>
+              {l.code === lang && <Check size={14} className="text-primary" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Animated hero phones
+// ---------------------------------------------------------------------------
+
+// Three illustrated WhatsApp-style "screens" that cycle inside each phone
+// frame. Each phone runs its own timer, offset slightly from the others, so
+// they don't all flip in perfect unison — closer to how three separate
+// people would actually be using their phones.
+const PHONE_SCREENS = [
+  {
+    label: "reminder",
+    render: () => (
+      <div className="flex flex-col gap-1.5 p-2.5 h-full bg-[#0b141a]">
+        <div className="self-start max-w-[85%] bg-[#202c33] text-[8px] leading-snug text-white/90 rounded-lg rounded-tl-none px-2 py-1.5">
+          Muraho! Ufite umwenda wa 4,000 Frw. Wabasha kwishyura ryari?
+        </div>
+        <div className="self-end max-w-[70%] bg-[#005c4b] text-[8px] leading-snug text-white/90 rounded-lg rounded-tr-none px-2 py-1.5">
+          Ejo bundi 👍
+        </div>
+      </div>
+    ),
+  },
+  {
+    label: "add-debt",
+    render: () => (
+      <div className="flex flex-col gap-1.5 p-2.5 h-full bg-[#0b141a]">
+        <div className="self-start max-w-[80%] bg-[#202c33] rounded-lg rounded-tl-none px-2 py-1.5 flex flex-col gap-1">
+          <span className="text-[7px] font-semibold text-emerald-400">Add Debt</span>
+          <span className="text-[8px] text-white/90">Amount?</span>
+        </div>
+        <div className="self-end max-w-[60%] bg-[#005c4b] text-[8px] text-white/90 rounded-lg rounded-tr-none px-2 py-1.5">
+          5,000 Frw
+        </div>
+        <div className="self-start max-w-[75%] bg-[#202c33] text-[8px] text-emerald-400 rounded-lg rounded-tl-none px-2 py-1.5 flex items-center gap-1">
+          <CheckCircle2 size={8} /> Saved
+        </div>
+      </div>
+    ),
+  },
+  {
+    label: "paid",
+    render: () => (
+      <div className="flex flex-col gap-1.5 p-2.5 h-full bg-[#0b141a]">
+        <div className="self-start max-w-[85%] bg-[#202c33] text-[8px] leading-snug text-white/90 rounded-lg rounded-tl-none px-2 py-1.5 flex items-center gap-1">
+          ✅ Kelly Kennedy has received the reminder
+        </div>
+        <div className="self-start max-w-[80%] bg-[#202c33] text-[8px] leading-snug text-emerald-400 rounded-lg rounded-tl-none px-2 py-1.5">
+          🎉 Paid in full — 4,000 Frw
+        </div>
+      </div>
+    ),
+  },
+];
+
+function PhoneMockup({ offsetMs = 0, className = "" }: { offsetMs?: number; className?: string }) {
+  const [screenIdx, setScreenIdx] = useState(0);
+
+  useEffect(() => {
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReduced) return;
+    const start = setTimeout(() => {
+      const interval = setInterval(() => {
+        setScreenIdx((i) => (i + 1) % PHONE_SCREENS.length);
+      }, 2000);
+      (start as unknown as { _interval?: number })._interval = interval as unknown as number;
+    }, offsetMs);
+    return () => clearTimeout(start);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Separate stable interval (offset handled via initial delay above only
+  // affects phase, not cleanup correctness).
+  useEffect(() => {
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReduced) return;
+    const id = setInterval(() => {
+      setScreenIdx((i) => (i + 1) % PHONE_SCREENS.length);
+    }, 2000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className={`relative w-[92px] sm:w-[110px] aspect-[9/19] rounded-[14px] border-[3px] border-black/80 bg-black shadow-2xl overflow-hidden ${className}`}>
+      <div className="absolute top-1 left-1/2 -translate-x-1/2 w-6 h-1.5 bg-black rounded-full z-10" />
+      <div className="w-full h-full relative">
+        {PHONE_SCREENS.map((screen, i) => (
+          <div
+            key={screen.label}
+            className={`absolute inset-0 transition-opacity duration-500 ${i === screenIdx ? "opacity-100" : "opacity-0"}`}
+          >
+            {screen.render()}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Background photos for the hero. Drop as many real photos as you have into
+// images/ under these names (or add more entries here) — they'll crossfade
+// through in order, looping. With just one image this simply displays it,
+// no fade needed.
+const HERO_IMAGES = [
+  "shop-hero.jpg",
+  "shop-hero-2.jpg",
+  "shop-hero-3.jpg",
+];
+
+const HERO_IMAGE_DURATION_MS = 5000;
+
+function AnimatedHero() {
+  const [imgIdx, setImgIdx] = useState(0);
+  const [loadedFlags, setLoadedFlags] = useState<boolean[]>(() => HERO_IMAGES.map(() => true));
+
+  useEffect(() => {
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReduced) return;
+    // Only cycle between images that actually loaded successfully.
+    const id = setInterval(() => {
+      setImgIdx((i) => {
+        const available = HERO_IMAGES.map((_, idx) => idx).filter((idx) => loadedFlags[idx]);
+        if (available.length <= 1) return i;
+        const currentPos = available.indexOf(i);
+        const nextPos = (currentPos + 1) % available.length;
+        return available[nextPos];
+      });
+    }, HERO_IMAGE_DURATION_MS);
+    return () => clearInterval(id);
+  }, [loadedFlags]);
+
+  const markFailed = (idx: number) => {
+    setLoadedFlags((flags) => {
+      if (!flags[idx]) return flags;
+      const next = [...flags];
+      next[idx] = false;
+      return next;
+    });
+  };
+
+  return (
+    <div className="relative rounded-2xl overflow-hidden shadow-2xl aspect-[4/3] bg-muted">
+      {HERO_IMAGES.map((filename, idx) => (
+        <img
+          key={filename}
+          src={`${import.meta.env.BASE_URL}images/${filename}`}
+          alt="Shop owners in Kigali using Shop Brain on WhatsApp"
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${idx === imgIdx && loadedFlags[idx] ? "opacity-100" : "opacity-0"}`}
+          onError={(e) => {
+            markFailed(idx);
+            if (idx === 0) {
+              e.currentTarget.src = "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?q=80&w=1200&auto=format&fit=crop";
+              e.currentTarget.onerror = null;
+            }
+          }}
+        />
+      ))}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/5 to-transparent" />
+
+      {/* Three phones scattered across the scene, each on its own cadence */}
+      <div className="absolute left-[8%] bottom-[10%] rotate-[-6deg]">
+        <PhoneMockup offsetMs={0} />
+      </div>
+      <div className="absolute left-[42%] bottom-[18%] rotate-[3deg] scale-110">
+        <PhoneMockup offsetMs={650} />
+      </div>
+      <div className="absolute right-[8%] bottom-[14%] rotate-[7deg]">
+        <PhoneMockup offsetMs={1300} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export default function Home() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [lang, setLang] = useState<Lang>("rw");
+
+  const t = copy[lang];
+
+  const navLinks = [
+    { name: t.nav.about, href: "#about" },
+    { name: t.nav.how, href: "#how-it-works" },
+    { name: t.nav.getStarted, href: "#get-started" },
+    { name: t.nav.contact, href: "#contact" },
+    { name: t.nav.privacy, href: "#privacy" },
+  ];
 
   useEffect(() => {
     const handleScroll = () => {
@@ -107,8 +524,8 @@ export default function Home() {
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-8">
             {navLinks.map((link) => (
-              <a 
-                key={link.name} 
+              <a
+                key={link.name}
                 href={link.href}
                 onClick={(e) => scrollToSection(e, link.href)}
                 className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors"
@@ -121,18 +538,22 @@ export default function Home() {
               className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-primary transition-colors border border-border rounded-md px-3 py-1.5"
               data-testid="link-admin"
             >
-              <LockKeyhole size={14} /> Admin
+              <LockKeyhole size={14} /> {t.nav.admin}
             </Link>
+            <LanguageSelector lang={lang} setLang={setLang} />
           </nav>
 
-          {/* Mobile Menu Toggle */}
-          <button 
-            className="md:hidden p-2 text-foreground"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            aria-label="Toggle menu"
-          >
-            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
+          {/* Mobile: language selector + menu toggle */}
+          <div className="flex items-center gap-2 md:hidden">
+            <LanguageSelector lang={lang} setLang={setLang} />
+            <button
+              className="p-2 text-foreground"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label="Toggle menu"
+            >
+              {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -141,8 +562,8 @@ export default function Home() {
         <div className="fixed inset-0 z-40 bg-background pt-20 px-4 md:hidden">
           <nav className="flex flex-col gap-6 p-4">
             {navLinks.map((link) => (
-              <a 
-                key={link.name} 
+              <a
+                key={link.name}
                 href={link.href}
                 onClick={(e) => scrollToSection(e, link.href)}
                 className="text-lg font-medium text-foreground py-2 border-b border-border/50"
@@ -154,7 +575,7 @@ export default function Home() {
               href="/admin"
               className="flex items-center gap-2 text-lg font-medium text-foreground py-2 border-b border-border/50"
             >
-              <LockKeyhole size={18} /> Admin
+              <LockKeyhole size={18} /> {t.nav.admin}
             </Link>
           </nav>
         </div>
@@ -166,38 +587,30 @@ export default function Home() {
           <div className="container mx-auto max-w-6xl grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-6 md:space-y-8 animate-in slide-in-from-bottom-8 duration-700 fade-in">
               <h1 className="text-4xl md:text-5xl lg:text-6xl font-display font-bold leading-[1.1] text-foreground">
-                Manage customer debts through WhatsApp.
+                {t.hero.title}
               </h1>
               <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-xl">
-                Shop Brain builds messaging-based business management tools that help small and informal shop owners in Rwanda track debts, send payment reminders, and manage customer relationships — accessible directly through WhatsApp.
+                {t.hero.body}
               </p>
               <div className="flex flex-wrap items-center gap-4 pt-4">
-                <a 
-                  href="#get-started" 
+                <a
+                  href="#get-started"
                   onClick={(e) => scrollToSection(e, "#get-started")}
                   className="inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-md font-medium hover:bg-primary/90 transition-colors shadow-sm"
                 >
-                  Get Started <ArrowRight size={18} />
+                  {t.hero.cta} <ArrowRight size={18} />
                 </a>
-                <a 
+                <a
                   href="#about"
                   onClick={(e) => scrollToSection(e, "#about")}
                   className="inline-flex items-center justify-center px-6 py-3 rounded-md font-medium text-foreground hover:bg-muted transition-colors border border-border"
                 >
-                  Learn More
+                  {t.hero.learnMore}
                 </a>
               </div>
             </div>
-            <div className="relative rounded-2xl overflow-hidden shadow-2xl aspect-[4/3] bg-muted animate-in slide-in-from-right-8 duration-700 fade-in delay-200">
-              <img 
-                src={`${import.meta.env.BASE_URL}images/shop-hero.jpg`} 
-                alt="Practical business management"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.src = "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?q=80&w=1000&auto=format&fit=crop";
-                }}
-              />
-              <div className="absolute inset-0 bg-primary/10 mix-blend-multiply"></div>
+            <div className="animate-in slide-in-from-right-8 duration-700 fade-in delay-200">
+              <AnimatedHero />
             </div>
           </div>
         </section>
@@ -206,11 +619,9 @@ export default function Home() {
         <section id="get-started" className="py-20 md:py-28 bg-card px-4 md:px-6 border-y border-border">
           <div className="container mx-auto max-w-5xl">
             <Reveal className="max-w-2xl mx-auto text-center mb-12">
-              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">Get Started</h2>
-              <h3 className="text-3xl md:text-4xl font-display font-bold mb-4">Scan to chat, or scan to learn more.</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed">
-                No app to install. Choose one below to get going in seconds.
-              </p>
+              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">{t.getStarted.eyebrow}</h2>
+              <h3 className="text-3xl md:text-4xl font-display font-bold mb-4">{t.getStarted.title}</h3>
+              <p className="text-lg text-muted-foreground leading-relaxed">{t.getStarted.body}</p>
             </Reveal>
 
             <Reveal className="max-w-sm mx-auto" delay={150}>
@@ -225,11 +636,9 @@ export default function Home() {
                 </div>
                 <div className="flex items-center gap-2 text-primary font-bold mb-2">
                   <MessageCircle size={20} />
-                  <span>Scan to chat with Shop Brain</span>
+                  <span>{t.getStarted.scanTitle}</span>
                 </div>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Opens a WhatsApp chat with our team directly.
-                </p>
+                <p className="text-sm text-muted-foreground mb-4">{t.getStarted.scanBody}</p>
                 <a
                   href={`https://wa.me/${WHATSAPP_BUSINESS_NUMBER}`}
                   target="_blank"
@@ -248,37 +657,35 @@ export default function Home() {
         <section id="about" className="py-20 md:py-32 px-4 md:px-6">
           <div className="container mx-auto max-w-6xl">
             <Reveal className="max-w-3xl mb-16">
-              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">About Shop Brain</h2>
-              <h3 className="text-3xl md:text-4xl font-display font-bold mb-6">A practical tool for real businesses.</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed">
-                Shop Brain is a WhatsApp-based debt tracking tool designed specifically for small shop owners. We understand that running a business is demanding, so we built a solution that fits seamlessly into your daily routine. It works in both English and Kinyarwanda.
-              </p>
+              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">{t.about.eyebrow}</h2>
+              <h3 className="text-3xl md:text-4xl font-display font-bold mb-6">{t.about.title}</h3>
+              <p className="text-lg text-muted-foreground leading-relaxed">{t.about.body}</p>
             </Reveal>
 
             <div id="how-it-works" className="mt-12">
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {[
-                  { icon: MessageCircle, step: "1", title: "Text the Bot", desc: "Message Shop Brain on WhatsApp like you would any contact — no install, no login." },
-                  { icon: ClipboardList, step: "2", title: "Add Customer Debt", desc: "Record what a customer owes in seconds, right inside the chat." },
-                  { icon: Bell, step: "3", title: "Bot Sends Reminder", desc: "Shop Brain follows up automatically, in English or Kinyarwanda." },
-                  { icon: CheckCircle2, step: "4", title: "Customer Pays", desc: "Mark the debt as paid and your balance updates instantly." },
-                ].map((item, idx) => (
-                  <Reveal key={item.step} delay={idx * 120}>
-                    <div className="relative bg-card p-6 rounded-xl border border-border shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 h-full">
-                      <span className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shadow-sm">
-                        {item.step}
-                      </span>
-                      <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-5">
-                        <item.icon size={22} />
+                {[ClipboardList, Bell, CheckCircle2, MessageCircle].map(() => null)}
+                {t.steps.map((item, idx) => {
+                  const icons = [MessageCircle, ClipboardList, Bell, CheckCircle2];
+                  const Icon = icons[idx];
+                  return (
+                    <Reveal key={item.title} delay={idx * 120}>
+                      <div className="relative bg-card p-6 rounded-xl border border-border shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 h-full">
+                        <span className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shadow-sm">
+                          {idx + 1}
+                        </span>
+                        <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-5">
+                          <Icon size={22} />
+                        </div>
+                        <h4 className="text-lg font-bold mb-2 font-display">{item.title}</h4>
+                        <p className="text-muted-foreground leading-relaxed text-sm">{item.desc}</p>
+                        {idx < 3 && (
+                          <ArrowRight className="hidden lg:block absolute top-1/2 -right-4 -translate-y-1/2 text-border" size={20} />
+                        )}
                       </div>
-                      <h4 className="text-lg font-bold mb-2 font-display">{item.title}</h4>
-                      <p className="text-muted-foreground leading-relaxed text-sm">{item.desc}</p>
-                      {idx < 3 && (
-                        <ArrowRight className="hidden lg:block absolute top-1/2 -right-4 -translate-y-1/2 text-border" size={20} />
-                      )}
-                    </div>
-                  </Reveal>
-                ))}
+                    </Reveal>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -288,11 +695,9 @@ export default function Home() {
         <section id="contact" className="py-20 md:py-32 bg-card px-4 md:px-6 border-y border-border">
           <div className="container mx-auto max-w-6xl grid md:grid-cols-2 gap-16 items-center">
             <Reveal>
-              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">Get in Touch</h2>
-              <h3 className="text-3xl md:text-4xl font-display font-bold mb-6">We're here to help you grow.</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed mb-10">
-                Whether you have questions about setting up Shop Brain for your store, or need support with your account, our team is ready to assist you.
-              </p>
+              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">{t.contact.eyebrow}</h2>
+              <h3 className="text-3xl md:text-4xl font-display font-bold mb-6">{t.contact.title}</h3>
+              <p className="text-lg text-muted-foreground leading-relaxed mb-10">{t.contact.body}</p>
 
               <div className="space-y-8">
                 <div className="flex items-start gap-4">
@@ -300,9 +705,9 @@ export default function Home() {
                     <Phone size={24} />
                   </div>
                   <div>
-                    <h5 className="font-bold text-lg">Questions? Message us directly</h5>
+                    <h5 className="font-bold text-lg">{t.contact.questions}</h5>
                     <p className="text-muted-foreground mt-1 text-lg">+250 799 627 713</p>
-                    <p className="text-sm text-muted-foreground mt-1">For support and questions — not the ShopBrain bot itself.</p>
+                    <p className="text-sm text-muted-foreground mt-1">{t.contact.questionsNote}</p>
                   </div>
                 </div>
 
@@ -311,7 +716,7 @@ export default function Home() {
                     <Mail size={24} />
                   </div>
                   <div>
-                    <h5 className="font-bold text-lg">Email</h5>
+                    <h5 className="font-bold text-lg">{t.contact.email}</h5>
                     <p className="text-muted-foreground mt-1 text-lg break-all">Ndayiragijesamuelprince@gmail.com</p>
                   </div>
                 </div>
@@ -321,7 +726,7 @@ export default function Home() {
                     <MapPin size={24} />
                   </div>
                   <div>
-                    <h5 className="font-bold text-lg">Address</h5>
+                    <h5 className="font-bold text-lg">{t.contact.address}</h5>
                     <p className="text-muted-foreground mt-1 text-lg">Kigese, Ruyenzi, Southern 0000, Rwanda</p>
                   </div>
                 </div>
@@ -329,9 +734,9 @@ export default function Home() {
             </Reveal>
 
             <Reveal delay={150} className="bg-background p-8 md:p-10 rounded-2xl border border-border shadow-xl">
-              <h4 className="text-xl font-bold font-display mb-1">Request Access</h4>
-              <p className="text-sm text-muted-foreground mb-6">Submit your details and we'll open a WhatsApp chat pre-filled with your request.</p>
-              <RequestAccessForm />
+              <h4 className="text-xl font-bold font-display mb-1">{t.form.title}</h4>
+              <p className="text-sm text-muted-foreground mb-6">{t.form.body}</p>
+              <RequestAccessForm t={t.form} businessTypes={t.businessTypes} />
             </Reveal>
           </div>
         </section>
@@ -340,7 +745,7 @@ export default function Home() {
         <section id="privacy" className="py-20 bg-muted px-4 md:px-6">
           <Reveal className="container mx-auto max-w-4xl bg-card p-8 md:p-12 rounded-2xl border border-border shadow-sm">
             <h2 className="text-2xl md:text-3xl font-display font-bold mb-8 text-foreground flex items-center gap-3">
-              <Shield className="text-primary" /> Privacy Policy
+              <Shield className="text-primary" /> {t.privacy.title}
             </h2>
             <div className="space-y-6 text-muted-foreground leading-relaxed">
               <p>Shop Brain Ltd collects WhatsApp phone numbers and customer debt records on behalf of shop owners.</p>
@@ -366,9 +771,7 @@ export default function Home() {
               <div className="text-2xl font-bold font-display tracking-tight text-white mb-3">
                 Shop Brain
               </div>
-              <p className="text-background/60 leading-relaxed max-w-sm mb-6">
-                A WhatsApp-based debt tracking tool built for small shop owners in Rwanda. No app to install — just message and go.
-              </p>
+              <p className="text-background/60 leading-relaxed max-w-sm mb-6">{t.footer.tagline}</p>
               <div className="flex items-center gap-3">
                 <a
                   href={INSTAGRAM_URL}
@@ -395,7 +798,7 @@ export default function Home() {
 
             {/* Quick links */}
             <div>
-              <h6 className="text-sm font-bold uppercase tracking-wider text-background/50 mb-4">Explore</h6>
+              <h6 className="text-sm font-bold uppercase tracking-wider text-background/50 mb-4">{t.footer.explore}</h6>
               <ul className="space-y-3">
                 {navLinks.map((link) => (
                   <li key={link.name}>
@@ -413,7 +816,7 @@ export default function Home() {
 
             {/* Contact */}
             <div>
-              <h6 className="text-sm font-bold uppercase tracking-wider text-background/50 mb-4">Contact</h6>
+              <h6 className="text-sm font-bold uppercase tracking-wider text-background/50 mb-4">{t.footer.contactHeading}</h6>
               <ul className="space-y-3 text-background/70">
                 <li>
                   <a href={`https://wa.me/${SUPPORT_NUMBER}`} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors break-all">
@@ -434,9 +837,7 @@ export default function Home() {
             <p className="text-background/50 text-sm">
               © {new Date().getFullYear()} Shop Brain Ltd — Registered in Rwanda.
             </p>
-            <p className="text-background/50 text-sm">
-              Built in Kigali 🇷🇼
-            </p>
+            <p className="text-background/50 text-sm">{t.footer.builtIn}</p>
           </div>
         </div>
       </footer>
@@ -444,7 +845,7 @@ export default function Home() {
   );
 }
 
-function RequestAccessForm() {
+function RequestAccessForm({ t, businessTypes }: { t: typeof copy["en"]["form"]; businessTypes: string[] }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [businessType, setBusinessType] = useState(businessTypes[0]);
@@ -470,7 +871,7 @@ function RequestAccessForm() {
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
       <div className="space-y-2">
-        <label htmlFor="name" className="text-sm font-medium">Full Name</label>
+        <label htmlFor="name" className="text-sm font-medium">{t.name}</label>
         <input
           type="text"
           id="name"
@@ -478,12 +879,12 @@ function RequestAccessForm() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-          placeholder="Your name"
+          placeholder={t.namePh}
           data-testid="input-request-name"
         />
       </div>
       <div className="space-y-2">
-        <label htmlFor="phone" className="text-sm font-medium">Phone Number</label>
+        <label htmlFor="phone" className="text-sm font-medium">{t.phone}</label>
         <input
           type="tel"
           id="phone"
@@ -491,12 +892,12 @@ function RequestAccessForm() {
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
           className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-          placeholder="Your WhatsApp number"
+          placeholder={t.phonePh}
           data-testid="input-request-phone"
         />
       </div>
       <div className="space-y-2">
-        <label htmlFor="business-type" className="text-sm font-medium">Business Type</label>
+        <label htmlFor="business-type" className="text-sm font-medium">{t.type}</label>
         <select
           id="business-type"
           value={businessType}
@@ -510,14 +911,14 @@ function RequestAccessForm() {
         </select>
       </div>
       <div className="space-y-2">
-        <label htmlFor="message" className="text-sm font-medium">Message (optional)</label>
+        <label htmlFor="message" className="text-sm font-medium">{t.message}</label>
         <textarea
           id="message"
           rows={4}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow resize-none"
-          placeholder="Anything else we should know?"
+          placeholder={t.messagePh}
           data-testid="input-request-message"
         ></textarea>
       </div>
@@ -526,7 +927,7 @@ function RequestAccessForm() {
         className="w-full inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-md font-bold text-lg hover:bg-primary/90 transition-colors shadow-sm"
         data-testid="button-request-access"
       >
-        <MessageCircle size={20} /> Send via WhatsApp
+        <MessageCircle size={20} /> {t.submit}
       </button>
     </form>
   );
