@@ -8,9 +8,27 @@ const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // no + or leading zero, used f
 
 // Sam's personal/support line — shown separately (footer/contact) for
 // anyone who has questions or gets confused before/after messaging the bot.
+//
+// ⚠️ CHECK THIS: the old file linked to 250795120043 but *displayed*
+// +250 799 627 713 in the contact section and footer. They are different
+// numbers. Set the correct one here — the display text is now derived from
+// this constant, so the link and the visible number can never drift apart.
 const SUPPORT_NUMBER = "250795120043";
 
 const INSTAGRAM_URL = "https://www.instagram.com/shopbrain_kigali";
+
+const CONTACT_EMAIL = "Ndayiragijesamuelprince@gmail.com";
+const CONTACT_ADDRESS = "Kigese, Ruyenzi, Southern 0000, Rwanda";
+const CONTACT_ADDRESS_SHORT = "Kigese, Ruyenzi, Rwanda";
+
+// Turns "250795120043" into "+250 795 120 043" so the number shown on the
+// page is always the number the wa.me link actually opens.
+function formatRwandaNumber(digits: string): string {
+  const m = digits.match(/^(\d{3})(\d{3})(\d{3})(\d{3})$/);
+  return m ? `+${m[1]} ${m[2]} ${m[3]} ${m[4]}` : `+${digits}`;
+}
+
+const SUPPORT_NUMBER_DISPLAY = formatRwandaNumber(SUPPORT_NUMBER);
 
 // ---------------------------------------------------------------------------
 // Language
@@ -304,174 +322,51 @@ function LanguageSelector({ lang, setLang }: { lang: Lang; setLang: (l: Lang) =>
 }
 
 // ---------------------------------------------------------------------------
-// Animated hero phones
+// Full-bleed hero background
 // ---------------------------------------------------------------------------
 
-// Three illustrated WhatsApp-style "screens" that cycle inside each phone
-// frame. Each phone runs its own timer, offset slightly from the others, so
-// they don't all flip in perfect unison — closer to how three separate
-// people would actually be using their phones.
-const PHONE_SCREENS = [
-  {
-    label: "reminder",
-    render: () => (
-      <div className="flex flex-col gap-1.5 p-2.5 h-full bg-[#0b141a]">
-        <div className="self-start max-w-[85%] bg-[#202c33] text-[8px] leading-snug text-white/90 rounded-lg rounded-tl-none px-2 py-1.5">
-          Muraho! Ufite umwenda wa 4,000 Frw. Wabasha kwishyura ryari?
-        </div>
-        <div className="self-end max-w-[70%] bg-[#005c4b] text-[8px] leading-snug text-white/90 rounded-lg rounded-tr-none px-2 py-1.5">
-          Ejo bundi 👍
-        </div>
-      </div>
-    ),
-  },
-  {
-    label: "add-debt",
-    render: () => (
-      <div className="flex flex-col gap-1.5 p-2.5 h-full bg-[#0b141a]">
-        <div className="self-start max-w-[80%] bg-[#202c33] rounded-lg rounded-tl-none px-2 py-1.5 flex flex-col gap-1">
-          <span className="text-[7px] font-semibold text-emerald-400">Add Debt</span>
-          <span className="text-[8px] text-white/90">Amount?</span>
-        </div>
-        <div className="self-end max-w-[60%] bg-[#005c4b] text-[8px] text-white/90 rounded-lg rounded-tr-none px-2 py-1.5">
-          5,000 Frw
-        </div>
-        <div className="self-start max-w-[75%] bg-[#202c33] text-[8px] text-emerald-400 rounded-lg rounded-tl-none px-2 py-1.5 flex items-center gap-1">
-          <CheckCircle2 size={8} /> Saved
-        </div>
-      </div>
-    ),
-  },
-  {
-    label: "paid",
-    render: () => (
-      <div className="flex flex-col gap-1.5 p-2.5 h-full bg-[#0b141a]">
-        <div className="self-start max-w-[85%] bg-[#202c33] text-[8px] leading-snug text-white/90 rounded-lg rounded-tl-none px-2 py-1.5 flex items-center gap-1">
-          ✅ Kelly Kennedy has received the reminder
-        </div>
-        <div className="self-start max-w-[80%] bg-[#202c33] text-[8px] leading-snug text-emerald-400 rounded-lg rounded-tl-none px-2 py-1.5">
-          🎉 Paid in full — 4,000 Frw
-        </div>
-      </div>
-    ),
-  },
-];
-
-function PhoneMockup({ offsetMs = 0, className = "" }: { offsetMs?: number; className?: string }) {
-  const [screenIdx, setScreenIdx] = useState(0);
-
-  useEffect(() => {
-    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (prefersReduced) return;
-    const start = setTimeout(() => {
-      const interval = setInterval(() => {
-        setScreenIdx((i) => (i + 1) % PHONE_SCREENS.length);
-      }, 2000);
-      (start as unknown as { _interval?: number })._interval = interval as unknown as number;
-    }, offsetMs);
-    return () => clearTimeout(start);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Separate stable interval (offset handled via initial delay above only
-  // affects phase, not cleanup correctness).
-  useEffect(() => {
-    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (prefersReduced) return;
-    const id = setInterval(() => {
-      setScreenIdx((i) => (i + 1) % PHONE_SCREENS.length);
-    }, 2000);
-    return () => clearInterval(id);
-  }, []);
-
-  return (
-    <div className={`relative w-[92px] sm:w-[110px] aspect-[9/19] rounded-[14px] border-[3px] border-black/80 bg-black shadow-2xl overflow-hidden ${className}`}>
-      <div className="absolute top-1 left-1/2 -translate-x-1/2 w-6 h-1.5 bg-black rounded-full z-10" />
-      <div className="w-full h-full relative">
-        {PHONE_SCREENS.map((screen, i) => (
-          <div
-            key={screen.label}
-            className={`absolute inset-0 transition-opacity duration-500 ${i === screenIdx ? "opacity-100" : "opacity-0"}`}
-          >
-            {screen.render()}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Background photos for the hero. Drop as many real photos as you have into
-// images/ under these names (or add more entries here) — they'll crossfade
-// through in order, looping. With just one image this simply displays it,
-// no fade needed.
-const HERO_IMAGES = [
-  "shop-hero.jpg",
-  "shop-hero-2.jpg",
-  "shop-hero-3.jpg",
-];
-
+// Background photos for the hero.
+//
+// These live in website/public/images/, which Vite copies to the site root
+// as-is. Files in public/ are NOT modules — importing them (the old
+// `import heroImage1 from "@assets/images/shop-hero.jpg"` lines) fails the
+// build because the path resolves to nothing. Reference them by URL instead,
+// exactly like the QR code below does.
+//
+// To add a photo: drop the file in website/public/images/ and add its
+// filename to this array.
+const HERO_IMAGE_FILES = ["shop-hero.jpg", "shop-hero-2.jpg", "shop-hero-3.jpg"];
+const HERO_IMAGES = HERO_IMAGE_FILES.map((f) => `${import.meta.env.BASE_URL}images/${f}`);
 const HERO_IMAGE_DURATION_MS = 5000;
 
-function AnimatedHero() {
+// Crossfading full-bleed background used behind the hero's text. Renders as
+// a stack of absolutely-positioned divs with a CSS background-image (same
+// technique as a standard full-bleed hero), each fading in/out in turn.
+function HeroBackground() {
   const [imgIdx, setImgIdx] = useState(0);
-  const [loadedFlags, setLoadedFlags] = useState<boolean[]>(() => HERO_IMAGES.map(() => true));
 
   useEffect(() => {
     const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (prefersReduced) return;
-    // Only cycle between images that actually loaded successfully.
+    if (prefersReduced || HERO_IMAGES.length <= 1) return;
     const id = setInterval(() => {
-      setImgIdx((i) => {
-        const available = HERO_IMAGES.map((_, idx) => idx).filter((idx) => loadedFlags[idx]);
-        if (available.length <= 1) return i;
-        const currentPos = available.indexOf(i);
-        const nextPos = (currentPos + 1) % available.length;
-        return available[nextPos];
-      });
+      setImgIdx((i) => (i + 1) % HERO_IMAGES.length);
     }, HERO_IMAGE_DURATION_MS);
     return () => clearInterval(id);
-  }, [loadedFlags]);
-
-  const markFailed = (idx: number) => {
-    setLoadedFlags((flags) => {
-      if (!flags[idx]) return flags;
-      const next = [...flags];
-      next[idx] = false;
-      return next;
-    });
-  };
+  }, []);
 
   return (
-    <div className="relative rounded-2xl overflow-hidden shadow-2xl aspect-[4/3] bg-muted">
-      {HERO_IMAGES.map((filename, idx) => (
-        <img
-          key={filename}
-          src={`${import.meta.env.BASE_URL}images/${filename}`}
-          alt="Shop owners in Kigali using Shop Brain on WhatsApp"
-          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${idx === imgIdx && loadedFlags[idx] ? "opacity-100" : "opacity-0"}`}
-          onError={(e) => {
-            markFailed(idx);
-            if (idx === 0) {
-              e.currentTarget.src = "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?q=80&w=1200&auto=format&fit=crop";
-              e.currentTarget.onerror = null;
-            }
-          }}
+    <>
+      {HERO_IMAGES.map((src, idx) => (
+        <div
+          key={src}
+          aria-hidden={idx !== imgIdx}
+          className={`absolute inset-0 -z-10 bg-cover bg-center bg-no-repeat transition-opacity duration-1000 ${idx === imgIdx ? "opacity-100" : "opacity-0"}`}
+          style={{ backgroundImage: `url('${src}')` }}
         />
       ))}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/5 to-transparent" />
-
-      {/* Three phones scattered across the scene, each on its own cadence */}
-      <div className="absolute left-[8%] bottom-[10%] rotate-[-6deg]">
-        <PhoneMockup offsetMs={0} />
-      </div>
-      <div className="absolute left-[42%] bottom-[18%] rotate-[3deg] scale-110">
-        <PhoneMockup offsetMs={650} />
-      </div>
-      <div className="absolute right-[8%] bottom-[14%] rotate-[7deg]">
-        <PhoneMockup offsetMs={1300} />
-      </div>
-    </div>
+      {/* Dark overlay for text contrast, sits above the photos but below content */}
+      <div className="absolute inset-0 -z-10 bg-gray-950/70" />
+    </>
   );
 }
 
@@ -582,14 +477,16 @@ export default function Home() {
       )}
 
       <main className="flex-1">
-        {/* Hero Section */}
-        <section id="hero" className="pt-32 pb-16 md:pt-40 md:pb-24 px-4 md:px-6">
-          <div className="container mx-auto max-w-6xl grid lg:grid-cols-2 gap-12 items-center">
-            <div className="space-y-6 md:space-y-8 animate-in slide-in-from-bottom-8 duration-700 fade-in">
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-display font-bold leading-[1.1] text-foreground">
+        {/* Hero Section — full-bleed background photo, text overlaid on top */}
+        <section id="hero" className="relative w-full min-h-screen flex items-center overflow-hidden">
+          <HeroBackground />
+
+          <div className="relative z-10 w-full pt-28 md:pt-16 pb-16 px-4 md:px-6">
+            <div className="container mx-auto max-w-6xl space-y-8 animate-in slide-in-from-bottom-8 duration-700 fade-in">
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-display font-bold leading-[1.1] text-white max-w-3xl">
                 {t.hero.title}
               </h1>
-              <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-xl">
+              <p className="text-lg md:text-xl text-white/90 leading-relaxed max-w-2xl">
                 {t.hero.body}
               </p>
               <div className="flex flex-wrap items-center gap-4 pt-4">
@@ -603,14 +500,11 @@ export default function Home() {
                 <a
                   href="#about"
                   onClick={(e) => scrollToSection(e, "#about")}
-                  className="inline-flex items-center justify-center px-6 py-3 rounded-md font-medium text-foreground hover:bg-muted transition-colors border border-border"
+                  className="inline-flex items-center justify-center px-6 py-3 rounded-md font-medium text-white hover:bg-white/10 transition-colors border border-white/30"
                 >
                   {t.hero.learnMore}
                 </a>
               </div>
-            </div>
-            <div className="animate-in slide-in-from-right-8 duration-700 fade-in delay-200">
-              <AnimatedHero />
             </div>
           </div>
         </section>
@@ -664,7 +558,6 @@ export default function Home() {
 
             <div id="how-it-works" className="mt-12">
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {[ClipboardList, Bell, CheckCircle2, MessageCircle].map(() => null)}
                 {t.steps.map((item, idx) => {
                   const icons = [MessageCircle, ClipboardList, Bell, CheckCircle2];
                   const Icon = icons[idx];
@@ -706,7 +599,15 @@ export default function Home() {
                   </div>
                   <div>
                     <h5 className="font-bold text-lg">{t.contact.questions}</h5>
-                    <p className="text-muted-foreground mt-1 text-lg">+250 799 627 713</p>
+                    <a
+                      href={`https://wa.me/${SUPPORT_NUMBER}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-muted-foreground hover:text-primary transition-colors mt-1 text-lg"
+                      data-testid="link-contact-whatsapp"
+                    >
+                      {SUPPORT_NUMBER_DISPLAY}
+                    </a>
                     <p className="text-sm text-muted-foreground mt-1">{t.contact.questionsNote}</p>
                   </div>
                 </div>
@@ -717,7 +618,12 @@ export default function Home() {
                   </div>
                   <div>
                     <h5 className="font-bold text-lg">{t.contact.email}</h5>
-                    <p className="text-muted-foreground mt-1 text-lg break-all">Ndayiragijesamuelprince@gmail.com</p>
+                    <a
+                      href={`mailto:${CONTACT_EMAIL}`}
+                      className="block text-muted-foreground hover:text-primary transition-colors mt-1 text-lg break-all"
+                    >
+                      {CONTACT_EMAIL}
+                    </a>
                   </div>
                 </div>
 
@@ -727,7 +633,7 @@ export default function Home() {
                   </div>
                   <div>
                     <h5 className="font-bold text-lg">{t.contact.address}</h5>
-                    <p className="text-muted-foreground mt-1 text-lg">Kigese, Ruyenzi, Southern 0000, Rwanda</p>
+                    <p className="text-muted-foreground mt-1 text-lg">{CONTACT_ADDRESS}</p>
                   </div>
                 </div>
               </div>
@@ -755,7 +661,7 @@ export default function Home() {
               <p>WhatsApp messages sent to Shop Brain are processed to extract commands (e.g. ADD, PAID, customer lookup) and are not stored beyond what is needed to fulfil the request.</p>
               <div className="mt-8 p-6 bg-background rounded-xl border border-border">
                 <p className="font-medium text-foreground mb-2">For data deletion requests, contact:</p>
-                <a href="mailto:Ndayiragijesamuelprince@gmail.com" className="text-primary hover:underline font-medium text-lg break-all">Ndayiragijesamuelprince@gmail.com</a>
+                <a href={`mailto:${CONTACT_EMAIL}`} className="text-primary hover:underline font-medium text-lg break-all">{CONTACT_EMAIL}</a>
               </div>
             </div>
           </Reveal>
@@ -820,15 +726,15 @@ export default function Home() {
               <ul className="space-y-3 text-background/70">
                 <li>
                   <a href={`https://wa.me/${SUPPORT_NUMBER}`} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors break-all">
-                    +250 799 627 713
+                    {SUPPORT_NUMBER_DISPLAY}
                   </a>
                 </li>
                 <li>
-                  <a href="mailto:Ndayiragijesamuelprince@gmail.com" className="hover:text-white transition-colors break-all">
-                    Ndayiragijesamuelprince@gmail.com
+                  <a href={`mailto:${CONTACT_EMAIL}`} className="hover:text-white transition-colors break-all">
+                    {CONTACT_EMAIL}
                   </a>
                 </li>
-                <li className="text-background/60">Kigese, Ruyenzi, Rwanda</li>
+                <li className="text-background/60">{CONTACT_ADDRESS_SHORT}</li>
               </ul>
             </div>
           </div>
@@ -850,6 +756,13 @@ function RequestAccessForm({ t, businessTypes }: { t: typeof copy["en"]["form"];
   const [phone, setPhone] = useState("");
   const [businessType, setBusinessType] = useState(businessTypes[0]);
   const [message, setMessage] = useState("");
+
+  // Business types are translated, so the selected value becomes stale when
+  // the visitor switches language mid-form. Reset to the first option of the
+  // new list so we never submit a label from the previous language.
+  useEffect(() => {
+    setBusinessType(businessTypes[0]);
+  }, [businessTypes]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
