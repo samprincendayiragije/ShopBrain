@@ -360,12 +360,16 @@ function HeroBackground() {
         <div
           key={src}
           aria-hidden={idx !== imgIdx}
-          className={`absolute inset-0 -z-10 bg-cover bg-center bg-no-repeat transition-opacity duration-1000 ${idx === imgIdx ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transition-opacity duration-1000 ${idx === imgIdx ? "opacity-100" : "opacity-0"}`}
           style={{ backgroundImage: `url('${src}')` }}
         />
       ))}
-      {/* Dark overlay for text contrast, sits above the photos but below content */}
-      <div className="absolute inset-0 -z-10 bg-gray-950/70" />
+      {/* Dark overlay for text contrast, sits above the photos but below content.
+          Using z-0 (not -z-10): the hero <section> below has no z-index of its
+          own, so a negative z-index here escapes past it and renders behind
+          the page's opaque background instead of behind just the hero text —
+          that's what was causing the white-on-white "blank" hero. */}
+      <div className="absolute inset-0 z-0 bg-gray-950/70" />
     </>
   );
 }
@@ -478,7 +482,7 @@ export default function Home() {
 
       <main className="flex-1">
         {/* Hero Section — full-bleed background photo, text overlaid on top */}
-        <section id="hero" className="relative w-full min-h-screen flex items-center overflow-hidden">
+        <section id="hero" className="relative w-full min-h-screen flex items-center overflow-hidden bg-gray-950">
           <HeroBackground />
 
           <div className="relative z-10 w-full pt-28 md:pt-16 pb-16 px-4 md:px-6">
