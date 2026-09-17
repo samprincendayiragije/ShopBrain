@@ -13,7 +13,7 @@ const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // no + or leading zero, used f
 // +250 799 627 713 in the contact section and footer. They are different
 // numbers. Set the correct one here — the display text is now derived from
 // this constant, so the link and the visible number can never drift apart.
-const SUPPORT_NUMBER = "250795120043";
+const SUPPORT_NUMBER = "250799627713";
 
 const INSTAGRAM_URL = "https://www.instagram.com/shopbrain_kigali";
 
