@@ -733,8 +733,10 @@ export default function Home() {
         </section>
       </main>
 
-      {/* Footer */}
-      <footer className="bg-foreground text-background pt-16 pb-8 px-4 md:px-6">
+      {/* Footer — hardcoded pitch-black regardless of light/dark theme,
+          rather than bg-foreground/text-background, since those CSS
+          variables don't reliably resolve to black/white on this site. */}
+      <footer className="bg-black text-white pt-16 pb-8 px-4 md:px-6">
         <div className="container mx-auto max-w-6xl">
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-10 pb-12 border-b border-white/10">
             {/* Brand */}
@@ -742,7 +744,7 @@ export default function Home() {
               <div className="text-2xl font-bold font-display tracking-tight text-white mb-3">
                 Shop Brain
               </div>
-              <p className="text-background/60 leading-relaxed max-w-sm mb-6">{t.footer.tagline}</p>
+              <p className="text-white/60 leading-relaxed max-w-sm mb-6">{t.footer.tagline}</p>
               <div className="flex items-center gap-3">
                 <a
                   href={INSTAGRAM_URL}
@@ -769,14 +771,14 @@ export default function Home() {
 
             {/* Quick links */}
             <div>
-              <h6 className="text-sm font-bold uppercase tracking-wider text-background/50 mb-4">{t.footer.explore}</h6>
+              <h6 className="text-sm font-bold uppercase tracking-wider text-white/50 mb-4">{t.footer.explore}</h6>
               <ul className="space-y-3">
                 {navLinks.map((link) => (
                   <li key={link.name}>
                     <a
                       href={link.href}
                       onClick={(e) => scrollToSection(e, link.href)}
-                      className="text-background/70 hover:text-white transition-colors"
+                      className="text-white/70 hover:text-white transition-colors"
                     >
                       {link.name}
                     </a>
@@ -787,8 +789,8 @@ export default function Home() {
 
             {/* Contact */}
             <div>
-              <h6 className="text-sm font-bold uppercase tracking-wider text-background/50 mb-4">{t.footer.contactHeading}</h6>
-              <ul className="space-y-3 text-background/70">
+              <h6 className="text-sm font-bold uppercase tracking-wider text-white/50 mb-4">{t.footer.contactHeading}</h6>
+              <ul className="space-y-3 text-white/70">
                 <li>
                   <a href={`https://wa.me/${SUPPORT_NUMBER}`} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors break-all">
                     {SUPPORT_NUMBER_DISPLAY}
@@ -799,16 +801,16 @@ export default function Home() {
                     {CONTACT_EMAIL}
                   </a>
                 </li>
-                <li className="text-background/60">{CONTACT_ADDRESS_SHORT}</li>
+                <li className="text-white/60">{CONTACT_ADDRESS_SHORT}</li>
               </ul>
             </div>
           </div>
 
           <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-background/50 text-sm">
+            <p className="text-white/50 text-sm">
               © {new Date().getFullYear()} Shop Brain Ltd — Registered in Rwanda.
             </p>
-            <p className="text-background/50 text-sm">{t.footer.builtIn}</p>
+            <p className="text-white/50 text-sm">{t.footer.builtIn}</p>
           </div>
         </div>
       </footer>
