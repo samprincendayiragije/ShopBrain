@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Menu, X, ArrowRight, Shield, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole, Instagram, ChevronDown, Check } from "lucide-react";
+import { Menu, X, ArrowRight, Shield, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole, Instagram, ChevronDown, Check, Sun, Moon } from "lucide-react";
 
 // The bot number — this is what the QR code and Get Started button send
 // people to, since that's the actual ShopBrain system.
@@ -29,6 +29,52 @@ function formatRwandaNumber(digits: string): string {
 }
 
 const SUPPORT_NUMBER_DISPLAY = formatRwandaNumber(SUPPORT_NUMBER);
+
+// ---------------------------------------------------------------------------
+// Theme (light / dark)
+// ---------------------------------------------------------------------------
+
+type Theme = "light" | "dark";
+const THEME_STORAGE_KEY = "shopbrain-theme";
+
+function getInitialTheme(): Theme {
+  if (typeof window === "undefined") return "light";
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === "light" || stored === "dark") return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function useTheme() {
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("dark", theme === "dark");
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+
+  return { theme, toggleTheme };
+}
+
+function ThemeToggle({ theme, toggleTheme, isScrolled }: { theme: Theme; toggleTheme: () => void; isScrolled: boolean }) {
+  const isDark = theme === "dark";
+  return (
+    <button
+      onClick={toggleTheme}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className={`inline-flex items-center justify-center w-9 h-9 rounded-md border transition-colors ${
+        isScrolled
+          ? "border-border text-muted-foreground hover:text-primary hover:bg-muted"
+          : "border-white/40 text-white/90 hover:text-white hover:bg-white/10 drop-shadow-sm"
+      }`}
+      data-testid="button-theme-toggle"
+    >
+      {isDark ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Language
@@ -273,7 +319,7 @@ function Reveal({ children, className = "", delay = 0 }: { children: React.React
 // Language selector
 // ---------------------------------------------------------------------------
 
-function LanguageSelector({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
+function LanguageSelector({ lang, setLang, isScrolled }: { lang: Lang; setLang: (l: Lang) => void; isScrolled: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const current = LANGUAGES.find((l) => l.code === lang)!;
@@ -290,7 +336,11 @@ function LanguageSelector({ lang, setLang }: { lang: Lang; setLang: (l: Lang) =>
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1.5 rounded-md border border-border hover:bg-muted transition-colors"
+        className={`inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1.5 rounded-md border transition-colors ${
+          isScrolled
+            ? "border-border hover:bg-muted"
+            : "border-white/40 text-white/90 hover:text-white hover:bg-white/10 drop-shadow-sm"
+        }`}
         aria-label="Select language"
         data-testid="button-language-selector"
       >
@@ -382,6 +432,7 @@ export default function Home() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [lang, setLang] = useState<Lang>("rw");
+  const { theme, toggleTheme } = useTheme();
 
   const t = copy[lang];
 
@@ -427,26 +478,36 @@ export default function Home() {
                 key={link.name}
                 href={link.href}
                 onClick={(e) => scrollToSection(e, link.href)}
-                className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors"
+                className={`text-sm font-medium transition-colors ${
+                  isScrolled
+                    ? "text-muted-foreground hover:text-primary"
+                    : "text-white/90 hover:text-white drop-shadow-sm"
+                }`}
               >
                 {link.name}
               </a>
             ))}
             <Link
               href="/admin"
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-primary transition-colors border border-border rounded-md px-3 py-1.5"
+              className={`inline-flex items-center gap-1.5 text-sm font-medium rounded-md px-3 py-1.5 border transition-colors ${
+                isScrolled
+                  ? "text-muted-foreground hover:text-primary border-border"
+                  : "text-white/90 hover:text-white border-white/40 drop-shadow-sm"
+              }`}
               data-testid="link-admin"
             >
               <LockKeyhole size={14} /> {t.nav.admin}
             </Link>
-            <LanguageSelector lang={lang} setLang={setLang} />
+            <ThemeToggle theme={theme} toggleTheme={toggleTheme} isScrolled={isScrolled} />
+            <LanguageSelector lang={lang} setLang={setLang} isScrolled={isScrolled} />
           </nav>
 
-          {/* Mobile: language selector + menu toggle */}
+          {/* Mobile: theme toggle + language selector + menu toggle */}
           <div className="flex items-center gap-2 md:hidden">
-            <LanguageSelector lang={lang} setLang={setLang} />
+            <ThemeToggle theme={theme} toggleTheme={toggleTheme} isScrolled={isScrolled} />
+            <LanguageSelector lang={lang} setLang={setLang} isScrolled={isScrolled} />
             <button
-              className="p-2 text-foreground"
+              className={isScrolled ? "p-2 text-foreground" : "p-2 text-white drop-shadow-sm"}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label="Toggle menu"
             >
