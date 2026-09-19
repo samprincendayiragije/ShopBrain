@@ -20,6 +20,13 @@ const sessions: Record<string, Session> = {};
 // deploying:
 //   alter table owners add column contact_phone text;
 
+// NOTE: reminder consent + STOP opt-out needs this SQL run in Supabase
+// BEFORE deploying this file:
+//   alter table customers add column reminders_consent boolean not null default false;
+//   update customers set reminders_consent = true; -- existing customers count as consented
+//   create table opt_outs (phone text primary key, created_at timestamptz not null default now());
+//   create table owner_notices (id bigint generated always as identity primary key, shop_id text not null, text text not null, created_at timestamptz not null default now());
+
 const T = {
   en: {
     welcome: "👋 Welcome to *ShopBrain*\nWhat would you like to do?",
@@ -142,6 +149,25 @@ const T = {
     editAskPhoneNoNumber: `Current phone: *no number*\n\nSend a phone number, or tap Keep Phone to leave it as no number.`,
     editKeepPhone: "⏭️ Keep Phone",
     editSaved: (name: string, phone: string) => `✅ *Customer updated!*\n\n👤 ${name}\n📞 ${phone}`,
+    // --- Reminder consent / STOP opt-out ---
+    askConsent: "📋 Did this customer agree to receive WhatsApp reminders about what they owe?\n\nOnly customers who agreed will get reminders.",
+    consentYes: "✅ Yes",
+    consentNo: "❌ No",
+    consentSavedYes: "✅ Saved. This customer can now receive reminders.",
+    consentSavedNo: "✅ Saved. No reminders will be sent to this customer.",
+    reminderSkippedOptedOut: (name: string) =>
+      `🚫 *${name}* asked to stop receiving reminders. Reminder not sent.`,
+    reminderSkippedNoConsent: (name: string) =>
+      `⚠️ No reminder consent is recorded for *${name}*, so the reminder was not sent.`,
+    remindAllSkippedOptOut: (names: string) => `\n\n🚫 Skipped — asked to stop: ${names}`,
+    remindAllSkippedNoConsent: (names: string) =>
+      `\n\n⚠️ Skipped — no reminder consent recorded: ${names}\n(Tap Find Customer → Send Reminder to record consent.)`,
+    remindAllNoneSent: "ℹ️ No reminders were sent.",
+    customerOptedOutNotice: (name: string, phone: string) =>
+      `🚫 *${name}* (${phone}) replied STOP. ShopBrain will no longer send reminders to this number.`,
+    customerOptedInNotice: (name: string, phone: string) =>
+      `✅ *${name}* (${phone}) replied START. Reminders to this number are back on.`,
+    optedOutLine: "🚫 Opted out of reminders (replied STOP)",
   },
   rw: {
      welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
@@ -264,10 +290,65 @@ const T = {
     editAskPhoneNoNumber: `Nimero isanzwe: *nta nimero*\n\nAndika nimero, cyangwa ukande Gumana Nimero niba ushaka gukomeza nta nimero.`,
     editKeepPhone: "⏭️ Gumana Nimero",
     editSaved: (name: string, phone: string) => `✅ *Umukiriya yahinduwe!*\n\n👤 ${name}\n📞 ${phone}`,
+    // --- Reminder consent / STOP opt-out ---
+    askConsent: "📋 Uyu mukiriya yemeye kwakira ubutumwa bwo kwibutsa amadeni kuri WhatsApp?\n\nAbemeye gusa nibo bazabona ubutumwa.",
+    consentYes: "✅ Yego",
+    consentNo: "❌ Oya",
+    consentSavedYes: "✅ Byabitswe. Uyu mukiriya ashobora kwibutswa.",
+    consentSavedNo: "✅ Byabitswe. Nta butumwa bwo kwibutsa buzoherezwa kuri uyu mukiriya.",
+    reminderSkippedOptedOut: (name: string) =>
+      `🚫 *${name}* yasabye guhagarikirwa ubutumwa bwo kwibutsa. Nta butumwa bwoherejwe.`,
+    reminderSkippedNoConsent: (name: string) =>
+      `⚠️ Nta bwemera bwo kwibutsa bwanditswe kuri *${name}*, ubutumwa ntibwoherejwe.`,
+    remindAllSkippedOptOut: (names: string) => `\n\n🚫 Ntibyoherejwe — basabye guhagarikirwa: ${names}`,
+    remindAllSkippedNoConsent: (names: string) =>
+      `\n\n⚠️ Ntibyoherejwe — nta bwemera bwanditswe: ${names}\n(Kanda Shakisha Umukiriya → Kwibutsa kugira ngo wandike ubwemera.)`,
+    remindAllNoneSent: "ℹ️ Nta butumwa bwoherejwe.",
+    customerOptedOutNotice: (name: string, phone: string) =>
+      `🚫 *${name}* (${phone}) yanditse STOP. ShopBrain ntizongera kohereza ubutumwa bwo kwibutsa kuri iyi nimero.`,
+    customerOptedInNotice: (name: string, phone: string) =>
+      `✅ *${name}* (${phone}) yanditse START. Ubutumwa bwo kwibutsa kuri iyi nimero buzongera koherezwa.`,
+    optedOutLine: "🚫 Yasabye guhagarikirwa ubutumwa bwo kwibutsa (yanditse STOP)",
   },
 };
 
 type Lang = "en" | "rw";
+
+// Sent to any number that isn't a registered shop owner (i.e. debtors
+// replying to a reminder). Bilingual because we have no language on file
+// for non-owners.
+const NON_OWNER_REPLY =
+  "This number is for shop owner use only. To stop receiving payment reminders, reply STOP.\n\n" +
+  "Iyi nimero ni iy'nyir'iduka gusa. Kugira ngo uhagarikirwe ubutumwa bwo kwibutsa, andika STOP.";
+
+const STOP_CONFIRMATION =
+  "✅ You will no longer receive payment reminders from ShopBrain.\n\n" +
+  "✅ Ntuzongera kwakira ubutumwa bwo kwibutsa bwa ShopBrain.";
+
+// Words a debtor can send to opt out. Compared after stripping everything
+// except letters, so "Stop", "stop!" and " STOP " all match.
+const STOP_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "HAGARIKA"]);
+
+function isStopKeyword(text: string): boolean {
+  return STOP_KEYWORDS.has(text.toUpperCase().replace(/[^A-Z]/g, ""));
+}
+
+// Words a debtor can send (or the START button sends) to turn reminders back on.
+const START_KEYWORDS = new Set(["START", "SUBSCRIBE", "TANGIRA"]);
+
+function isStartKeyword(text: string): boolean {
+  return START_KEYWORDS.has(text.toUpperCase().replace(/[^A-Z]/g, ""));
+}
+
+// Second bubble after a STOP: how to turn reminders back on, with a START button.
+const START_PROMPT =
+  "Whenever you want to continue receiving reminders, press *START* below.\n\n" +
+  "Niba wifuza gukomeza kwakira ubutumwa bwo kwibutsa, kanda *START* hasi.";
+
+// Bubble after a START: confirms, and shows a STOP button in case they change their mind.
+const START_CONFIRMATION_PROMPT =
+  "✅ You will receive payment reminders again.\n\nIf you do not want any more reminders, press *STOP* below.\n\n" +
+  "✅ Uzongera kwakira ubutumwa bwo kwibutsa.\n\nNiba udashaka kongera kubwakira, kanda *STOP* hasi.";
 
 function cleanPhone(phone: string): string {
   let cleaned = phone.replace(/\D/g, "");
@@ -304,6 +385,123 @@ async function isOwner(from: string): Promise<boolean> {
 async function getLang(from: string): Promise<Lang> {
   const { data } = await supabase.from("owners").select("language").eq("phone", cleanPhone(from)).single();
   return (data?.language as Lang) ?? "en";
+}
+
+// --- STOP opt-out ---
+// Opt-outs live in their own table keyed by phone number, so a STOP applies
+// across every shop and also blocks the number if another shop adds it later.
+// Both checks throw on a database error instead of returning "not opted out"
+// — failing open here would mean sending reminders to someone who said STOP.
+async function isOptedOut(phone: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("opt_outs")
+    .select("phone")
+    .eq("phone", cleanPhone(phone))
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+async function getOptedOutSet(phones: string[]): Promise<Set<string>> {
+  const clean = phones.filter(Boolean).map(cleanPhone);
+  if (clean.length === 0) return new Set();
+  const { data, error } = await supabase.from("opt_outs").select("phone").in("phone", clean);
+  if (error) throw error;
+  return new Set((data ?? []).map((r: { phone: string }) => r.phone));
+}
+
+// Tells every shop that has this number as a customer what the debtor just did.
+// If WhatsApp refuses the message (usually because the owner hasn't messaged the
+// bot in the last 24h), the notice is saved and delivered the next time the
+// owner sends the bot anything.
+async function notifyShops(phone: string, event: "stop" | "start", req: Request): Promise<void> {
+  try {
+    const { data: rows } = await supabase.from("customers").select("name, shop_id").eq("phone", phone);
+    for (const row of rows ?? []) {
+      const ownerLang = await getLang(row.shop_id);
+      const text = event === "stop"
+        ? T[ownerLang].customerOptedOutNotice(row.name, phone)
+        : T[ownerLang].customerOptedInNotice(row.name, phone);
+      try {
+        await sendWhatsAppMessage(row.shop_id, text);
+      } catch (err) {
+        req.log.warn({ err, shop: row.shop_id }, "Owner notice not delivered, saving for later");
+        await supabase.from("owner_notices").insert({ shop_id: row.shop_id, text });
+      }
+    }
+  } catch (err) {
+    req.log.warn({ err }, "Failed to look up owners to notify");
+  }
+}
+
+// Sends any notices that couldn't be delivered earlier. Called whenever an
+// owner messages the bot, since that reopens the 24h window.
+async function deliverPendingNotices(from: string): Promise<void> {
+  try {
+    const { data: notices } = await supabase
+      .from("owner_notices")
+      .select("id, text")
+      .eq("shop_id", from)
+      .order("created_at", { ascending: true });
+    for (const n of notices ?? []) {
+      await sendWhatsAppMessage(from, n.text);
+      await supabase.from("owner_notices").delete().eq("id", n.id);
+    }
+  } catch (err) {
+    console.error("Failed to deliver pending owner notices:", err);
+  }
+}
+
+async function isKnownDebtor(phone: string): Promise<boolean> {
+  if (await isOptedOut(phone)) return true;
+  const { data, error } = await supabase.from("customers").select("id").eq("phone", phone).limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
+async function handleDebtorStop(from: string, req: Request): Promise<void> {
+  const phone = cleanPhone(from);
+  const { error } = await supabase.from("opt_outs").upsert({ phone }, { onConflict: "phone" });
+  if (error) throw error;
+  await sendWhatsAppMessage(from, STOP_CONFIRMATION);
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: START_PROMPT },
+    action: {
+      buttons: [{ type: "reply", reply: { id: "debtor_start", title: "START" } }],
+    },
+  });
+  await notifyShops(phone, "stop", req);
+}
+
+async function handleDebtorStart(from: string, req: Request): Promise<void> {
+  const phone = cleanPhone(from);
+  const { error } = await supabase.from("opt_outs").delete().eq("phone", phone);
+  if (error) throw error;
+  // The debtor has asked for reminders themselves, which counts as consent.
+  await supabase.from("customers").update({ reminders_consent: true }).eq("phone", phone);
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: START_CONFIRMATION_PROMPT },
+    action: {
+      buttons: [{ type: "reply", reply: { id: "debtor_stop", title: "STOP" } }],
+    },
+  });
+  await notifyShops(phone, "start", req);
+}
+
+async function handleNonOwnerMessage(from: string, text: string, req: Request): Promise<void> {
+  if (isStopKeyword(text)) {
+    await handleDebtorStop(from, req);
+    return;
+  }
+  // Only honour a typed START from someone we actually know as a debtor, so a
+  // stranger texting "start" just gets the normal owner-only reply.
+  if (isStartKeyword(text) && (await isKnownDebtor(cleanPhone(from)))) {
+    await handleDebtorStart(from, req);
+    return;
+  }
+  await sendWhatsAppMessage(from, NON_OWNER_REPLY);
 }
 
 // Maps owner language to the correct approved WhatsApp template name for
@@ -380,6 +578,9 @@ interface WhatsAppMessage {
     button_reply?: { id: string; title: string };
     list_reply?: { id: string; title: string };
   };
+  // Set when the sender taps a quick-reply button on a template message
+  // (e.g. the STOP button on a reminder).
+  button?: { text?: string; payload?: string };
   type: string;
 }
 
@@ -403,7 +604,7 @@ interface WebhookBody {
 }
 
 router.get("/privacy", (_req: Request, res: Response) => {
-  res.send("<html><body><h1>ShopBrain Privacy Policy</h1><p>ShopBrain collects WhatsApp phone numbers and debt records solely to provide debt tracking services to shop owners. Data is stored securely and never shared with third parties. Contact: +250 795 120 043</p></body></html>");
+  res.send("<html><body><h1>ShopBrain Privacy Policy</h1><p>ShopBrain collects WhatsApp phone numbers and debt records solely to provide debt tracking services to shop owners. Data is stored securely and never shared with third parties. Customers can reply STOP to any reminder at any time to stop receiving messages. Contact: +250 795 120 043</p></body></html>");
 });
 
 router.get("/webhook", (req: Request, res: Response) => {
@@ -443,6 +644,15 @@ router.post("/webhook", async (req: Request, res: Response) => {
       req.log.warn({ err, from }, "Failed to mark message as read");
     }
     try {
+      if (msg.type === "button") {
+        const label = msg.button?.payload || msg.button?.text || "";
+        if (isStopKeyword(label)) {
+          await handleDebtorStop(from, req);
+        } else if (isStartKeyword(label)) {
+          await handleDebtorStart(from, req);
+        }
+        continue;
+      }
       if (msg.type === "interactive") {
         const replyId =
           msg.interactive?.button_reply?.id ||
@@ -645,6 +855,24 @@ async function sendLanguagePicker(from: string, lang: Lang): Promise<void> {
   });
 }
 
+// Yes/No question asking whether a customer agreed to get WhatsApp reminders.
+// Used in three places: when adding a brand-new customer (session step
+// "add_consent"), when a customer's phone number is changed or created via
+// the legacy ADD command, and when an owner tries to remind someone with no
+// consent recorded (both use session step "consent_existing").
+async function askConsent(from: string, lang: Lang): Promise<void> {
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].askConsent },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "consent_yes", title: T[lang].consentYes } },
+        { type: "reply", reply: { id: "consent_no", title: T[lang].consentNo } },
+      ],
+    },
+  });
+}
+
 // --- MoMo setup flow ---
 async function startMomoSetup(from: string, lang: Lang): Promise<void> {
   sessions[from] = { step: "momo_number", data: {} };
@@ -784,28 +1012,49 @@ async function askEditPhone(from: string, lang: Lang): Promise<void> {
 async function saveEditedCustomer(from: string, lang: Lang): Promise<void> {
   const session = sessions[from];
   if (!session) return;
-  const { editCustomerId, editName, editPhone } = session.data;
+  const { editCustomerId, editOriginalPhone, editName, editPhone } = session.data;
   sessions[from] = undefined as any;
 
-  const updates: Record<string, string | null> = {};
+  // Consent was given for the OLD number, so a changed number needs a fresh
+  // answer. Reset it here and ask again after saving.
+  const phoneChanged = (editPhone || null) !== (editOriginalPhone || null);
+
+  const updates: Record<string, string | boolean | null> = {};
   if (editName) updates["name"] = editName;
   updates["phone"] = editPhone ? editPhone : null;
+  if (phoneChanged) updates["reminders_consent"] = false;
 
   await supabase.from("customers").update(updates).eq("id", editCustomerId);
 
   await sendWhatsAppMessage(from, T[lang].editSaved(editName ?? "", editPhone || (lang === "rw" ? "nta nimero" : "no number")));
+
+  if (phoneChanged && editPhone) {
+    sessions[from] = { step: "consent_existing", data: { consentCustomerId: editCustomerId ?? "" } };
+    await askConsent(from, lang);
+    return;
+  }
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
 async function handleInteractive(from: string, replyId: string, req: Request): Promise<void> {
+  // START / STOP buttons sent to debtors — handled for anyone, owner or not.
+  if (replyId === "debtor_stop") {
+    await handleDebtorStop(from, req);
+    return;
+  }
+  if (replyId === "debtor_start") {
+    await handleDebtorStart(from, req);
+    return;
+  }
+
   if (!(await isOwner(from))) {
-    const langCheck = await getLang(from);
-    await sendWhatsAppMessage(from, T[langCheck].ownerOnly);
+    await sendWhatsAppMessage(from, NON_OWNER_REPLY);
     return;
   }
 
   // FIX: lang must be declared before any branch below uses it.
   const lang = await getLang(from);
+  await deliverPendingNotices(from);
 
   if (replyId === "add_debt") {
     sessions[from] = { step: "add_phone", data: {} };
@@ -827,6 +1076,28 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     sessions[from]!.step = "add_name";
     await sendWhatsAppMessage(from, T[lang].askName);
     return;
+  }
+
+  if (replyId === "consent_yes" || replyId === "consent_no") {
+    const step = sessions[from]?.step;
+    const granted = replyId === "consent_yes";
+    if (step === "add_consent") {
+      // New customer being added: remember the answer, then continue to name.
+      sessions[from]!.data["consent"] = granted ? "yes" : "no";
+      sessions[from]!.step = "add_name";
+      await sendWhatsAppMessage(from, T[lang].askName);
+      return;
+    }
+    if (step === "consent_existing") {
+      // Customer already exists: save the answer straight to their record.
+      const customerId = sessions[from]!.data["consentCustomerId"];
+      sessions[from] = undefined as any;
+      await supabase.from("customers").update({ reminders_consent: granted }).eq("id", customerId).eq("shop_id", from);
+      await sendWhatsAppMessage(from, granted ? T[lang].consentSavedYes : T[lang].consentSavedNo);
+      setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+      return;
+    }
+    return; // stale button tap, ignore
   }
 
   if (replyId === "momo_code_skip") {
@@ -1020,12 +1291,14 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
 
 async function handleMessage(from: string, text: string, req: Request): Promise<void> {
   if (!(await isOwner(from))) {
-    const lang = await getLang(from);
-    await sendWhatsAppMessage(from, T[lang].ownerOnly);
+    // Not a shop owner — most likely a debtor replying to a reminder.
+    // Honour STOP; otherwise tell them this number is owner-only.
+    await handleNonOwnerMessage(from, text, req);
     return;
   }
 
   const lang = await getLang(from);
+  await deliverPendingNotices(from);
   const session = sessions[from];
 
   if (session?.step === "setup_shop_name") {
@@ -1147,15 +1420,22 @@ async function handleSession(from: string, text: string, session: Session, lang:
       return;
     }
     session.data["phone"] = phone;
-    session.step = "add_name";
     const { data: existing } = await supabase.from("customers").select("name").eq("phone", phone).eq("shop_id", from).single();
     if (existing) {
-      await sendWhatsAppMessage(from, T[lang].existingCustomer(existing.name));
+      // Known customer: their consent status is already on file, so don't ask again.
       session.data["name"] = existing.name;
       session.step = "add_item";
+      await sendWhatsAppMessage(from, T[lang].existingCustomer(existing.name));
     } else {
-      await sendWhatsAppMessage(from, T[lang].askName);
+      // New customer: ask about reminder consent before collecting the name.
+      session.step = "add_consent";
+      await askConsent(from, lang);
     }
+    return;
+  }
+  if (session.step === "add_consent" || session.step === "consent_existing") {
+    // Owner typed something instead of tapping Yes/No — ask again.
+    await askConsent(from, lang);
     return;
   }
   if (session.step === "add_name") {
@@ -1177,6 +1457,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
       return;
     }
     const { phone, name, item } = session.data as Record<string, string>;
+    const consentGiven = session.data["consent"] === "yes";
     // phone may be "" (customer chose "No Number") — store null in that case
     const phoneValue: string | null = phone ? phone : null;
 
@@ -1189,7 +1470,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
     }
     if (!customer) {
       // FIX: was inserting a literal `phoneValue` column instead of setting `phone`.
-      const { data: newCustomer, error } = await supabase.from("customers").insert({ phone: phoneValue, name, shop_id: from }).select().single();
+      const { data: newCustomer, error } = await supabase.from("customers").insert({ phone: phoneValue, name, shop_id: from, reminders_consent: consentGiven }).select().single();
       if (error || !newCustomer) {
         await sendWhatsAppMessage(from, T[lang].somethingWrong);
         return;
@@ -1340,6 +1621,22 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     await sendWhatsAppMessage(from, T[lang].noCustomer(phone));
     return;
   }
+
+  // Never remind someone who replied STOP.
+  if (await isOptedOut(phone)) {
+    await sendWhatsAppMessage(from, T[lang].reminderSkippedOptedOut(customer.name));
+    setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+    return;
+  }
+
+  // No consent on record: don't send, but let the owner record it right here.
+  if (!customer.reminders_consent) {
+    await sendWhatsAppMessage(from, T[lang].reminderSkippedNoConsent(customer.name));
+    sessions[from] = { step: "consent_existing", data: { consentCustomerId: customer.id } };
+    await askConsent(from, lang);
+    return;
+  }
+
   const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
   const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
   if (total === 0) {
@@ -1435,7 +1732,9 @@ async function lookupCustomer(from: string, phone: string, lang: Lang): Promise<
   // see exactly when the last visit happened, not just which day.
   const lastDate = lastTx ? formatFullTimestamp(lastTx.date) : "N/A";
   sessions[from] = { step: "idle", data: { lastPhone: phone } };
-  await sendWhatsAppMessage(from, T[lang].customerSummary(customer.name, phone, lastTx?.item ?? "N/A", totalOwed, lastDate));
+  let summaryText = T[lang].customerSummary(customer.name, phone, lastTx?.item ?? "N/A", totalOwed, lastDate);
+  if (await isOptedOut(phone)) summaryText += `\n${T[lang].optedOutLine}`;
+  await sendWhatsAppMessage(from, summaryText);
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
     body: { text: T[lang].whatToDo },
@@ -1509,7 +1808,7 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
-  async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<void> {
+async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<void> {
   const { data: owner } = await supabase
     .from("owners")
     .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname, contact_phone")
@@ -1528,7 +1827,13 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
     return;
   }
 
+  // One query up front for everyone who has replied STOP among this shop's
+  // customers, instead of one lookup per customer.
+  const optedOut = await getOptedOutSet(customers.map((c: { phone: string | null }) => c.phone ?? ""));
+
   const lines: string[] = [];
+  const skippedOptedOut: string[] = [];
+  const skippedNoConsent: string[] = [];
   let grandTotal = 0;
   let sentCount = 0;
   let failedCount = 0;
@@ -1540,6 +1845,17 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
     const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
     const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
     if (total === 0) continue;
+
+    // Only customers who owe money get reported as skipped, so the owner
+    // isn't told about people who had nothing to be reminded of anyway.
+    if (optedOut.has(customer.phone)) {
+      skippedOptedOut.push(customer.name);
+      continue;
+    }
+    if (!customer.reminders_consent) {
+      skippedNoConsent.push(customer.name);
+      continue;
+    }
 
     const itemizedList = await buildItemizedList(customer.id);
 
@@ -1581,22 +1897,32 @@ async function showAllCustomers(from: string, lang: Lang): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 500));
   }
 
+  const skippedNote =
+    (skippedOptedOut.length > 0 ? T[lang].remindAllSkippedOptOut(skippedOptedOut.join(", ")) : "") +
+    (skippedNoConsent.length > 0 ? T[lang].remindAllSkippedNoConsent(skippedNoConsent.join(", ")) : "");
+
   if (sentCount === 0 && failedCount > 0) {
     // FIX: distinguish "nothing to send" from "sends failed" — previously
     // both cases showed remindAllNone ("No customers with outstanding
     // debts"), which was misleading when debts existed but every send threw.
-    await sendWhatsAppMessage(from, lang === "rw"
+    await sendWhatsAppMessage(from, (lang === "rw"
       ? "❌ Ubutumwa ntabwo bwoherejwe — hari ikibazo. Reba raporo cyangwa gerageza nanone."
-      : "❌ Reminders failed to send — please check your template/setup and try again.");
+      : "❌ Reminders failed to send — please check your template/setup and try again.") + skippedNote);
     return;
   }
 
   if (sentCount === 0) {
+    if (skippedNote) {
+      // Debts exist, but everyone was skipped for opt-out / missing consent.
+      await sendWhatsAppMessage(from, T[lang].remindAllNoneSent + skippedNote);
+      setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+      return;
+    }
     await sendWhatsAppMessage(from, T[lang].remindAllNone);
     return;
   }
 
-  const summary = T[lang].remindAllSummary(sentCount, grandTotal) + lines.join("\n") + T[lang].remindAllTotal(grandTotal);
+  const summary = T[lang].remindAllSummary(sentCount, grandTotal) + lines.join("\n") + T[lang].remindAllTotal(grandTotal) + skippedNote;
   await sendWhatsAppMessage(from, summary);
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
@@ -1656,14 +1982,17 @@ async function handleLegacyAdd(from: string, text: string, lang: Lang): Promise<
     await sendWhatsAppMessage(from, T[lang].invalidAmount);
     return;
   }
+  let isNewCustomer = false;
   let { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
   if (!customer) {
-    const { data: newCustomer, error } = await supabase.from("customers").insert({ phone, name, shop_id: from }).select().single();
+    // New customers start with no reminder consent; we ask right after saving.
+    const { data: newCustomer, error } = await supabase.from("customers").insert({ phone, name, shop_id: from, reminders_consent: false }).select().single();
     if (error || !newCustomer) {
       await sendWhatsAppMessage(from, T[lang].somethingWrong);
       return;
     }
     customer = newCustomer;
+    isNewCustomer = true;
   }
   const { error: txError } = await supabase.from("transactions").insert({ customer_id: customer.id, item, amount, paid: false });
   if (txError) {
@@ -1673,6 +2002,11 @@ async function handleLegacyAdd(from: string, text: string, lang: Lang): Promise<
   const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
   const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
   await sendWhatsAppMessage(from, T[lang].debtSaved(name, phone, item, amount, total));
+
+  if (isNewCustomer) {
+    sessions[from] = { step: "consent_existing", data: { consentCustomerId: customer.id } };
+    await askConsent(from, lang);
+  }
 }
 
 async function handleLegacyPaid(from: string, text: string, lang: Lang): Promise<void> {
