@@ -327,7 +327,7 @@ const STOP_CONFIRMATION =
 
 // Words a debtor can send to opt out. Compared after stripping everything
 // except letters, so "Stop", "stop!" and " STOP " all match.
-const STOP_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "HAGARIKA"]);
+const STOP_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "GUHAGARIKA"]);
 
 function isStopKeyword(text: string): boolean {
   return STOP_KEYWORDS.has(text.toUpperCase().replace(/[^A-Z]/g, ""));
