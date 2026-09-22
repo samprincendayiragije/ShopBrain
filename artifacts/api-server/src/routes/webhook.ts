@@ -57,6 +57,7 @@ const T = {
     reminderFailedGeneric: (name: string, code: number) => `❌ Reminder failed for *${name}* (error code: ${code}) — please try again`,
     noDebts: (name: string) => `✅ ${name} has no outstanding debts. No reminder sent.`,
     findCustomerPrompt: "🔍 *Find Customer*\n\nEnter the customer's phone number:",
+    findCustomerPromptSearch: "🔍 *Find Customer*\n\nEnter the customer's phone number or name:",
     markPaidPrompt: "✅ *Mark as Paid*\n\nEnter the customer's phone number:",
     askPartialAmount: "💰 How much is the customer paying?",
     askPartialItem: "📦 What is this payment for?",
@@ -112,13 +113,13 @@ const T = {
 ➕ More — see everything else, including your full customer list
 
 *Typed shortcuts (optional):*
-• TOTAL — see your total outstanding debt
-• REMIND ALL — remind every customer who owes you
-• REMIND <phone> — remind one specific customer
-• @ALL — list every customer you've registered
-• MOMO — set up your MTN MoMo payment details for reminders
-• MENU — show the quick-action buttons again
-• HELP — show this message again`,
+- TOTAL — see your total outstanding debt
+- REMIND ALL — remind every customer who owes you
+- REMIND <phone> — remind one specific customer
+- @ALL — list every customer you've registered
+- MOMO — set up your MTN MoMo payment details for reminders
+- MENU — show the quick-action buttons again
+- HELP — show this message again`,
     securityTip: `🔒 *Security Tip — Protect your data:*\n\nLock this ShopBrain chat so only you can open it.\n\n*How to do it:*\n1. Long press this chat in your WhatsApp inbox\n2. Tap the lock icon 🔒\n3. It will now require your fingerprint or Face ID to open\n\nYour customer data stays private even if someone picks up your phone.`,
     // --- MoMo setup ---
     momoIntro: "💳 *MoMo Payment Setup*\n\nThis lets your customers see exactly where to send money when they get a reminder.\n\nWhat is your MTN MoMo phone number?\n\ne.g. 0788123456",
@@ -168,6 +169,15 @@ const T = {
     customerOptedInNotice: (name: string, phone: string) =>
       `✅ *${name}* (${phone}) replied START. Reminders to this number are back on.`,
     optedOutLine: "🚫 Opted out of reminders (replied STOP)",
+    // --- Name search ---
+    multipleCustomersFound: (name: string) => `🔍 Found a few customers matching "${name}". Tap to select:`,
+    noNameMatch: (name: string) => `❌ No customer found matching "${name}".`,
+    // --- No-number duplicate name warning ---
+    duplicateNameWarning: (name: string, item: string, total: number) =>
+      `⚠️ You already have another customer named *${name}* with no phone number (owes ${total.toLocaleString()} Frw, last item: ${item}).\n\nTo avoid mixing them up later, you can add a short label (e.g. "${name} (motorbike)"), or continue if you're sure this is a different person.`,
+    dupContinueBtn: "✅ Continue As-Is",
+    dupRelabelBtn: "✏️ Add Label",
+    askRelabel: "Send the name with a short label added, e.g. \"Jean (motorbike)\":",
   },
   rw: {
      welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
@@ -198,6 +208,7 @@ const T = {
     reminderFailedGeneric: (name: string, code: number) => `❌ Ubutumwa bwanze kuri *${name}* (code: ${code}) — gerageza nanone`,
     noDebts: (name: string) => `✅ ${name} ntagomba kwishyura. Nta butumwa bwoherejwe.`,
     findCustomerPrompt: "🔍 *Shakisha Umukiriya*\n\nAndika nimero y'umukiriya:",
+    findCustomerPromptSearch: "🔍 *Shakisha Umukiriya*\n\nAndika nimero cyangwa izina ry'umukiriya:",
     markPaidPrompt: "✅ *Emeza Kwishyura*\n\nAndika nimero y'umukiriya:",
     askPartialAmount: "💰 Umukiriya ariha angahe?",
     askPartialItem: "📦 Ni iyihe kiguzi cy'iri shyura?",
@@ -253,13 +264,13 @@ const T = {
 ➕ Ibindi — reba ibindi byose, hamwe n'urutonde rw'abakiriya bawe bose
 
 *Amabwiriza wandika (ntibisabwa):*
-• TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amadeni yose
-• REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amadeni
-• REMIND <nimero> — wibutsa umukiriya umwe
-• @ALL — reba abakiriya bawe bose
-• MOMO — shyiraho amakuru ya MTN MoMo azagaragara ku butumwa
-• MENU — garuka kuri buto z'ibanze
-• HELP — reba ubu butumwa nanone`,
+- TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amadeni yose
+- REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amadeni
+- REMIND <nimero> — wibutsa umukiriya umwe
+- @ALL — reba abakiriya bawe bose
+- MOMO — shyiraho amakuru ya MTN MoMo azagaragara ku butumwa
+- MENU — garuka kuri buto z'ibanze
+- HELP — reba ubu butumwa nanone`,
     securityTip: `🔒 *Ubutumwa bw'Umutekano:*\n\nFunga iki gikorwa cya ShopBrain kugira ngo wowe gusa ubashobore kukibona.\n\n*Uko bikorwa:*\n1. Fata iki gikorwa mu rutonde rwa WhatsApp\n2. Kanda ikimenyetso cy'isuri 🔒\n3. Bizasaba igikumwe cyawe cyangwa ubuso bwawe\n\nAmakuru y'abakiriya bawe azaba ari mu mutekano.`,
     // --- MoMo setup ---
     momoIntro: "💳 *Gushyiraho MoMo*\n\nIbi bituma abakiriya babona neza aho koherereza amafaranga igihe babonye ubutumwa bwo kwibutsa.\n\nNimero yawe ya MTN MoMo ni iyihe?\n\nUrugero: 0788123456",
@@ -309,6 +320,15 @@ const T = {
     customerOptedInNotice: (name: string, phone: string) =>
       `✅ *${name}* (${phone}) yanditse START. Ubutumwa bwo kwibutsa kuri iyi nimero buzongera koherezwa.`,
     optedOutLine: "🚫 Yasabye guhagarikirwa ubutumwa bwo kwibutsa (yanditse STOP)",
+    // --- Name search ---
+    multipleCustomersFound: (name: string) => `🔍 Hari abakiriya benshi bahuye na "${name}". Kanda uhitemo:`,
+    noNameMatch: (name: string) => `❌ Nta mukiriya ubonetse witwa "${name}".`,
+    // --- No-number duplicate name warning ---
+    duplicateNameWarning: (name: string, item: string, total: number) =>
+      `⚠️ Ufite undi mukiriya witwa *${name}* udafite nimero (asigayemo ${total.toLocaleString()} Frw, igicuruzwa giherutse: ${item}).\n\nKugira ngo utabatanya, wongeraho ikimenyetso gito (urugero: "${name} (moto)"), cyangwa ukomeze niba uzi ko ari umuntu utandukanye.`,
+    dupContinueBtn: "✅ Komeza Uko Bimeze",
+    dupRelabelBtn: "✏️ Ongeraho Ikimenyetso",
+    askRelabel: "Andika izina hamwe n'ikimenyetso gito, urugero \"Jean (moto)\":",
   },
 };
 
@@ -567,6 +587,112 @@ function buildMomoBlock(owner: {
   const codeLine = owner.momo_code ? `MoMo Code: ${owner.momo_code}. ` : "";
   const nickname = owner.shop_nickname ? ` (This is MoMo for "${owner.shop_nickname}")` : "";
   return `${owner.momo_number}. ${codeLine}Name shown on MoMo: ${owner.momo_receiver_name ?? ""}${nickname}`;
+}
+
+// --- Name search helpers ---
+// Finds customers for this shop whose name contains the given text
+// (case-insensitive). Limited to 10 since a WhatsApp list message can only
+// show 10 rows.
+async function searchCustomersByName(shopId: string, name: string): Promise<Array<{ id: string; name: string; phone: string | null }>> {
+  const { data } = await supabase
+    .from("customers")
+    .select("id, name, phone")
+    .eq("shop_id", shopId)
+    .ilike("name", `%${name.trim()}%`)
+    .limit(10);
+  return data ?? [];
+}
+
+// Same as above but also pulls unpaid total + last item/visit per match, so
+// when two customers share a name (especially two no-number ones) the owner
+// has enough to tell them apart from the list alone.
+async function searchCustomersWithDetails(
+  shopId: string,
+  name: string
+): Promise<Array<{ id: string; name: string; phone: string | null; total: number; lastItem: string | null; lastDate: string | null }>> {
+  const matches = await searchCustomersByName(shopId, name);
+  const rows: Array<{ id: string; name: string; phone: string | null; total: number; lastItem: string | null; lastDate: string | null }> = [];
+  for (const c of matches) {
+    const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", c.id).eq("paid", false);
+    const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
+    const { data: lastTxArr } = await supabase.from("transactions").select("item, date").eq("customer_id", c.id).order("date", { ascending: false }).limit(1);
+    const lastTx = lastTxArr?.[0];
+    rows.push({
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      total,
+      lastItem: lastTx?.item ?? null,
+      lastDate: lastTx ? formatFullTimestamp(lastTx.date) : null,
+    });
+  }
+  return rows;
+}
+
+// Handles the result of a name search: zero matches shows "not found" and
+// the menu; exactly one match jumps straight into that customer's record;
+// several matches are shown as a WhatsApp list to pick from.
+async function sendNameSearchResults(
+  from: string,
+  lang: Lang,
+  rows: Array<{ id: string; name: string; phone: string | null; total: number; lastItem: string | null; lastDate: string | null }>,
+  searchedName: string
+): Promise<void> {
+  if (rows.length === 0) {
+    await sendWhatsAppMessage(from, T[lang].noNameMatch(searchedName));
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  if (rows.length === 1) {
+    const c = rows[0]!;
+    if (c.phone) {
+      sessions[from] = { step: "idle", data: { lastPhone: c.phone } };
+      await lookupCustomer(from, c.phone, lang);
+    } else {
+      await sendNoNumberCustomerSummary(from, lang, c.id);
+    }
+    return;
+  }
+  await sendWhatsAppMessage(from, T[lang].multipleCustomersFound(searchedName));
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "list",
+    body: { text: T[lang].whatToDo },
+    action: {
+      button: lang === "rw" ? "Hitamo" : "Select",
+      sections: [
+        {
+          title: lang === "rw" ? "Abakiriya" : "Customers",
+          rows: rows.slice(0, 10).map((r) => ({
+            id: `namesearch_${r.id}`,
+            title: r.name.slice(0, 24),
+            description: `${r.total > 0 ? r.total.toLocaleString() + " Frw" : T[lang].cleared}${r.lastItem ? " — " + r.lastItem : ""}${r.lastDate ? " — " + r.lastDate : ""}`.slice(0, 72),
+          })),
+        },
+      ],
+    },
+  });
+}
+
+// Shows a customer's summary by ID rather than phone — needed for
+// no-number customers, since phone-based lookups can't reach them.
+// Deliberately sends no action buttons: Mark as Paid / Edit / Send Reminder
+// are still phone-keyed everywhere else in this file (a known, pre-existing
+// gap for no-number customers), so wiring buttons here would silently fail.
+async function sendNoNumberCustomerSummary(from: string, lang: Lang, customerId: string): Promise<void> {
+  const { data: customer } = await supabase.from("customers").select("*").eq("id", customerId).eq("shop_id", from).single();
+  if (!customer) {
+    await sendWhatsAppMessage(from, T[lang].noCustomerText);
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  const { data: transactions } = await supabase.from("transactions").select("*").eq("customer_id", customer.id).order("date", { ascending: false });
+  const unpaid = (transactions ?? []).filter((t: { paid: boolean }) => !t.paid);
+  const totalOwed = unpaid.reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
+  const lastTx = transactions?.[0];
+  const lastDate = lastTx ? formatFullTimestamp(lastTx.date) : "N/A";
+  const phoneDisplay = lang === "rw" ? "nta nimero" : "no number";
+  await sendWhatsAppMessage(from, T[lang].customerSummary(customer.name, phoneDisplay, lastTx?.item ?? "N/A", totalOwed, lastDate));
+  await sendPersistentMenu(from, lang);
 }
 
 interface WhatsAppMessage {
@@ -1056,6 +1182,24 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   const lang = await getLang(from);
   await deliverPendingNotices(from);
 
+  // A row picked from a name-search list message.
+  if (replyId.startsWith("namesearch_")) {
+    const customerId = replyId.slice("namesearch_".length);
+    const { data: customer } = await supabase.from("customers").select("id, phone").eq("id", customerId).eq("shop_id", from).single();
+    if (!customer) {
+      await sendWhatsAppMessage(from, T[lang].noCustomerText);
+      await sendPersistentMenu(from, lang);
+      return;
+    }
+    if (customer.phone) {
+      sessions[from] = { step: "idle", data: { lastPhone: customer.phone } };
+      await lookupCustomer(from, customer.phone, lang);
+    } else {
+      await sendNoNumberCustomerSummary(from, lang, customer.id);
+    }
+    return;
+  }
+
   if (replyId === "add_debt") {
     sessions[from] = { step: "add_phone", data: {} };
     await sendWhatsAppInteractiveMessage(from, {
@@ -1098,6 +1242,22 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
       return;
     }
     return; // stale button tap, ignore
+  }
+
+  // --- No-number duplicate-name warning buttons ---
+  if (replyId === "dup_continue") {
+    if (sessions[from]?.step !== "add_name_dup_check") return; // stale button tap, ignore
+    sessions[from]!.data["name"] = sessions[from]!.data["pendingName"] ?? "";
+    sessions[from]!.step = "add_item";
+    await sendWhatsAppMessage(from, T[lang].askItem);
+    return;
+  }
+
+  if (replyId === "dup_relabel") {
+    if (sessions[from]?.step !== "add_name_dup_check") return; // stale button tap, ignore
+    await sendWhatsAppMessage(from, T[lang].askRelabel);
+    // Stays on add_name_dup_check — the next typed message becomes the final name.
+    return;
   }
 
   if (replyId === "momo_code_skip") {
@@ -1175,7 +1335,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
 
   if (replyId === "find_customer") {
     sessions[from] = { step: "find_phone", data: {} };
-    await sendWhatsAppMessage(from, T[lang].findCustomerPrompt);
+    await sendWhatsAppMessage(from, T[lang].findCustomerPromptSearch);
     return;
   }
   if (replyId === "change_language") {
@@ -1407,6 +1567,16 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
     await lookupCustomer(from, possiblePhone, lang);
     return;
   }
+
+  // Not a phone number and not a known command — for an already-registered
+  // owner, try it as a name search before falling back to onboarding/menu.
+  const { data: ownerCheck } = await supabase.from("owners").select("name").eq("phone", cleanPhone(from)).single();
+  if (ownerCheck?.name) {
+    const rows = await searchCustomersWithDetails(from, text.trim());
+    await sendNameSearchResults(from, lang, rows, text.trim());
+    return;
+  }
+
   const shopName = await getOrAskShopName(from, lang);
   if (!shopName) return;
   await sendPersistentMenu(from, lang);
@@ -1439,7 +1609,50 @@ async function handleSession(from: string, text: string, session: Session, lang:
     return;
   }
   if (session.step === "add_name") {
-    session.data["name"] = text;
+    const typedName = text.trim();
+    const phoneValue = session.data["phone"]; // "" means "No Number" was chosen
+
+    if (!phoneValue) {
+      // No-number customer: warn if another no-number customer already has
+      // this exact name, so the owner doesn't end up with two indistinguishable "Jean"s.
+      const { data: dup } = await supabase
+        .from("customers")
+        .select("id, name")
+        .eq("shop_id", from)
+        .is("phone", null)
+        .ilike("name", typedName)
+        .limit(1)
+        .maybeSingle();
+      if (dup) {
+        const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", dup.id).eq("paid", false);
+        const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
+        const { data: lastTxArr } = await supabase.from("transactions").select("item").eq("customer_id", dup.id).order("date", { ascending: false }).limit(1);
+        const lastItem = lastTxArr?.[0]?.item ?? (lang === "rw" ? "nta kiguzi" : "no items yet");
+        session.data["pendingName"] = typedName;
+        session.step = "add_name_dup_check";
+        await sendWhatsAppInteractiveMessage(from, {
+          type: "button",
+          body: { text: T[lang].duplicateNameWarning(typedName, lastItem, total) },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "dup_continue", title: T[lang].dupContinueBtn } },
+              { type: "reply", reply: { id: "dup_relabel", title: T[lang].dupRelabelBtn } },
+            ],
+          },
+        });
+        return;
+      }
+    }
+
+    session.data["name"] = typedName;
+    session.step = "add_item";
+    await sendWhatsAppMessage(from, T[lang].askItem);
+    return;
+  }
+  if (session.step === "add_name_dup_check") {
+    // Owner typed a name directly instead of tapping a button — treat it as
+    // the final (presumably relabeled) name and move on.
+    session.data["name"] = text.trim();
     session.step = "add_item";
     await sendWhatsAppMessage(from, T[lang].askItem);
     return;
@@ -1489,9 +1702,17 @@ async function handleSession(from: string, text: string, session: Session, lang:
     return;
   }
   if (session.step === "find_phone") {
-    const phone = cleanPhone(text);
-    sessions[from] = { step: "idle", data: { lastPhone: phone } };
-    await lookupCustomer(from, phone, lang);
+    const trimmed = text.trim();
+    const looksLikePhone = /^[\d\s+\-()]{7,15}$/.test(trimmed);
+    if (looksLikePhone) {
+      const phone = cleanPhone(trimmed);
+      sessions[from] = { step: "idle", data: { lastPhone: phone } };
+      await lookupCustomer(from, phone, lang);
+    } else {
+      sessions[from] = undefined as any;
+      const rows = await searchCustomersWithDetails(from, trimmed);
+      await sendNameSearchResults(from, lang, rows, trimmed);
+    }
     return;
   }
   if (session.step === "paid_phone") {
