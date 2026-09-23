@@ -171,6 +171,7 @@ const T = {
     optedOutLine: "🚫 Opted out of reminders (replied STOP)",
     // --- Name search ---
     multipleCustomersFound: (name: string) => `🔍 Found a few customers matching "${name}". Tap to select:`,
+    multipleCustomersFoundReminder: (name: string) => `🔍 Found a few customers matching "${name}". Tap who to remind:`,
     noNameMatch: (name: string) => `❌ No customer found matching "${name}".`,
     // --- No-number duplicate name warning ---
     duplicateNameWarning: (name: string, item: string, total: number) =>
