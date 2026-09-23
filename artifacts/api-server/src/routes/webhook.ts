@@ -1,11 +1,17 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { sendWhatsAppMessage, sendWhatsAppInteractiveMessage, sendWhatsAppTemplateMessage, markMessageAsRead } from "../lib/whatsapp.js";
 import { supabase } from "../lib/supabase.js";
+import { runWeeklyCheckin } from "../jobs/weeklyCheckin.js";
 
 const router: IRouter = Router();
 
 const VERIFY_TOKEN =
   process.env["WHATSAPP_VERIFY_TOKEN"] ?? "ShopBrain_kigali_2026";
+
+// Sam's own WhatsApp number (cleaned format, e.g. 250799xxxxxx) — used by the
+// week-1 check-in "Yes, I have an issue" button to flag real ShopBrain users
+// who need help, without waiting for Sam to notice on his own.
+const SAM_PHONE_NUMBER = process.env["SAM_PHONE_NUMBER"];
 
 interface Session {
   step: string;
@@ -58,6 +64,7 @@ const T = {
     noDebts: (name: string) => `✅ ${name} has no outstanding debts. No reminder sent.`,
     findCustomerPrompt: "🔍 *Find Customer*\n\nEnter the customer's phone number:",
     findCustomerPromptSearch: "🔍 *Find Customer*\n\nEnter the customer's phone number or name:",
+    findReminderPromptSearch: "🔔 *Send Reminder*\n\nEnter the customer's phone number or name:",
     markPaidPrompt: "✅ *Mark as Paid*\n\nEnter the customer's phone number:",
     askPartialAmount: "💰 How much is the customer paying?",
     askPartialItem: "📦 What is this payment for?",
@@ -173,12 +180,16 @@ const T = {
     multipleCustomersFound: (name: string) => `🔍 Found a few customers matching "${name}". Tap to select:`,
     multipleCustomersFoundReminder: (name: string) => `🔍 Found a few customers matching "${name}". Tap who to remind:`,
     noNameMatch: (name: string) => `❌ No customer found matching "${name}".`,
+    optedOutRowLabel: "🚫 Opted out — STOP",
     // --- No-number duplicate name warning ---
     duplicateNameWarning: (name: string, item: string, total: number) =>
       `⚠️ You already have another customer named *${name}* with no phone number (owes ${total.toLocaleString()} Frw, last item: ${item}).\n\nTo avoid mixing them up later, you can add a short label (e.g. "${name} (motorbike)"), or continue if you're sure this is a different person.`,
     dupContinueBtn: "✅ Continue As-Is",
     dupRelabelBtn: "✏️ Add Label",
     askRelabel: "Send the name with a short label added, e.g. \"Jean (motorbike)\":",
+    // --- Week-1 check-in flagging ---
+    checkinIssueBtn: "❌ Yes, I have an issue",
+    checkinConfirmed: "Got it — someone will reach out to help you soon.",
   },
   rw: {
      welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
@@ -210,6 +221,7 @@ const T = {
     noDebts: (name: string) => `✅ ${name} ntagomba kwishyura. Nta butumwa bwoherejwe.`,
     findCustomerPrompt: "🔍 *Shakisha Umukiriya*\n\nAndika nimero y'umukiriya:",
     findCustomerPromptSearch: "🔍 *Shakisha Umukiriya*\n\nAndika nimero cyangwa izina ry'umukiriya:",
+    findReminderPromptSearch: "🔔 *Kwibutsa*\n\nAndika nimero cyangwa izina ry'umukiriya:",
     markPaidPrompt: "✅ *Emeza Kwishyura*\n\nAndika nimero y'umukiriya:",
     askPartialAmount: "💰 Umukiriya ariha angahe?",
     askPartialItem: "📦 Ni iyihe kiguzi cy'iri shyura?",
@@ -323,13 +335,18 @@ const T = {
     optedOutLine: "🚫 Yasabye guhagarikirwa ubutumwa bwo kwibutsa (yanditse STOP)",
     // --- Name search ---
     multipleCustomersFound: (name: string) => `🔍 Hari abakiriya benshi bahuye na "${name}". Kanda uhitemo:`,
+    multipleCustomersFoundReminder: (name: string) => `🔍 Hari abakiriya benshi bahuye na "${name}". Kanda uwo wibutsa:`,
     noNameMatch: (name: string) => `❌ Nta mukiriya ubonetse witwa "${name}".`,
+    optedOutRowLabel: "🚫 Yahagaritse — STOP",
     // --- No-number duplicate name warning ---
     duplicateNameWarning: (name: string, item: string, total: number) =>
       `⚠️ Ufite undi mukiriya witwa *${name}* udafite nimero (asigayemo ${total.toLocaleString()} Frw, igicuruzwa giherutse: ${item}).\n\nKugira ngo utabatanya, wongeraho ikimenyetso gito (urugero: "${name} (moto)"), cyangwa ukomeze niba uzi ko ari umuntu utandukanye.`,
     dupContinueBtn: "✅ Komeza Uko Bimeze",
     dupRelabelBtn: "✏️ Ongeraho Ikimenyetso",
     askRelabel: "Andika izina hamwe n'ikimenyetso gito, urugero \"Jean (moto)\":",
+    // --- Week-1 check-in flagging ---
+    checkinIssueBtn: "❌ Yego, mfite ikibazo",
+    checkinConfirmed: "Byakiriwe — hari uzagufasha vuba.",
   },
 };
 
@@ -674,6 +691,64 @@ async function sendNameSearchResults(
   });
 }
 
+// Reminder-specific name search: every remindable match becomes a tappable
+// list row, INCLUDING customers who opted out (marked with a 🚫 prefix and
+// "Opted out — STOP" instead of their amount owed). This is intentional —
+// the owner should see every customer matching the name they typed, exactly
+// like everywhere else in the app, rather than have some silently vanish.
+// Tapping an opted-out row never sends a message: the handler re-checks
+// opt-out status and replies with the standard "can't receive reminders"
+// message instead of calling sendReminder. No-number customers are dropped
+// entirely since there is no way to send them a WhatsApp reminder at all.
+async function sendReminderNameSearchResults(
+  from: string,
+  lang: Lang,
+  rows: Array<{ id: string; name: string; phone: string | null; total: number; lastItem: string | null; lastDate: string | null }>,
+  searchedName: string
+): Promise<void> {
+  const withPhone = rows.filter((r) => r.phone);
+
+  if (withPhone.length === 0) {
+    await sendWhatsAppMessage(from, T[lang].noNameMatch(searchedName));
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+
+  const optedOutSet = await getOptedOutSet(withPhone.map((r) => r.phone!));
+
+  // A single match still goes through sendReminder directly (which already
+  // handles the opted-out / no-consent cases with their own messages), so
+  // we only branch into the list UI when there's real ambiguity to resolve.
+  if (withPhone.length === 1) {
+    await sendReminder(from, withPhone[0]!.phone!, lang);
+    return;
+  }
+
+  await sendWhatsAppMessage(from, T[lang].multipleCustomersFoundReminder(searchedName));
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "list",
+    body: { text: T[lang].whatToDo },
+    action: {
+      button: lang === "rw" ? "Hitamo" : "Select",
+      sections: [
+        {
+          title: lang === "rw" ? "Abakiriya" : "Customers",
+          rows: withPhone.slice(0, 10).map((r) => {
+            const optedOut = optedOutSet.has(cleanPhone(r.phone!));
+            return {
+              id: `remindsearch_${r.id}`,
+              title: `${optedOut ? "🚫 " : ""}${r.name}`.slice(0, 24),
+              description: optedOut
+                ? `${r.phone} — ${T[lang].optedOutRowLabel}`.slice(0, 72)
+                : `${r.phone} — ${r.total > 0 ? r.total.toLocaleString() + " Frw" : T[lang].cleared}`.slice(0, 72),
+            };
+          }),
+        },
+      ],
+    },
+  });
+}
+
 // Shows a customer's summary by ID rather than phone — needed for
 // no-number customers, since phone-based lookups can't reach them.
 // Deliberately sends no action buttons: Mark as Paid / Edit / Send Reminder
@@ -732,6 +807,20 @@ interface WebhookBody {
 
 router.get("/privacy", (_req: Request, res: Response) => {
   res.send("<html><body><h1>ShopBrain Privacy Policy</h1><p>ShopBrain collects WhatsApp phone numbers and debt records solely to provide debt tracking services to shop owners. Data is stored securely and never shared with third parties. Customers can reply STOP to any reminder at any time to stop receiving messages. Contact: +250 795 120 043</p></body></html>");
+});
+
+// Meant to be pinged once a day by an external uptime/cron service (the same
+// UptimeRobot setup already pinging /privacy every 5 minutes — just add a
+// second monitor here on a 24h interval). Safe to deploy and start pinging
+// before the "weekly_checkin" WhatsApp template is approved: each send
+// attempt is wrapped in try/catch inside runWeeklyCheckin, so an
+// unapproved-template error is logged and skipped rather than crashing
+// anything. Once Meta approves the template, sends start succeeding on the
+// very next scheduled run — no redeploy needed.
+router.get("/jobs/weekly-checkin", async (req: Request, res: Response) => {
+  const result = await runWeeklyCheckin();
+  req.log.info(result, "Weekly check-in job run complete");
+  res.json(result);
 });
 
 router.get("/webhook", (req: Request, res: Response) => {
@@ -1174,6 +1263,31 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
 
+  // Week-1 check-in "Yes, I have an issue" button — handled for any real
+  // owner regardless of session state. Flags Sam directly via WhatsApp with
+  // shop + phone context, so he knows it's a genuine ShopBrain user and not
+  // a stranger, without needing to be actively checking in on people.
+  if (replyId === "checkin_issue") {
+    const ownerPhone = cleanPhone(from);
+    const { data: owner } = await supabase.from("owners").select("name, language").eq("phone", ownerPhone).single();
+    const ownerLang = (owner?.language as Lang) ?? "en";
+    const shopName = owner?.name ?? `Shop (${from.slice(-4)})`;
+
+    if (SAM_PHONE_NUMBER) {
+      try {
+        await sendWhatsAppMessage(
+          SAM_PHONE_NUMBER,
+          `⚠️ ShopBrain issue flagged\n\nShop: ${shopName}\nOwner phone: ${ownerPhone}\n\nThey tapped "Yes" on their check-in — this is a real ShopBrain user, not a stranger.`
+        );
+      } catch (err) {
+        console.error("Failed to notify Sam of flagged issue:", err);
+      }
+    }
+
+    await sendWhatsAppMessage(from, T[ownerLang].checkinConfirmed);
+    return;
+  }
+
   if (!(await isOwner(from))) {
     await sendWhatsAppMessage(from, NON_OWNER_REPLY);
     return;
@@ -1198,6 +1312,27 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     } else {
       await sendNoNumberCustomerSummary(from, lang, customer.id);
     }
+    return;
+  }
+
+  // A row picked from a reminder-specific name-search list. Always
+  // re-checks opt-out status right before sending — never trusts the label
+  // shown in the list, since the opt-out state could theoretically change
+  // between listing and tapping.
+  if (replyId.startsWith("remindsearch_")) {
+    const customerId = replyId.slice("remindsearch_".length);
+    const { data: customer } = await supabase.from("customers").select("id, name, phone").eq("id", customerId).eq("shop_id", from).single();
+    if (!customer?.phone) {
+      await sendWhatsAppMessage(from, T[lang].noCustomerText);
+      await sendPersistentMenu(from, lang);
+      return;
+    }
+    if (await isOptedOut(customer.phone)) {
+      await sendWhatsAppMessage(from, T[lang].reminderSkippedOptedOut(customer.name));
+      await sendPersistentMenu(from, lang);
+      return;
+    }
+    await sendReminder(from, customer.phone, lang);
     return;
   }
 
@@ -1377,7 +1512,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   }
   if (replyId === "reminder_specific") {
     sessions[from] = { step: "reminder_phone", data: {} };
-    await sendWhatsAppMessage(from, T[lang].findCustomerPrompt);
+    await sendWhatsAppMessage(from, T[lang].findReminderPromptSearch);
     return;
   }
   if (replyId === "reminder_all_choice") {
@@ -1748,9 +1883,15 @@ async function handleSession(from: string, text: string, session: Session, lang:
     return;
   }
   if (session.step === "reminder_phone") {
-    const phone = cleanPhone(text);
+    const trimmed = text.trim();
+    const looksLikePhone = /^[\d\s+\-()]{7,15}$/.test(trimmed);
     sessions[from] = undefined as any;
-    await sendReminder(from, phone, lang);
+    if (looksLikePhone) {
+      await sendReminder(from, cleanPhone(trimmed), lang);
+    } else {
+      const rows = await searchCustomersWithDetails(from, trimmed);
+      await sendReminderNameSearchResults(from, lang, rows, trimmed);
+    }
     return;
   }
   // --- MoMo setup steps ---
