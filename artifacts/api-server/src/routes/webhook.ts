@@ -60,6 +60,8 @@ const sessions: Record<string, Session> = {};
 //   );
 //   create index if not exists payments_shop_created_idx on payments (shop_id, created_at);
 
+// NOTE: Undo Last Debt, Today and Quick Amounts need NO new SQL.
+
 const T = {
   en: {
     welcome: "👋 Welcome to *ShopBrain*\nWhat would you like to do?",
@@ -69,7 +71,7 @@ const T = {
     askPhone: "➕ *Add Debt*\n\nWhat is the customer's phone number?\n\ne.g. 0788123456",
     askName: "What is the customer's name?",
     askItem: "What item did they take?",
-    askAmount: "How much do they owe? (in Frw)",
+    askAmount: "How much do they owe? (in Frw)\n\n✍️ Type an amount, or choose one below (optional)",
     invalidPhone: "❌ Invalid number. Please enter a valid phone number:",
     invalidAmount: "❌ Invalid amount. Please enter a number e.g. 5000",
     debtSaved: (name: string, phone: string, item: string, amount: number, total: number) =>
@@ -139,15 +141,17 @@ const T = {
 *Using the buttons:*
 ➕ Add Debt — record a new customer debt
 🔍 Find Customer — look up a customer's balance
+↩️ Undo Last Debt — on a customer's card, removes their latest debt if you made a mistake
 ✅ Mark as Paid — enter their number, then choose Partially or Full Payment
 🔔 Send Reminder — remind one customer, or everyone at once
 🌐 Change Language — switch Kinyarwanda/English
 💳 MoMo — set up payment details, or set the number customers can reach you on
 💰 Total — see your total outstanding debt
-➕ More — see everything else: Follow-up, Report and your full customer list
+➕ More — see everything else: Follow-up, Report, Today and your full customer list
 
 *Typed shortcuts (optional):*
 - TOTAL — see your total outstanding debt
+- TODAY — what was added and collected today
 - FOLLOWUP — customers who need a call or a visit
 - REPORT — what's owed now and how much came back
 - REMIND ALL — remind every customer who owes you
@@ -246,6 +250,22 @@ const T = {
     reportOldest: (days: number) => `🕰 Oldest unpaid debt: ${days} days`,
     reportFollowUp: (n: number) => `🚩 Need follow-up: ${n} — type FOLLOWUP to see them`,
     reportNote: "ℹ️ Collected amounts only count payments recorded in ShopBrain.",
+    // --- Undo last debt ---
+    undoBtn: "↩️ Undo Last Debt",
+    undoYes: "✅ Yes, remove",
+    undoConfirm: (name: string, item: string, amount: number, date: string) =>
+      `↩️ Remove this debt for *${name}*?\n\n📦 ${item}\n💰 ${amount.toLocaleString()} Frw\n📅 ${date}`,
+    undoDone: (name: string, item: string, amount: number, total: number) =>
+      `✅ *Debt removed*\n\n👤 ${name}\n📦 ${item} — ${amount.toLocaleString()} Frw\n📊 Total owed now: ${total.toLocaleString()} Frw`,
+    undoAlreadyPaid: (name: string) => `ℹ️ The last entry for *${name}* is already paid, so it can't be undone here.`,
+    undoNothing: (name: string) => `ℹ️ *${name}* has no entries to undo.`,
+    undoGone: "ℹ️ That entry was already removed.",
+    // --- Today ---
+    todayBtn: "📆 Today",
+    todayHeader: "📆 *Today*",
+    todayDebts: (total: number, n: number) => `➕ Debts added: *${total.toLocaleString()} Frw* (${n})`,
+    todayPayments: (total: number, n: number) => `✅ Payments received: *${total.toLocaleString()} Frw* (${n})`,
+    todayOwed: (total: number, count: number) => `💰 Total owed now: *${total.toLocaleString()} Frw* (${count} customers)`,
   },
   rw: {
     welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
@@ -255,7 +275,7 @@ const T = {
     askPhone: "➕ *Ongeraho Umwenda*\n\nAndika nimero y'umukiriya?\n\nUrugero: 0788123456",
     askName: "Andika izina ry'umukiriya?",
     askItem: "Igicuruzwa atwaye?",
-    askAmount: "Agusigayemo angahe? (muri Frw)",
+    askAmount: "Agusigayemo angahe? (muri Frw)\n\n✍️ Andika cyangwa uhitemo hano hasi (si ngombwa)",
     invalidPhone: "❌ Nimero si yo. Andika nimero y'umukiriya ikurikira:",
     invalidAmount: "❌ Umubare si wo. Andika umubare urugero 5000",
     debtSaved: (name: string, phone: string, item: string, amount: number, total: number) =>
@@ -325,15 +345,17 @@ const T = {
 *Gukoresha buto:*
 ➕ Ongeraho Umwenda — andika umwenda mushya
 🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo
+↩️ Siba Uheruka — ku makuru y'umukiriya, usiba umwenda uheruka niba wibeshye
 ✅ Emeza Kwishyura — andika nimero, hanyuma uhitemo Igice cyangwa Byose
 🔔 Kwibutsa — wibutsa umukiriya umwe, cyangwa bose icyarimwe
 🌐 Guhindura Ururimi — hindura Ikinyarwanda/Icyongereza
 💳 MoMo — shyiraho amakuru y'ubwishyu, cyangwa shyiraho nimero abakiriya bakuvugana
 💰 Igiteranyo — reba igiteranyo cy'amadeni yose
-➕ Ibindi — reba ibindi byose: Gukurikirana, Raporo, n'urutonde rw'abakiriya bawe bose
+➕ Ibindi — reba ibindi byose: Gukurikirana, Raporo, Uyu Munsi, n'urutonde rw'abakiriya bawe bose
 
 *Amabwiriza wandika (ntibisabwa):*
 - TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amadeni yose
+- UYU MUNSI cyangwa TODAY — ibyongeweho n'ibyishyuwe uyu munsi
 - GUKURIKIRANA — abakiriya bakeneye guhamagarwa cyangwa gusurwa
 - RAPORO — amafaranga asigaye n'ayagarutse
 - REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amadeni
@@ -432,6 +454,22 @@ const T = {
     reportOldest: (days: number) => `🕰 Ideni rya kera: iminsi ${days}`,
     reportFollowUp: (n: number) => `🚩 Bakeneye gukurikiranwa: ${n} — andika GUKURIKIRANA ubirebe`,
     reportNote: "ℹ️ Amafaranga yishyuwe abarwa gusa ku kwishyura kwanditswe muri ShopBrain.",
+    // --- Undo last debt ---
+    undoBtn: "↩️ Siba Uheruka",
+    undoYes: "✅ Yego, siba",
+    undoConfirm: (name: string, item: string, amount: number, date: string) =>
+      `↩️ Ushaka gusiba uyu mwenda wa *${name}*?\n\n📦 ${item}\n💰 ${amount.toLocaleString()} Frw\n📅 ${date}`,
+    undoDone: (name: string, item: string, amount: number, total: number) =>
+      `✅ *Umwenda wasibwe*\n\n👤 ${name}\n📦 ${item} — ${amount.toLocaleString()} Frw\n📊 Asigayemo ubu: ${total.toLocaleString()} Frw`,
+    undoAlreadyPaid: (name: string) => `ℹ️ Umwenda uheruka wa *${name}* waramaze kwishyurwa, ntushobora gusibwa hano.`,
+    undoNothing: (name: string) => `ℹ️ *${name}* nta mwenda wo gusiba afite.`,
+    undoGone: "ℹ️ Uyu mwenda waramaze gusibwa.",
+    // --- Today ---
+    todayBtn: "📆 Uyu Munsi",
+    todayHeader: "📆 *Uyu Munsi*",
+    todayDebts: (total: number, n: number) => `➕ Amadeni yongeweho: *${total.toLocaleString()} Frw* (${n})`,
+    todayPayments: (total: number, n: number) => `✅ Yishyuwe: *${total.toLocaleString()} Frw* (${n})`,
+    todayOwed: (total: number, count: number) => `💰 Asigayemo ubu: *${total.toLocaleString()} Frw* (abakiriya ${count})`,
   },
 };
 
@@ -836,9 +874,10 @@ async function sendReminderNameSearchResults(
 
 // Shows a customer's summary by ID rather than phone — needed for
 // no-number customers, since phone-based lookups can't reach them.
-// Deliberately sends no action buttons: Mark as Paid / Edit / Send Reminder
-// are still phone-keyed everywhere else in this file (a known, pre-existing
-// gap for no-number customers), so wiring buttons here would silently fail.
+// Only the Undo Last Debt button is offered here (it works by customer ID).
+// Mark as Paid / Edit / Send Reminder are still phone-keyed everywhere else
+// in this file (a known, pre-existing gap for no-number customers), so wiring
+// those buttons here would silently fail.
 async function sendNoNumberCustomerSummary(from: string, lang: Lang, customerId: string): Promise<void> {
   const { data: customer } = await supabase.from("customers").select("*").eq("id", customerId).eq("shop_id", from).single();
   if (!customer) {
@@ -853,6 +892,15 @@ async function sendNoNumberCustomerSummary(from: string, lang: Lang, customerId:
   const lastDate = lastTx ? formatFullTimestamp(lastTx.date) : "N/A";
   const phoneDisplay = lang === "rw" ? "nta nimero" : "no number";
   await sendWhatsAppMessage(from, T[lang].customerSummary(customer.name, phoneDisplay, lastTx?.item ?? "N/A", totalOwed, lastDate));
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].whatToDo },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: `undo_last_${customer.id}`, title: T[lang].undoBtn } },
+      ],
+    },
+  });
   await sendPersistentMenu(from, lang);
 }
 
@@ -1115,8 +1163,9 @@ async function sendMomoMenu(from: string, lang: Lang): Promise<void> {
   });
 }
 
-// "More" menu: Follow-up, Report, All Customers in the first bubble, Help in
-// a second one (a single WhatsApp button message caps out at 3 buttons).
+// "More" menu: Follow-up, Report, All Customers in the first bubble; Today
+// and Help in a second one (a single WhatsApp button message caps out at 3
+// buttons). Today sits just below Report and above Help.
 async function sendMoreMenu(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -1134,6 +1183,7 @@ async function sendMoreMenu(from: string, lang: Lang): Promise<void> {
     body: { text: "\u200B" },
     action: {
       buttons: [
+        { type: "reply", reply: { id: "today_btn", title: T[lang].todayBtn } },
         { type: "reply", reply: { id: "help_btn", title: "❓ Help" } },
       ],
     },
@@ -1460,6 +1510,30 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
 
   if (replyId === "remind_cancel") {
     await sendPersistentMenu(from, lang);
+    return;
+  }
+
+  if (replyId === "today_btn") {
+    await showToday(from, lang);
+    return;
+  }
+
+  // Quick-amount button during Add Debt.
+  if (replyId.startsWith("amt_")) {
+    if (sessions[from]?.step !== "add_amount") return; // stale button tap, ignore
+    const amount = parseInt(replyId.slice("amt_".length), 10);
+    if (isNaN(amount) || amount <= 0) return;
+    await finishAddDebt(from, lang, amount);
+    return;
+  }
+
+  if (replyId.startsWith("undo_last_")) {
+    await sendUndoConfirm(from, lang, replyId.slice("undo_last_".length));
+    return;
+  }
+
+  if (replyId.startsWith("undo_yes_")) {
+    await undoDebt(from, lang, replyId.slice("undo_yes_".length));
     return;
   }
 
@@ -1807,6 +1881,11 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
     return;
   }
 
+  if (upper === "TODAY" || upper === "UYU MUNSI") {
+    await showToday(from, lang);
+    return;
+  }
+
   if (upper === "MOMO") {
     await startMomoSetup(from, lang);
     return;
@@ -1947,7 +2026,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
   if (session.step === "add_item") {
     session.data["item"] = text;
     session.step = "add_amount";
-    await sendWhatsAppMessage(from, T[lang].askAmount);
+    await sendAmountPrompt(from, lang);
     return;
   }
   if (session.step === "add_amount") {
@@ -1956,36 +2035,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
       await sendWhatsAppMessage(from, T[lang].invalidAmount);
       return;
     }
-    const { phone, name, item } = session.data as Record<string, string>;
-    const consentGiven = session.data["consent"] === "yes";
-    // phone may be "" (customer chose "No Number") — store null in that case
-    const phoneValue: string | null = phone ? phone : null;
-
-    sessions[from] = undefined as any;
-
-    let customer: any = null;
-    if (phoneValue) {
-      const { data: existingCustomer } = await supabase.from("customers").select("*").eq("phone", phoneValue).eq("shop_id", from).single();
-      customer = existingCustomer;
-    }
-    if (!customer) {
-      // FIX: was inserting a literal `phoneValue` column instead of setting `phone`.
-      const { data: newCustomer, error } = await supabase.from("customers").insert({ phone: phoneValue, name, shop_id: from, reminders_consent: consentGiven }).select().single();
-      if (error || !newCustomer) {
-        await sendWhatsAppMessage(from, T[lang].somethingWrong);
-        return;
-      }
-      customer = newCustomer;
-    }
-    const { error: txError } = await supabase.from("transactions").insert({ customer_id: customer.id, item, amount, paid: false });
-    if (txError) {
-      await sendWhatsAppMessage(from, T[lang].somethingWrong);
-      return;
-    }
-    const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
-    const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
-    await sendWhatsAppMessage(from, T[lang].debtSaved(customer.name, phoneValue || (lang === "rw" ? "nta nimero" : "no number"), item, amount, total));
-    setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+    await finishAddDebt(from, lang, amount);
     return;
   }
   if (session.step === "find_phone") {
@@ -2252,6 +2302,206 @@ async function getUnpaidTotal(customerId: string): Promise<number> {
   return (data ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
 }
 
+// --- Quick amounts ---
+const DEFAULT_QUICK_AMOUNTS = [500, 1000, 2000];
+
+// Amounts the owner uses at least twice (in their last 200 entries) take the
+// button slots, most frequent first. Remaining slots fall back to the defaults.
+async function getQuickAmounts(shopId: string): Promise<number[]> {
+  try {
+    const { data: custs } = await supabase.from("customers").select("id").eq("shop_id", shopId);
+    const ids = (custs ?? []).map((c: { id: string }) => c.id);
+    if (ids.length === 0) return DEFAULT_QUICK_AMOUNTS;
+
+    const { data: txs } = await supabase
+      .from("transactions")
+      .select("amount")
+      .in("customer_id", ids)
+      .order("date", { ascending: false })
+      .limit(200);
+
+    const stats = new Map<number, { count: number; firstSeen: number }>();
+    (txs ?? []).forEach((t: { amount: number }, i: number) => {
+      const s = stats.get(t.amount);
+      if (s) s.count++;
+      else stats.set(t.amount, { count: 1, firstSeen: i });
+    });
+
+    const result = [...stats.entries()]
+      .filter(([, s]) => s.count >= 2)
+      .sort((a, b) => b[1].count - a[1].count || a[1].firstSeen - b[1].firstSeen)
+      .map(([amount]) => amount)
+      .slice(0, 3);
+
+    for (const d of DEFAULT_QUICK_AMOUNTS) {
+      if (result.length >= 3) break;
+      if (!result.includes(d)) result.push(d);
+    }
+    return result.sort((a, b) => a - b);
+  } catch (err) {
+    console.error("Failed to load quick amounts:", err);
+    return DEFAULT_QUICK_AMOUNTS;
+  }
+}
+
+async function sendAmountPrompt(from: string, lang: Lang): Promise<void> {
+  const amounts = await getQuickAmounts(from);
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].askAmount },
+    action: {
+      buttons: amounts.map((a) => ({
+        type: "reply",
+        reply: { id: `amt_${a}`, title: `${a.toLocaleString()} Frw` },
+      })),
+    },
+  });
+}
+
+// Shared by the typed amount and the quick-amount buttons.
+async function finishAddDebt(from: string, lang: Lang, amount: number): Promise<void> {
+  const session = sessions[from];
+  if (!session) return;
+  const { phone, name, item } = session.data as Record<string, string>;
+  const consentGiven = session.data["consent"] === "yes";
+  // phone may be "" (customer chose "No Number") — store null in that case
+  const phoneValue: string | null = phone ? phone : null;
+
+  sessions[from] = undefined as any;
+
+  let customer: any = null;
+  if (phoneValue) {
+    const { data: existingCustomer } = await supabase.from("customers").select("*").eq("phone", phoneValue).eq("shop_id", from).single();
+    customer = existingCustomer;
+  }
+  if (!customer) {
+    const { data: newCustomer, error } = await supabase.from("customers").insert({ phone: phoneValue, name, shop_id: from, reminders_consent: consentGiven }).select().single();
+    if (error || !newCustomer) {
+      await sendWhatsAppMessage(from, T[lang].somethingWrong);
+      return;
+    }
+    customer = newCustomer;
+  }
+  const { error: txError } = await supabase.from("transactions").insert({ customer_id: customer.id, item, amount, paid: false });
+  if (txError) {
+    await sendWhatsAppMessage(from, T[lang].somethingWrong);
+    return;
+  }
+  const total = await getUnpaidTotal(customer.id);
+  await sendWhatsAppMessage(from, T[lang].debtSaved(customer.name, phoneValue || (lang === "rw" ? "nta nimero" : "no number"), item, amount, total));
+  setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+}
+
+// --- Undo last debt ---
+async function sendUndoConfirm(from: string, lang: Lang, customerId: string): Promise<void> {
+  const { data: customer } = await supabase.from("customers").select("id, name").eq("id", customerId).eq("shop_id", from).single();
+  if (!customer) {
+    await sendWhatsAppMessage(from, T[lang].noCustomerText);
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  const { data: lastArr } = await supabase
+    .from("transactions")
+    .select("id, item, amount, paid, date")
+    .eq("customer_id", customer.id)
+    .order("date", { ascending: false })
+    .limit(1);
+  const last = lastArr?.[0];
+  if (!last) {
+    await sendWhatsAppMessage(from, T[lang].undoNothing(customer.name));
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  if (last.paid) {
+    await sendWhatsAppMessage(from, T[lang].undoAlreadyPaid(customer.name));
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].undoConfirm(customer.name, last.item, last.amount, formatFullTimestamp(last.date)) },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: `undo_yes_${last.id}`, title: T[lang].undoYes } },
+        { type: "reply", reply: { id: "remind_cancel", title: T[lang].cancelBtn } },
+      ],
+    },
+  });
+}
+
+async function undoDebt(from: string, lang: Lang, txId: string): Promise<void> {
+  const { data: tx } = await supabase.from("transactions").select("id, item, amount, paid, customer_id").eq("id", txId).maybeSingle();
+  if (!tx) {
+    // Already deleted (e.g. the button was tapped twice).
+    await sendWhatsAppMessage(from, T[lang].undoGone);
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  // The entry must belong to a customer of THIS shop.
+  const { data: customer } = await supabase.from("customers").select("id, name").eq("id", tx.customer_id).eq("shop_id", from).single();
+  if (!customer) {
+    await sendWhatsAppMessage(from, T[lang].noCustomerText);
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  if (tx.paid) {
+    await sendWhatsAppMessage(from, T[lang].undoAlreadyPaid(customer.name));
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+  const { error } = await supabase.from("transactions").delete().eq("id", tx.id);
+  if (error) {
+    await sendWhatsAppMessage(from, T[lang].somethingWrong);
+    return;
+  }
+  const total = await getUnpaidTotal(customer.id);
+  await sendWhatsAppMessage(from, T[lang].undoDone(customer.name, tx.item, tx.amount, total));
+  setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+}
+
+// --- Today ---
+// Kigali is UTC+2 with no DST, so "today" starts at 22:00 UTC the day before.
+const KIGALI_OFFSET_MS = 2 * 60 * 60 * 1000;
+function startOfTodayKigali(): Date {
+  const shifted = new Date(Date.now() + KIGALI_OFFSET_MS);
+  shifted.setUTCHours(0, 0, 0, 0);
+  return new Date(shifted.getTime() - KIGALI_OFFSET_MS);
+}
+
+async function showToday(from: string, lang: Lang): Promise<void> {
+  const startIso = startOfTodayKigali().toISOString();
+
+  const { data: custs } = await supabase.from("customers").select("id").eq("shop_id", from);
+  const ids = (custs ?? []).map((c: { id: string }) => c.id);
+  if (ids.length === 0) {
+    await sendWhatsAppMessage(from, T[lang].noCustomers);
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+
+  const { data: addedTx } = await supabase.from("transactions").select("amount").in("customer_id", ids).gte("date", startIso);
+  const { data: paidToday, error } = await supabase.from("payments").select("amount").eq("shop_id", from).gte("created_at", startIso);
+  if (error) console.error("Failed to load today's payments:", error);
+  const { debtors } = await analyzeDebtors(from);
+
+  const added = (addedTx ?? []).reduce((s: number, t: { amount: number }) => s + t.amount, 0);
+  const paid = (paidToday ?? []).reduce((s: number, p: { amount: number }) => s + p.amount, 0);
+  const owedNow = debtors.reduce((s, d) => s + d.total, 0);
+
+  const t = T[lang];
+  await sendWhatsAppMessage(
+    from,
+    [
+      t.todayHeader,
+      "",
+      t.todayDebts(added, (addedTx ?? []).length),
+      t.todayPayments(paid, (paidToday ?? []).length),
+      t.todayOwed(owedNow, debtors.length),
+    ].join("\n")
+  );
+  setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+}
+
 async function applyPartialPayment(from: string, customer: { id: string; name: string; phone: string }, paymentAmount: number, lang: Lang, item: string): Promise<void> {
   const { data: unpaidTx } = await supabase.from("transactions").select("*").eq("customer_id", customer.id).eq("paid", false).order("date", { ascending: true });
   if (!unpaidTx || unpaidTx.length === 0) {
@@ -2312,12 +2562,14 @@ async function lookupCustomer(from: string, phone: string, lang: Lang): Promise<
     },
   });
   // Sent as a second bubble since a single WhatsApp button message caps out
-  // at 3 buttons and the row above is already full.
+  // at 3 buttons and the row above is already full. Undo Last Debt sits just
+  // above Edit Customer.
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
     body: { text: "\u200B" },
     action: {
       buttons: [
+        { type: "reply", reply: { id: `undo_last_${customer.id}`, title: T[lang].undoBtn } },
         { type: "reply", reply: { id: "edit_customer", title: T[lang].editBtn } },
       ],
     },
