@@ -13,6 +13,19 @@ const VERIFY_TOKEN =
 // who need help, without waiting for Sam to notice on his own.
 const SAM_PHONE_NUMBER = process.env["SAM_PHONE_NUMBER"];
 
+// A customer can be reminded at most once per this many days (the owner can
+// still override a single reminder with "Send Anyway"). REMIND ALL skips
+// anyone reminded inside this window.
+const REMINDER_COOLDOWN_DAYS = 7;
+
+// A debt older than this many days shows up on the Follow-up list.
+const OLD_DEBT_DAYS = 14;
+
+// Max customers shown on the Follow-up list (the rest are summarised).
+const FOLLOWUP_MAX = 15;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 interface Session {
   step: string;
   data: Record<string, string>;
@@ -32,6 +45,20 @@ const sessions: Record<string, Session> = {};
 //   update customers set reminders_consent = true; -- existing customers count as consented
 //   create table opt_outs (phone text primary key, created_at timestamptz not null default now());
 //   create table owner_notices (id bigint generated always as identity primary key, shop_id text not null, text text not null, created_at timestamptz not null default now());
+
+// NOTE: reminder cooldown, Follow-up list and REPORT need this SQL run in
+// Supabase BEFORE deploying this file:
+//   alter table customers add column if not exists last_reminded_at timestamptz;
+//   alter table customers add column if not exists last_reminder_status text;
+//   create table if not exists payments (
+//     id bigint generated always as identity primary key,
+//     shop_id text not null,
+//     customer_id text not null,
+//     customer_name text,
+//     amount integer not null,
+//     created_at timestamptz not null default now()
+//   );
+//   create index if not exists payments_shop_created_idx on payments (shop_id, created_at);
 
 const T = {
   en: {
@@ -117,10 +144,12 @@ const T = {
 🌐 Change Language — switch Kinyarwanda/English
 💳 MoMo — set up payment details, or set the number customers can reach you on
 💰 Total — see your total outstanding debt
-➕ More — see everything else, including your full customer list
+➕ More — see everything else: Follow-up, Report and your full customer list
 
 *Typed shortcuts (optional):*
 - TOTAL — see your total outstanding debt
+- FOLLOWUP — customers who need a call or a visit
+- REPORT — what's owed now and how much came back
 - REMIND ALL — remind every customer who owes you
 - REMIND <phone> — remind one specific customer
 - @ALL — list every customer you've registered
@@ -190,9 +219,36 @@ const T = {
     // --- Week-1 check-in flagging ---
     checkinIssueBtn: "❌ Yes, I have an issue",
     checkinConfirmed: "Got it — someone will reach out to help you soon.",
+    // --- Reminder cooldown ---
+    sendAnywayBtn: "📤 Send Anyway",
+    cancelBtn: "✖️ Cancel",
+    reminderCooldown: (name: string, daysAgo: number) =>
+      `⏱ *${name}* was already reminded ${daysAgo === 0 ? "today" : daysAgo === 1 ? "1 day ago" : `${daysAgo} days ago`}. To avoid annoying customers, reminders are limited to once every ${REMINDER_COOLDOWN_DAYS} days.\n\nSend anyway?`,
+    remindAllSkippedRecent: (names: string) =>
+      `\n\n⏱ Skipped — reminded in the last ${REMINDER_COOLDOWN_DAYS} days: ${names}`,
+    // --- Follow-up list ---
+    followUpBtn: "🚩 Follow-up",
+    followUpHeader: (count: number) => `🚩 *Needs Follow-up (${count})*\n\nThese customers need a call or a visit:\n\n`,
+    followUpContinued: "🚩 *Continued...*\n\n",
+    followUpMore: (n: number) => `➕ ${n} more not shown. Settle or call the ones above first.`,
+    followUpNone: "✅ Nobody needs follow-up right now.",
+    reasonNoPhone: "no phone number — can't send reminders",
+    reasonOptedOut: "asked to stop reminders — call them",
+    reasonNoConsent: "no reminder consent recorded",
+    reasonFailed: "last reminder did not deliver",
+    reasonOld: (days: number) => `oldest debt is ${days} days old`,
+    // --- Report ---
+    reportBtn: "📊 Report",
+    reportHeader: "📊 *ShopBrain Report*",
+    reportOwed: (total: number, count: number) => `💰 Owed now: *${total.toLocaleString()} Frw* (${count} customers)`,
+    reportCollected30: (total: number, n: number) => `✅ Collected, last 30 days: *${total.toLocaleString()} Frw* (${n} payments)`,
+    reportCollected7: (total: number) => `✅ Collected, last 7 days: *${total.toLocaleString()} Frw*`,
+    reportOldest: (days: number) => `🕰 Oldest unpaid debt: ${days} days`,
+    reportFollowUp: (n: number) => `🚩 Need follow-up: ${n} — type FOLLOWUP to see them`,
+    reportNote: "ℹ️ Collected amounts only count payments recorded in ShopBrain.",
   },
   rw: {
-     welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
+    welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
     addDebt: "➕ Ongeraho Umwenda",
     findCustomer: "🔍 Shakisha Umukiriya",
     changeLanguage: "🌐 Guhindura Ururimi",
@@ -274,10 +330,12 @@ const T = {
 🌐 Guhindura Ururimi — hindura Ikinyarwanda/Icyongereza
 💳 MoMo — shyiraho amakuru y'ubwishyu, cyangwa shyiraho nimero abakiriya bakuvugana
 💰 Igiteranyo — reba igiteranyo cy'amadeni yose
-➕ Ibindi — reba ibindi byose, hamwe n'urutonde rw'abakiriya bawe bose
+➕ Ibindi — reba ibindi byose: Gukurikirana, Raporo, n'urutonde rw'abakiriya bawe bose
 
 *Amabwiriza wandika (ntibisabwa):*
 - TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amadeni yose
+- GUKURIKIRANA — abakiriya bakeneye guhamagarwa cyangwa gusurwa
+- RAPORO — amafaranga asigaye n'ayagarutse
 - REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amadeni
 - REMIND <nimero> — wibutsa umukiriya umwe
 - @ALL — reba abakiriya bawe bose
@@ -347,6 +405,33 @@ const T = {
     // --- Week-1 check-in flagging ---
     checkinIssueBtn: "❌ Yego, mfite ikibazo",
     checkinConfirmed: "Byakiriwe — hari uzagufasha vuba.",
+    // --- Reminder cooldown ---
+    sendAnywayBtn: "📤 Ohereza Nubundi",
+    cancelBtn: "✖️ Reka",
+    reminderCooldown: (name: string, daysAgo: number) =>
+      `⏱ *${name}* yibutswe ${daysAgo === 0 ? "uyu munsi" : `hashize iminsi ${daysAgo}`}. Kugira ngo abakiriya batarakara, kwibutsa bikorwa rimwe mu minsi ${REMINDER_COOLDOWN_DAYS}.\n\nUracyashaka kohereza?`,
+    remindAllSkippedRecent: (names: string) =>
+      `\n\n⏱ Ntibyoherejwe — bibutswe mu minsi ${REMINDER_COOLDOWN_DAYS} ishize: ${names}`,
+    // --- Follow-up list ---
+    followUpBtn: "🚩 Gukurikirana",
+    followUpHeader: (count: number) => `🚩 *Abakeneye Gukurikiranwa (${count})*\n\nAba bakiriya bakeneye guhamagarwa cyangwa gusurwa:\n\n`,
+    followUpContinued: "🚩 *Gukomeza...*\n\n",
+    followUpMore: (n: number) => `➕ Hari abandi ${n} batagaragaye hano. Banza ukurikirane abo hejuru.`,
+    followUpNone: "✅ Nta muntu ukeneye gukurikiranwa ubu.",
+    reasonNoPhone: "nta nimero — ntushobora kumwibutsa",
+    reasonOptedOut: "yasabye guhagarikirwa ubutumwa — muhamagare",
+    reasonNoConsent: "nta bwemera bwo kwibutsa bwanditswe",
+    reasonFailed: "ubutumwa bwa nyuma ntibwagezeyo",
+    reasonOld: (days: number) => `ideni rya kera rimaze iminsi ${days}`,
+    // --- Report ---
+    reportBtn: "📊 Raporo",
+    reportHeader: "📊 *Raporo ya ShopBrain*",
+    reportOwed: (total: number, count: number) => `💰 Asigayemo ubu: *${total.toLocaleString()} Frw* (abakiriya ${count})`,
+    reportCollected30: (total: number, n: number) => `✅ Yishyuwe mu minsi 30 ishize: *${total.toLocaleString()} Frw* (kwishyura ${n})`,
+    reportCollected7: (total: number) => `✅ Yishyuwe mu minsi 7 ishize: *${total.toLocaleString()} Frw*`,
+    reportOldest: (days: number) => `🕰 Ideni rya kera: iminsi ${days}`,
+    reportFollowUp: (n: number) => `🚩 Bakeneye gukurikiranwa: ${n} — andika GUKURIKIRANA ubirebe`,
+    reportNote: "ℹ️ Amafaranga yishyuwe abarwa gusa ku kwishyura kwanditswe muri ShopBrain.",
   },
 };
 
@@ -898,6 +983,17 @@ router.post("/webhook", async (req: Request, res: Response) => {
       const { data: log } = await supabase.from("reminder_logs").select("*").eq("message_id", status.id).single();
       if (!log) continue;
       const lang = await getLang(log.owner_phone) as Lang;
+
+      // Remember the latest reminder status on the customer, so the Follow-up
+      // list can flag reminders that did not deliver.
+      if (["sent", "delivered", "read", "failed"].includes(status.status)) {
+        await supabase
+          .from("customers")
+          .update({ last_reminder_status: status.status })
+          .eq("phone", log.customer_phone)
+          .eq("shop_id", log.owner_phone);
+      }
+
       if (status.status === "sent") {
         await supabase.from("reminder_logs").update({ status: "sent" }).eq("message_id", status.id);
         await sendWhatsAppMessage(log.owner_phone, T[lang].reminderSentNotReceived(log.customer_name, log.customer_phone));
@@ -1019,13 +1115,25 @@ async function sendMomoMenu(from: string, lang: Lang): Promise<void> {
   });
 }
 
+// "More" menu: Follow-up, Report, All Customers in the first bubble, Help in
+// a second one (a single WhatsApp button message caps out at 3 buttons).
 async function sendMoreMenu(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
     body: { text: T[lang].whatToDo },
     action: {
       buttons: [
+        { type: "reply", reply: { id: "followup_btn", title: T[lang].followUpBtn } },
+        { type: "reply", reply: { id: "report_btn", title: T[lang].reportBtn } },
         { type: "reply", reply: { id: "view_all_customers", title: T[lang].allCustomersBtn } },
+      ],
+    },
+  });
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: "\u200B" },
+    action: {
+      buttons: [
         { type: "reply", reply: { id: "help_btn", title: "❓ Help" } },
       ],
     },
@@ -1336,6 +1444,35 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
 
+  // "Send Anyway" after the reminder cooldown warning. sendReminder still
+  // re-checks opt-out and consent; only the cooldown is bypassed.
+  if (replyId.startsWith("remindforce_")) {
+    const customerId = replyId.slice("remindforce_".length);
+    const { data: customer } = await supabase.from("customers").select("id, phone").eq("id", customerId).eq("shop_id", from).single();
+    if (!customer?.phone) {
+      await sendWhatsAppMessage(from, T[lang].noCustomerText);
+      await sendPersistentMenu(from, lang);
+      return;
+    }
+    await sendReminder(from, customer.phone, lang, true);
+    return;
+  }
+
+  if (replyId === "remind_cancel") {
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+
+  if (replyId === "followup_btn") {
+    await showFollowUp(from, lang);
+    return;
+  }
+
+  if (replyId === "report_btn") {
+    await showReport(from, lang);
+    return;
+  }
+
   if (replyId === "add_debt") {
     sessions[from] = { step: "add_phone", data: {} };
     await sendWhatsAppInteractiveMessage(from, {
@@ -1550,7 +1687,11 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
       return;
     }
     sessions[from] = undefined as any;
+    // Work out what is being cleared BEFORE marking paid, so the Report can
+    // count it as money collected.
+    const owedBefore = await getUnpaidTotal(customer.id);
     await supabase.from("transactions").update({ paid: true }).eq("customer_id", customer.id).eq("paid", false);
+    await recordPayment(from, customer.id, customer.name, owedBefore);
     await sendWhatsAppMessage(from, T[lang].allPaid(customer.name));
     await sendPersistentMenu(from, lang);
     return;
@@ -1653,6 +1794,16 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
 
   if (upper === "TOTAL" || upper === "IGITERANYO") {
     await showTotalDebt(from, lang);
+    return;
+  }
+
+  if (["FOLLOWUP", "FOLLOW-UP", "FOLLOW UP", "GUKURIKIRANA"].includes(upper)) {
+    await showFollowUp(from, lang);
+    return;
+  }
+
+  if (upper === "REPORT" || upper === "RAPORO") {
+    await showReport(from, lang);
     return;
   }
 
@@ -1962,8 +2113,9 @@ async function handleSession(from: string, text: string, session: Session, lang:
   }
 }
 
-
-async function sendReminder(from: string, phone: string, lang: Lang): Promise<void> {
+// `force` skips the cooldown check only (used by the "Send Anyway" button).
+// Opt-out and consent are ALWAYS checked, even when forced.
+async function sendReminder(from: string, phone: string, lang: Lang, force = false): Promise<void> {
   const { data: owner } = await supabase
     .from("owners")
     .select("name, language, momo_number, momo_code, momo_receiver_name, shop_nickname, contact_phone")
@@ -2007,6 +2159,26 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     return;
   }
 
+  // Cooldown: one reminder per customer per REMINDER_COOLDOWN_DAYS. The owner
+  // can override a single reminder with "Send Anyway".
+  if (!force && customer.last_reminded_at) {
+    const sinceMs = Date.now() - new Date(customer.last_reminded_at).getTime();
+    if (sinceMs < REMINDER_COOLDOWN_DAYS * DAY_MS) {
+      const daysAgo = Math.floor(sinceMs / DAY_MS);
+      await sendWhatsAppInteractiveMessage(from, {
+        type: "button",
+        body: { text: T[lang].reminderCooldown(customer.name, daysAgo) },
+        action: {
+          buttons: [
+            { type: "reply", reply: { id: `remindforce_${customer.id}`, title: T[lang].sendAnywayBtn } },
+            { type: "reply", reply: { id: "remind_cancel", title: T[lang].cancelBtn } },
+          ],
+        },
+      });
+      return;
+    }
+  }
+
   const itemizedList = await buildItemizedList(customer.id);
 
   const momoBlock = buildMomoBlock(owner ?? {}, reminderLang);
@@ -2035,6 +2207,12 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
     reminderVars,
   );
 
+  // Start the cooldown clock and reset the delivery status for the Follow-up list.
+  await supabase
+    .from("customers")
+    .update({ last_reminded_at: new Date().toISOString(), last_reminder_status: "pending" })
+    .eq("id", customer.id);
+
   if (insertedLog) {
     const { error } = await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
     if (error) console.error("Failed to update reminder_logs message_id:", error);
@@ -2053,6 +2231,27 @@ async function sendReminder(from: string, phone: string, lang: Lang): Promise<vo
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
+// --- Payment log (feeds the REPORT) ---
+// transactions only store a paid flag and the remaining amount, so a payment
+// leaves no trace there. This table keeps one row per payment so the report
+// can say how much came back. Failures are logged but never block the
+// payment itself.
+async function recordPayment(shopId: string, customerId: string, customerName: string, amount: number): Promise<void> {
+  if (!amount || amount <= 0) return;
+  const { error } = await supabase.from("payments").insert({
+    shop_id: shopId,
+    customer_id: String(customerId),
+    customer_name: customerName,
+    amount,
+  });
+  if (error) console.error("Failed to record payment:", error);
+}
+
+async function getUnpaidTotal(customerId: string): Promise<number> {
+  const { data } = await supabase.from("transactions").select("amount").eq("customer_id", customerId).eq("paid", false);
+  return (data ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
+}
+
 async function applyPartialPayment(from: string, customer: { id: string; name: string; phone: string }, paymentAmount: number, lang: Lang, item: string): Promise<void> {
   const { data: unpaidTx } = await supabase.from("transactions").select("*").eq("customer_id", customer.id).eq("paid", false).order("date", { ascending: true });
   if (!unpaidTx || unpaidTx.length === 0) {
@@ -2062,6 +2261,8 @@ async function applyPartialPayment(from: string, customer: { id: string; name: s
   const totalBefore = unpaidTx.reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
   if (paymentAmount >= totalBefore) {
     await supabase.from("transactions").update({ paid: true }).eq("customer_id", customer.id).eq("paid", false);
+    // Count only what was actually owed, even if the owner typed a bigger number.
+    await recordPayment(from, customer.id, customer.name, totalBefore);
     await sendWhatsAppMessage(from, T[lang].fullPaid(customer.name, paymentAmount));
     return;
   }
@@ -2076,6 +2277,7 @@ async function applyPartialPayment(from: string, customer: { id: string; name: s
       remaining = 0;
     }
   }
+  await recordPayment(from, customer.id, customer.name, paymentAmount);
   const totalAfter = totalBefore - paymentAmount;
   await sendWhatsAppMessage(from, T[lang].partialPaid(customer.name, paymentAmount, totalAfter, item));
 }
@@ -2197,6 +2399,7 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
   const lines: string[] = [];
   const skippedOptedOut: string[] = [];
   const skippedNoConsent: string[] = [];
+  const skippedRecent: string[] = [];
   let grandTotal = 0;
   let sentCount = 0;
   let failedCount = 0;
@@ -2217,6 +2420,11 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
     }
     if (!customer.reminders_consent) {
       skippedNoConsent.push(customer.name);
+      continue;
+    }
+    // Cooldown: skip anyone reminded within the last REMINDER_COOLDOWN_DAYS.
+    if (customer.last_reminded_at && Date.now() - new Date(customer.last_reminded_at).getTime() < REMINDER_COOLDOWN_DAYS * DAY_MS) {
+      skippedRecent.push(customer.name);
       continue;
     }
 
@@ -2248,6 +2456,11 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
       }
+      // Start the cooldown clock and reset the delivery status for the Follow-up list.
+      await supabase
+        .from("customers")
+        .update({ last_reminded_at: new Date().toISOString(), last_reminder_status: "pending" })
+        .eq("id", customer.id);
       lines.push(`👤 ${customer.name} — ${total.toLocaleString()} Frw`);
       grandTotal += total;
       sentCount++;
@@ -2262,7 +2475,8 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
 
   const skippedNote =
     (skippedOptedOut.length > 0 ? T[lang].remindAllSkippedOptOut(skippedOptedOut.join(", ")) : "") +
-    (skippedNoConsent.length > 0 ? T[lang].remindAllSkippedNoConsent(skippedNoConsent.join(", ")) : "");
+    (skippedNoConsent.length > 0 ? T[lang].remindAllSkippedNoConsent(skippedNoConsent.join(", ")) : "") +
+    (skippedRecent.length > 0 ? T[lang].remindAllSkippedRecent(skippedRecent.join(", ")) : "");
 
   if (sentCount === 0 && failedCount > 0) {
     // FIX: distinguish "nothing to send" from "sends failed" — previously
@@ -2276,7 +2490,7 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
 
   if (sentCount === 0) {
     if (skippedNote) {
-      // Debts exist, but everyone was skipped for opt-out / missing consent.
+      // Debts exist, but everyone was skipped for opt-out / missing consent / cooldown.
       await sendWhatsAppMessage(from, T[lang].remindAllNoneSent + skippedNote);
       setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
       return;
@@ -2328,6 +2542,151 @@ async function showTotalDebt(from: string, lang: Lang): Promise<void> {
     `${T[lang].totalDebtTopDebtors}\n${debtorLines}`;
 
   await sendWhatsAppMessage(from, message);
+  setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+}
+
+// --- Follow-up list + Report ---
+type FollowUpReason = "no_phone" | "opted_out" | "no_consent" | "failed" | "old";
+
+interface DebtorInfo {
+  id: string;
+  name: string;
+  phone: string | null;
+  total: number;
+  oldestDays: number;
+  reasons: FollowUpReason[];
+}
+
+function reasonText(lang: Lang, reason: FollowUpReason, oldestDays: number): string {
+  const t = T[lang];
+  switch (reason) {
+    case "no_phone": return t.reasonNoPhone;
+    case "opted_out": return t.reasonOptedOut;
+    case "no_consent": return t.reasonNoConsent;
+    case "failed": return t.reasonFailed;
+    case "old": return t.reasonOld(oldestDays);
+  }
+}
+
+// Loads every customer of a shop who currently owes money, with the reasons
+// (if any) the owner should follow up personally. Two queries total for
+// customers + transactions, instead of one per customer.
+async function analyzeDebtors(shopId: string): Promise<{ debtors: DebtorInfo[]; customerCount: number }> {
+  const { data: customers } = await supabase.from("customers").select("*").eq("shop_id", shopId);
+  if (!customers || customers.length === 0) return { debtors: [], customerCount: 0 };
+
+  const ids = customers.map((c: { id: string }) => c.id);
+  const { data: unpaidTx } = await supabase
+    .from("transactions")
+    .select("customer_id, amount, date")
+    .in("customer_id", ids)
+    .eq("paid", false);
+
+  const byCustomer = new Map<string, { total: number; oldest: number }>();
+  for (const tx of unpaidTx ?? []) {
+    const ts = new Date(tx.date).getTime();
+    const cur = byCustomer.get(tx.customer_id) ?? { total: 0, oldest: ts };
+    cur.total += tx.amount;
+    if (ts < cur.oldest) cur.oldest = ts;
+    byCustomer.set(tx.customer_id, cur);
+  }
+
+  const optedOut = await getOptedOutSet(customers.map((c: { phone: string | null }) => c.phone ?? ""));
+
+  const debtors: DebtorInfo[] = [];
+  for (const c of customers) {
+    const agg = byCustomer.get(c.id);
+    if (!agg || agg.total <= 0) continue;
+    const oldestDays = Math.floor((Date.now() - agg.oldest) / DAY_MS);
+    const reasons: FollowUpReason[] = [];
+    if (!c.phone) reasons.push("no_phone");
+    else if (optedOut.has(c.phone)) reasons.push("opted_out");
+    else if (!c.reminders_consent) reasons.push("no_consent");
+    if (c.phone && c.last_reminder_status === "failed") reasons.push("failed");
+    if (oldestDays >= OLD_DEBT_DAYS) reasons.push("old");
+    debtors.push({ id: c.id, name: c.name, phone: c.phone ?? null, total: agg.total, oldestDays, reasons });
+  }
+  return { debtors, customerCount: customers.length };
+}
+
+async function showFollowUp(from: string, lang: Lang): Promise<void> {
+  const { debtors, customerCount } = await analyzeDebtors(from);
+  if (customerCount === 0) {
+    await sendWhatsAppMessage(from, T[lang].noCustomers);
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+
+  const flagged = debtors
+    .filter((d) => d.reasons.length > 0)
+    .sort((a, b) => b.oldestDays - a.oldestDays);
+
+  if (flagged.length === 0) {
+    await sendWhatsAppMessage(from, T[lang].followUpNone);
+    setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+    return;
+  }
+
+  const shown = flagged.slice(0, FOLLOWUP_MAX);
+  const lines = shown.map((d) =>
+    `👤 *${d.name}* — ${d.total.toLocaleString()} Frw\n📞 ${d.phone ?? (lang === "rw" ? "nta nimero" : "no number")}\n⚠️ ${d.reasons.map((r) => reasonText(lang, r, d.oldestDays)).join("; ")}`
+  );
+
+  const chunkSize = 5;
+  for (let i = 0; i < lines.length; i += chunkSize) {
+    const chunk = lines.slice(i, i + chunkSize);
+    const header = i === 0 ? T[lang].followUpHeader(flagged.length) : T[lang].followUpContinued;
+    await sendWhatsAppMessage(from, header + chunk.join("\n\n"));
+  }
+  if (flagged.length > shown.length) {
+    await sendWhatsAppMessage(from, T[lang].followUpMore(flagged.length - shown.length));
+  }
+  setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+}
+
+async function showReport(from: string, lang: Lang): Promise<void> {
+  const { debtors, customerCount } = await analyzeDebtors(from);
+  if (customerCount === 0) {
+    await sendWhatsAppMessage(from, T[lang].noCustomers);
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+
+  const owedNow = debtors.reduce((sum, d) => sum + d.total, 0);
+  const oldestDays = debtors.reduce((max, d) => Math.max(max, d.oldestDays), 0);
+  const followUpCount = debtors.filter((d) => d.reasons.length > 0).length;
+
+  const since30 = new Date(Date.now() - 30 * DAY_MS).toISOString();
+  const { data: payments, error } = await supabase
+    .from("payments")
+    .select("amount, created_at")
+    .eq("shop_id", from)
+    .gte("created_at", since30);
+  if (error) console.error("Failed to load payments for report:", error);
+
+  const cut7 = Date.now() - 7 * DAY_MS;
+  let collected30 = 0;
+  let count30 = 0;
+  let collected7 = 0;
+  for (const p of payments ?? []) {
+    collected30 += p.amount;
+    count30++;
+    if (new Date(p.created_at).getTime() >= cut7) collected7 += p.amount;
+  }
+
+  const t = T[lang];
+  const lines: string[] = [
+    t.reportHeader,
+    "",
+    t.reportOwed(owedNow, debtors.length),
+    t.reportCollected30(collected30, count30),
+    t.reportCollected7(collected7),
+  ];
+  if (debtors.length > 0) lines.push(t.reportOldest(oldestDays));
+  if (followUpCount > 0) lines.push(t.reportFollowUp(followUpCount));
+  lines.push("", t.reportNote);
+
+  await sendWhatsAppMessage(from, lines.join("\n"));
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
@@ -2384,7 +2743,9 @@ async function handleLegacyPaid(from: string, text: string, lang: Lang): Promise
   if (partialAmount && !isNaN(partialAmount)) {
     await applyPartialPayment(from, customer, partialAmount, lang, lang === "rw" ? "Ntabwo byaranzwe" : "Not specified");
   } else {
+    const owedBefore = await getUnpaidTotal(customer.id);
     await supabase.from("transactions").update({ paid: true }).eq("customer_id", customer.id).eq("paid", false);
+    await recordPayment(from, customer.id, customer.name, owedBefore);
     await sendWhatsAppMessage(from, T[lang].allPaid(customer.name));
   }
 }
