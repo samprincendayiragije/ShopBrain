@@ -2,11 +2,16 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { sendWhatsAppMessage, sendWhatsAppInteractiveMessage, sendWhatsAppTemplateMessage, markMessageAsRead } from "../lib/whatsapp.js";
 import { supabase } from "../lib/supabase.js";
 import { runWeeklyCheckin } from "../jobs/weeklyCheckin.js";
+import * as features from "../lib/shopFeatures.js";
 
 const router: IRouter = Router();
 
 const VERIFY_TOKEN =
   process.env["WHATSAPP_VERIFY_TOKEN"] ?? "ShopBrain_kigali_2026";
+
+// Optional secret for the daily /jobs/auto-reminders ping. If set, the URL must
+// end with ?key=<this value>.
+const JOB_SECRET = process.env["JOB_SECRET"];
 
 // Sam's own WhatsApp number (cleaned format, e.g. 250799xxxxxx) — used by the
 // week-1 check-in "Yes, I have an issue" button to flag real ShopBrain users
@@ -61,6 +66,10 @@ const sessions: Record<string, Session> = {};
 //   create index if not exists payments_shop_created_idx on payments (shop_id, created_at);
 
 // NOTE: Undo Last Debt, Today and Quick Amounts need NO new SQL.
+
+// NOTE: stock, sales/profit, expenses, supplier debts, auto-reminders, promise
+// dates and the credit limit need shopbrain_migration.sql run in Supabase
+// BEFORE deploying this file. Their code lives in ../lib/shopFeatures.ts.
 
 const T = {
   en: {
@@ -140,14 +149,17 @@ const T = {
 
 *Using the buttons:*
 ➕ Add Debt — record a new customer debt
-🔍 Find Customer — look up a customer's balance
-↩️ Undo Last Debt — on a customer's card, removes their latest debt if you made a mistake
 ✅ Mark as Paid — enter their number, then choose Partially or Full Payment
+📋 Menu — opens the full list of actions:
+🔍 Find Customer — look up a customer's balance. On their card: View History, Send Reminder, Mark as Paid, ↩️ Undo Last Debt (removes their latest debt if you made a mistake), ✏️ Edit Customer, 📅 Promise Date (note when they promised to pay)
 🔔 Send Reminder — remind one customer, or everyone at once
-🌐 Change Language — switch Kinyarwanda/English
-💳 MoMo — set up payment details, or set the number customers can reach you on
-💰 Total — see your total outstanding debt
-➕ More — see everything else: Follow-up, Report, Today and your full customer list
+🚩 Follow-up — customers who need a call or a visit
+📋 All Customers — your full customer list
+💵 Record Sale — sell from stock, cash or on credit; stock goes down automatically
+📦 Stock — add items, restock, see what's running low
+💰 Money & Reports — Total Debt, Debt Report, Today, 💹 Profit (today / 7 / 30 days), 🧾 Add Expense
+💼 I Owe Suppliers — track what you owe your suppliers and mark it paid
+⚙️ Settings — 💳 MoMo & contact number, ⏰ Auto Reminders, 🚧 Credit Limit, 🌐 Language, 🔒 Security
 
 *Typed shortcuts (optional):*
 - TOTAL — see your total outstanding debt
@@ -344,14 +356,17 @@ const T = {
 
 *Gukoresha buto:*
 ➕ Ongeraho Umwenda — andika umwenda mushya
-🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo
-↩️ Siba Uheruka — ku makuru y'umukiriya, usiba umwenda uheruka niba wibeshye
 ✅ Emeza Kwishyura — andika nimero, hanyuma uhitemo Igice cyangwa Byose
+📋 Menu — fungura urutonde rwose rw'ibikorwa:
+🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo. Ku makuru ye: Raporo y'ideni, Kwibutsa, Emeza Kwishyura, ↩️ Siba Uheruka (usiba umwenda uheruka niba wibeshye), ✏️ Hindura Umukiriya, 📅 Itariki (andika igihe yasezeranyije kwishyura)
 🔔 Kwibutsa — wibutsa umukiriya umwe, cyangwa bose icyarimwe
-🌐 Guhindura Ururimi — hindura Ikinyarwanda/Icyongereza
-💳 MoMo — shyiraho amakuru y'ubwishyu, cyangwa shyiraho nimero abakiriya bakuvugana
-💰 Igiteranyo — reba igiteranyo cy'amadeni yose
-➕ Ibindi — reba ibindi byose: Gukurikirana, Raporo, Uyu Munsi, n'urutonde rw'abakiriya bawe bose
+🚩 Gukurikirana — abakiriya bakeneye guhamagarwa cyangwa gusurwa
+📋 Abakiriya Bose — urutonde rw'abakiriya bawe bose
+💵 Andika Igurisha — gurisha mu bubiko, cash cyangwa ku mwenda; ububiko bugabanuka bwonyine
+📦 Ububiko — ongeramo ibicuruzwa, reba ibigiye gushira
+💰 Amafaranga & Raporo — Igiteranyo, Raporo y'Amadeni, Uyu Munsi, 💹 Inyungu (uyu munsi / iminsi 7 / 30), 🧾 Andika Ikiguzi
+💼 Amadeni Nkwiye — andika ibyo ugomba abagemura ubyemeze igihe wishyuye
+⚙️ Igenamiterere — 💳 MoMo & nimero, ⏰ Kwibutsa Byikora, 🚧 Ikirenga cy'Ideni, 🌐 Ururimi, 🔒 Umutekano
 
 *Amabwiriza wandika (ntibisabwa):*
 - TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amadeni yose
@@ -956,6 +971,22 @@ router.get("/jobs/weekly-checkin", async (req: Request, res: Response) => {
   res.json(result);
 });
 
+// Daily auto-reminder job. Ping it once a day (e.g. cron-job.org at 09:00
+// Africa/Kigali): https://YOUR-HOST/jobs/auto-reminders?key=YOUR_JOB_SECRET
+// It answers straight away and does the sending in the background. Extra
+// pings are harmless — nobody is reminded more than once per cooldown.
+router.get("/jobs/auto-reminders", (req: Request, res: Response) => {
+  if (JOB_SECRET && req.query["key"] !== JOB_SECRET) {
+    res.sendStatus(403);
+    return;
+  }
+  features
+    .runAutoReminders()
+    .then((r) => req.log.info(r, "Auto-reminder job complete"))
+    .catch((err) => req.log.error({ err }, "Auto-reminder job failed"));
+  res.json({ started: true });
+});
+
 router.get("/webhook", (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -1042,6 +1073,15 @@ router.post("/webhook", async (req: Request, res: Response) => {
           .eq("shop_id", log.owner_phone);
       }
 
+      // Auto-reminders go out when the owner's 24h window is usually closed,
+      // so just record the status instead of messaging the owner about each one.
+      if (log.is_auto) {
+        if (["sent", "delivered", "read", "failed"].includes(status.status)) {
+          await supabase.from("reminder_logs").update({ status: status.status }).eq("message_id", status.id);
+        }
+        continue;
+      }
+
       if (status.status === "sent") {
         await supabase.from("reminder_logs").update({ status: "sent" }).eq("message_id", status.id);
         await sendWhatsAppMessage(log.owner_phone, T[lang].reminderSentNotReceived(log.customer_name, log.customer_phone));
@@ -1093,50 +1133,15 @@ async function sendOnboardingLanguagePicker(from: string): Promise<void> {
   });
 }
 
-// Shared 3-bubble button layout, in the agreed order:
-// Add Debt, Mark as Paid, Find Customer | Send Reminder, MoMo, Total |
-// Security, Change Language, More.
-// `firstBubbleText` lets callers use a greeting on first registration vs.
-// a plain "what would you like to do" on every later visit.
+// The main menu is now ONE bubble: Add Debt | Mark as Paid | Menu.
+// "Menu" opens a list of every other action (see sendMenuList in
+// ../lib/shopFeatures.ts). `firstBubbleText` lets callers use a greeting on
+// first registration vs. a plain "what would you like to do" on later visits.
 async function sendMenuButtons(from: string, lang: Lang, firstBubbleText: string): Promise<void> {
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: firstBubbleText },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "add_debt", title: T[lang].addDebt } },
-        { type: "reply", reply: { id: "mark_paid", title: T[lang].markPaidBtn } },
-        { type: "reply", reply: { id: "find_customer", title: T[lang].findCustomer } },
-      ],
-    },
-  });
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: "\u200B" },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "send_reminder_menu", title: T[lang].sendReminder } },
-        { type: "reply", reply: { id: "momo_menu", title: T[lang].momoBtn } },
-        { type: "reply", reply: { id: "show_total", title: T[lang].totalBtn } },
-      ],
-    },
-  });
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: "\u200B" },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "security_info", title: T[lang].securityBtn } },
-        { type: "reply", reply: { id: "change_language", title: T[lang].changeLanguage } },
-        { type: "reply", reply: { id: "more_menu", title: T[lang].moreBtn } },
-      ],
-    },
-  });
+  await features.sendMainBubble(from, lang, firstBubbleText);
 }
 
-// Right after registration, the owner now sees the SAME full menu as every
-// later visit — no separate stripped-down first-time bubble, and no more
-// auto-sent security tip (that now only fires when the owner taps Security).
+// Right after registration, the owner sees the SAME menu as every later visit.
 async function sendFirstTimeMenu(from: string, lang: Lang): Promise<void> {
   await sendMenuButtons(from, lang, T[lang].welcome);
 }
@@ -1158,33 +1163,6 @@ async function sendMomoMenu(from: string, lang: Lang): Promise<void> {
       buttons: [
         { type: "reply", reply: { id: "momo_start", title: T[lang].momoMenuStart } },
         { type: "reply", reply: { id: "set_contact_number", title: T[lang].momoMenuContact } },
-      ],
-    },
-  });
-}
-
-// "More" menu: Follow-up, Report, All Customers in the first bubble; Today
-// and Help in a second one (a single WhatsApp button message caps out at 3
-// buttons). Today sits just below Report and above Help.
-async function sendMoreMenu(from: string, lang: Lang): Promise<void> {
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: T[lang].whatToDo },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "followup_btn", title: T[lang].followUpBtn } },
-        { type: "reply", reply: { id: "report_btn", title: T[lang].reportBtn } },
-        { type: "reply", reply: { id: "view_all_customers", title: T[lang].allCustomersBtn } },
-      ],
-    },
-  });
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: "\u200B" },
-    action: {
-      buttons: [
-        { type: "reply", reply: { id: "today_btn", title: T[lang].todayBtn } },
-        { type: "reply", reply: { id: "help_btn", title: "❓ Help" } },
       ],
     },
   });
@@ -1224,6 +1202,20 @@ async function sendLanguagePicker(from: string, lang: Lang): Promise<void> {
       buttons: [
         { type: "reply", reply: { id: "lang_rw", title: "Ikinyarwanda" } },
         { type: "reply", reply: { id: "lang_en", title: "Icyongereza" } },
+      ],
+    },
+  });
+}
+
+// The "customer's phone number?" prompt of the Add Debt flow. Used by the
+// Add Debt button and by credit sales from stock.
+async function sendAddPhonePrompt(from: string, lang: Lang): Promise<void> {
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: T[lang].askPhone },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "phone_skip", title: lang === "rw" ? "Nta Nimero" : "No Number" } },
       ],
     },
   });
@@ -1455,6 +1447,34 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   const lang = await getLang(from);
   await deliverPendingNotices(from);
 
+  // Menus, stock, sales, profit, expenses, suppliers, auto-reminders,
+  // promise dates and credit limit all live in ../lib/shopFeatures.ts.
+  if (await features.handleInteractive(from, replyId, lang)) return;
+
+  // Main-menu "Mark as Paid": always ask for the customer, never reuse a
+  // stale lookup from earlier in the chat.
+  if (replyId === "mark_paid_menu") {
+    sessions[from] = { step: "paid_phone", data: {} };
+    await sendWhatsAppMessage(from, T[lang].markPaidPrompt);
+    return;
+  }
+
+  // Credit-limit warning buttons (the warning is sent from finishAddDebt).
+  if (replyId === "limit_continue") {
+    const s = sessions[from];
+    if (s?.step !== "limit_confirm") return; // stale button tap, ignore
+    s.data["limitOk"] = "1";
+    await finishAddDebt(from, lang, parseInt(s.data["pendingAmount"] ?? "0", 10));
+    return;
+  }
+  if (replyId === "limit_cancel") {
+    if (sessions[from]?.step !== "limit_confirm") return; // stale button tap, ignore
+    sessions[from] = undefined as any;
+    await sendWhatsAppMessage(from, features.strings[lang].clCancelled);
+    await sendPersistentMenu(from, lang);
+    return;
+  }
+
   // A row picked from a name-search list message.
   if (replyId.startsWith("namesearch_")) {
     const customerId = replyId.slice("namesearch_".length);
@@ -1549,15 +1569,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
 
   if (replyId === "add_debt") {
     sessions[from] = { step: "add_phone", data: {} };
-    await sendWhatsAppInteractiveMessage(from, {
-      type: "button",
-      body: { text: T[lang].askPhone },
-      action: {
-        buttons: [
-          { type: "reply", reply: { id: "phone_skip", title: lang === "rw" ? "Nta Nimero" : "No Number" } },
-        ],
-      },
-    });
+    await sendAddPhonePrompt(from, lang);
     return;
   }
 
@@ -1595,8 +1607,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   if (replyId === "dup_continue") {
     if (sessions[from]?.step !== "add_name_dup_check") return; // stale button tap, ignore
     sessions[from]!.data["name"] = sessions[from]!.data["pendingName"] ?? "";
-    sessions[from]!.step = "add_item";
-    await sendWhatsAppMessage(from, T[lang].askItem);
+    await continueAfterName(from, lang, sessions[from]!);
     return;
   }
 
@@ -1640,11 +1651,6 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   if (replyId === "contact_number_skip") {
     if (sessions[from]?.step !== "contact_number") return; // stale button tap, ignore
     await saveContactNumber(from, lang, null);
-    return;
-  }
-
-  if (replyId === "more_menu") {
-    await sendMoreMenu(from, lang);
     return;
   }
 
@@ -1734,8 +1740,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     // If tapped from a customer lookup card (Find Customer, etc.), the
     // phone is already known — skip straight to Partial/Full Payment for
     // that customer instead of asking again. Only prompt for a number when
-    // Mark as Paid is tapped with no customer already in context (e.g. from
-    // the main menu).
+    // Mark as Paid is tapped with no customer already in context.
     const knownPhone = sessions[from]?.data["lastPhone"];
     if (knownPhone) {
       await startMarkPaidForPhone(from, knownPhone, lang);
@@ -1908,6 +1913,9 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
   }
 
   if (session) {
+    // Stock, sales, expenses, suppliers, promise date and credit-limit
+    // answers are handled by ../lib/shopFeatures.ts first.
+    if (await features.handleSession(from, text, session, lang)) return;
     await handleSession(from, text, session, lang, req);
     return;
   }
@@ -1948,6 +1956,19 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
   await sendPersistentMenu(from, lang);
 }
 
+// After the customer is known: a credit sale from stock already has the item
+// and amount, so it is saved straight away; a normal Add Debt asks for the item.
+async function continueAfterName(from: string, lang: Lang, session: Session): Promise<void> {
+  const presetAmount = session.data["presetAmount"];
+  if (presetAmount) {
+    session.data["item"] = session.data["presetItem"] ?? "";
+    await finishAddDebt(from, lang, parseInt(presetAmount, 10));
+    return;
+  }
+  session.step = "add_item";
+  await sendWhatsAppMessage(from, T[lang].askItem);
+}
+
 async function handleSession(from: string, text: string, session: Session, lang: Lang, req: Request): Promise<void> {
   if (session.step === "add_phone") {
     const phone = cleanPhone(text);
@@ -1960,8 +1981,12 @@ async function handleSession(from: string, text: string, session: Session, lang:
     if (existing) {
       // Known customer: their consent status is already on file, so don't ask again.
       session.data["name"] = existing.name;
-      session.step = "add_item";
-      await sendWhatsAppMessage(from, T[lang].existingCustomer(existing.name));
+      if (session.data["presetAmount"]) {
+        await continueAfterName(from, lang, session);
+      } else {
+        session.step = "add_item";
+        await sendWhatsAppMessage(from, T[lang].existingCustomer(existing.name));
+      }
     } else {
       // New customer: ask about reminder consent before collecting the name.
       session.step = "add_consent";
@@ -2011,16 +2036,14 @@ async function handleSession(from: string, text: string, session: Session, lang:
     }
 
     session.data["name"] = typedName;
-    session.step = "add_item";
-    await sendWhatsAppMessage(from, T[lang].askItem);
+    await continueAfterName(from, lang, session);
     return;
   }
   if (session.step === "add_name_dup_check") {
     // Owner typed a name directly instead of tapping a button — treat it as
     // the final (presumably relabeled) name and move on.
     session.data["name"] = text.trim();
-    session.step = "add_item";
-    await sendWhatsAppMessage(from, T[lang].askItem);
+    await continueAfterName(from, lang, session);
     return;
   }
   if (session.step === "add_item") {
@@ -2295,6 +2318,11 @@ async function recordPayment(shopId: string, customerId: string, customerName: s
     amount,
   });
   if (error) console.error("Failed to record payment:", error);
+
+  // Debt fully cleared: forget any "promised to pay by" date.
+  if ((await getUnpaidTotal(customerId)) === 0) {
+    await supabase.from("customers").update({ promise_date: null }).eq("id", customerId);
+  }
 }
 
 async function getUnpaidTotal(customerId: string): Promise<number> {
@@ -2358,7 +2386,7 @@ async function sendAmountPrompt(from: string, lang: Lang): Promise<void> {
   });
 }
 
-// Shared by the typed amount and the quick-amount buttons.
+// Shared by the typed amount, the quick-amount buttons and credit sales from stock.
 async function finishAddDebt(from: string, lang: Lang, amount: number): Promise<void> {
   const session = sessions[from];
   if (!session) return;
@@ -2366,6 +2394,21 @@ async function finishAddDebt(from: string, lang: Lang, amount: number): Promise<
   const consentGiven = session.data["consent"] === "yes";
   // phone may be "" (customer chose "No Number") — store null in that case
   const phoneValue: string | null = phone ? phone : null;
+
+  // Credit limit: warn before saving a debt that pushes this customer over
+  // the owner's limit. "Add Anyway" comes back here with limitOk set.
+  if (!session.data["limitOk"]) {
+    const check = await features.creditLimitCheck(from, phoneValue, amount);
+    if (check) {
+      session.data["pendingAmount"] = String(amount);
+      session.step = "limit_confirm";
+      await features.sendCreditLimitWarning(from, lang, name ?? "", check);
+      return;
+    }
+  }
+  // Set when this debt is a credit sale from stock.
+  const stockId = session.data["stockId"];
+  const stockQty = parseInt(session.data["stockQty"] ?? "0", 10);
 
   sessions[from] = undefined as any;
 
@@ -2388,7 +2431,18 @@ async function finishAddDebt(from: string, lang: Lang, amount: number): Promise<
     return;
   }
   const total = await getUnpaidTotal(customer.id);
-  await sendWhatsAppMessage(from, T[lang].debtSaved(customer.name, phoneValue || (lang === "rw" ? "nta nimero" : "no number"), item, amount, total));
+  await sendWhatsAppMessage(from, T[lang].debtSaved(customer.name, phoneValue || (lang === "rw" ? "nta nimero" : "no number"), item ?? "", amount, total));
+
+  // Credit sale from stock: take the pieces out of stock and log the profit.
+  if (stockId && stockQty > 0) {
+    await features.completeCreditSale(from, lang, {
+      stockId,
+      qty: stockQty,
+      revenue: amount,
+      customerName: customer.name,
+    });
+  }
+
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
@@ -2549,6 +2603,7 @@ async function lookupCustomer(from: string, phone: string, lang: Lang): Promise<
   sessions[from] = { step: "idle", data: { lastPhone: phone } };
   let summaryText = T[lang].customerSummary(customer.name, phone, lastTx?.item ?? "N/A", totalOwed, lastDate);
   if (await isOptedOut(phone)) summaryText += `\n${T[lang].optedOutLine}`;
+  if (customer.promise_date) summaryText += `\n${features.promiseLine(lang, customer.promise_date)}`;
   await sendWhatsAppMessage(from, summaryText);
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -2563,7 +2618,7 @@ async function lookupCustomer(from: string, phone: string, lang: Lang): Promise<
   });
   // Sent as a second bubble since a single WhatsApp button message caps out
   // at 3 buttons and the row above is already full. Undo Last Debt sits just
-  // above Edit Customer.
+  // above Edit Customer; Promise Date lets the owner note when they promised to pay.
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
     body: { text: "\u200B" },
@@ -2571,6 +2626,7 @@ async function lookupCustomer(from: string, phone: string, lang: Lang): Promise<
       buttons: [
         { type: "reply", reply: { id: `undo_last_${customer.id}`, title: T[lang].undoBtn } },
         { type: "reply", reply: { id: "edit_customer", title: T[lang].editBtn } },
+        { type: "reply", reply: { id: "promise_set", title: features.strings[lang].promiseBtn } },
       ],
     },
   });
@@ -2798,7 +2854,7 @@ async function showTotalDebt(from: string, lang: Lang): Promise<void> {
 }
 
 // --- Follow-up list + Report ---
-type FollowUpReason = "no_phone" | "opted_out" | "no_consent" | "failed" | "old";
+type FollowUpReason = "no_phone" | "opted_out" | "no_consent" | "failed" | "old" | "promise_missed";
 
 interface DebtorInfo {
   id: string;
@@ -2807,9 +2863,10 @@ interface DebtorInfo {
   total: number;
   oldestDays: number;
   reasons: FollowUpReason[];
+  promiseDate: string | null;
 }
 
-function reasonText(lang: Lang, reason: FollowUpReason, oldestDays: number): string {
+function reasonText(lang: Lang, reason: FollowUpReason, oldestDays: number, promiseDate: string | null): string {
   const t = T[lang];
   switch (reason) {
     case "no_phone": return t.reasonNoPhone;
@@ -2817,6 +2874,7 @@ function reasonText(lang: Lang, reason: FollowUpReason, oldestDays: number): str
     case "no_consent": return t.reasonNoConsent;
     case "failed": return t.reasonFailed;
     case "old": return t.reasonOld(oldestDays);
+    case "promise_missed": return promiseDate ? features.reasonPromise(lang, promiseDate) : "";
   }
 }
 
@@ -2844,6 +2902,7 @@ async function analyzeDebtors(shopId: string): Promise<{ debtors: DebtorInfo[]; 
   }
 
   const optedOut = await getOptedOutSet(customers.map((c: { phone: string | null }) => c.phone ?? ""));
+  const today = features.kigaliDate();
 
   const debtors: DebtorInfo[] = [];
   for (const c of customers) {
@@ -2856,7 +2915,17 @@ async function analyzeDebtors(shopId: string): Promise<{ debtors: DebtorInfo[]; 
     else if (!c.reminders_consent) reasons.push("no_consent");
     if (c.phone && c.last_reminder_status === "failed") reasons.push("failed");
     if (oldestDays >= OLD_DEBT_DAYS) reasons.push("old");
-    debtors.push({ id: c.id, name: c.name, phone: c.phone ?? null, total: agg.total, oldestDays, reasons });
+    // They promised a date and it has passed without payment.
+    if (c.promise_date && c.promise_date < today) reasons.push("promise_missed");
+    debtors.push({
+      id: c.id,
+      name: c.name,
+      phone: c.phone ?? null,
+      total: agg.total,
+      oldestDays,
+      reasons,
+      promiseDate: c.promise_date ?? null,
+    });
   }
   return { debtors, customerCount: customers.length };
 }
@@ -2881,7 +2950,7 @@ async function showFollowUp(from: string, lang: Lang): Promise<void> {
 
   const shown = flagged.slice(0, FOLLOWUP_MAX);
   const lines = shown.map((d) =>
-    `👤 *${d.name}* — ${d.total.toLocaleString()} Frw\n📞 ${d.phone ?? (lang === "rw" ? "nta nimero" : "no number")}\n⚠️ ${d.reasons.map((r) => reasonText(lang, r, d.oldestDays)).join("; ")}`
+    `👤 *${d.name}* — ${d.total.toLocaleString()} Frw\n📞 ${d.phone ?? (lang === "rw" ? "nta nimero" : "no number")}\n⚠️ ${d.reasons.map((r) => reasonText(lang, r, d.oldestDays, d.promiseDate)).join("; ")}`
   );
 
   const chunkSize = 5;
@@ -3001,5 +3070,20 @@ async function handleLegacyPaid(from: string, text: string, lang: Lang): Promise
     await sendWhatsAppMessage(from, T[lang].allPaid(customer.name));
   }
 }
+
+// Connect the feature module (menus, stock, sales, profit, expenses, supplier
+// debts, auto-reminders, promise dates, credit limit) to this file's helpers.
+features.initShopFeatures({
+  sessions,
+  cleanPhone,
+  sendMenu: sendPersistentMenu,
+  sendAddDebtPhonePrompt: sendAddPhonePrompt,
+  buildItemizedList,
+  buildMomoBlock,
+  reminderTemplateName,
+  metaLanguageCode,
+  getOptedOutSet,
+  reminderCooldownDays: REMINDER_COOLDOWN_DAYS,
+});
 
 export default router;
