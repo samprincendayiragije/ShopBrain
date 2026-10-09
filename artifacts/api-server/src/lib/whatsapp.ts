@@ -1,3 +1,10 @@
+import {
+  templateName,
+  templateLanguageCode,
+  type TemplateKind,
+  type TemplateLang,
+} from "./templateSettings";
+
 const PHONE_NUMBER_ID = process.env["WHATSAPP_PHONE_NUMBER_ID"];
 const ACCESS_TOKEN = process.env["WHATSAPP_ACCESS_TOKEN"];
 if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
@@ -94,7 +101,10 @@ export async function markMessageAsRead(messageId: string): Promise<void> {
  * `params` are inserted in order into the {{1}}, {{2}}, {{3}}... placeholders
  * in the template body, as configured in WhatsApp Manager.
  *
- * Example: sendWhatsAppTemplateMessage(phone, "debt_reminder", "en_US", [customerName, shopName, amount])
+ * `languageCode` MUST match the language the template is registered under in
+ * WhatsApp Manager ("en", "rw", "en_US"...), otherwise Meta rejects it with
+ * error 132001. Prefer sendWhatsAppTemplateByKind below, which looks the name
+ * and code up in templateSettings.ts so they can never drift apart.
  */
 export async function sendWhatsAppTemplateMessage(
   to: string,
@@ -127,8 +137,31 @@ export async function sendWhatsAppTemplateMessage(
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`WhatsApp API error ${res.status}: ${body}`);
+    throw new Error(
+      `WhatsApp template "${templateName}" (${languageCode}) failed, ${res.status}: ${body}`,
+    );
   }
   const data = await res.json() as { messages: Array<{ id: string }> };
   return data.messages[0].id;
+}
+
+/**
+ * Sends a template by kind ("reminder" | "receipt" | "weekly") and language
+ * ("en" | "rw"). The template name AND its language code both come from
+ * templateSettings.ts, so changing a template only ever means editing that file.
+ *
+ * Example: sendWhatsAppTemplateByKind(phone, "receipt", "rw", [a, b, c, d])
+ */
+export async function sendWhatsAppTemplateByKind(
+  to: string,
+  kind: TemplateKind,
+  lang: TemplateLang,
+  params: string[],
+): Promise<string> {
+  return sendWhatsAppTemplateMessage(
+    to,
+    templateName(kind, lang),
+    templateLanguageCode(kind, lang),
+    params,
+  );
 }

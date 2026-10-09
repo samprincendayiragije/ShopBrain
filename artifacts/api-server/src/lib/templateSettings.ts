@@ -5,30 +5,70 @@
 //
 // 1) TEMPLATE_NAMES: the exact name of each approved template, copied from
 //    WhatsApp Manager (lowercase letters, numbers and underscores).
-// 2) The two switches below it say whether your reminder templates still
-//    contain the payment details.
-// 3) BUTTON_WORDS: the words written on the buttons of your reminder
+// 2) TEMPLATE_LANGUAGE_CODES: the language each template is REGISTERED in on
+//    Meta. WhatsApp only delivers a template when the language code sent
+//    matches the one it was registered with, even if the words inside are in
+//    another language. Check the "Language" column in WhatsApp Manager.
+// 3) The switch below says whether your reminder templates still contain the
+//    payment details.
+// 4) BUTTON_WORDS: the words written on the buttons of your reminder
 //    templates. The bot recognises a tap by these words (capital letters,
 //    spaces and apostrophes don't matter, and it is enough that the button
 //    text CONTAINS the word).
 
+export type TemplateKind = "reminder" | "receipt" | "weekly";
+export type TemplateLang = "en" | "rw";
+
 /**
- * The approved templates. Each one needs an English version (en) and a
- * Kinyarwanda version (rw).
+ * The approved templates, matched to WhatsApp Manager (checked 9 Oct 2026).
+ *
+ * reminder: debt_reminder (English) and debt_reminder_rw_v2 (Kinyarwanda).
+ *           Both exist and are Active. They include the buttons.
+ *
+ * receipt:  sent to the customer after a payment.
+ *           en = "receipts"  (English text, registered as English)
+ *           rw = "receipt"   (Kinyarwanda text, but REGISTERED AS ENGLISH on Meta)
+ *           The old names payment_receipt / payment_receipt_rw do not exist in
+ *           WhatsApp Manager, so every receipt using them failed.
+ *
+ * weekly:   the Monday "ShopBrain recovered X for you" message to the owner.
+ *           en = "updates"  (English)
+ *           rw = "raporo"   (Kinyarwanda)
+ *           Variables: {{1}} shop name, {{2}} amount recovered,
+ *                      {{3}} date range, {{4}} total still owed
+ *           Check that "updates" uses the same {{1}}-{{4}} order as "raporo".
  */
-export const TEMPLATE_NAMES = {
-  // The reminder sent to customers. These are your EXISTING reminder templates
-  // after you edited them to add the buttons, so the names did not change.
+export const TEMPLATE_NAMES: Record<TemplateKind, Record<TemplateLang, string>> = {
   reminder: { en: "debt_reminder", rw: "debt_reminder_rw_v2" },
-
-  // "You paid X, remaining Y" sent to the customer after a payment.
-  // Variables: {{1}} customer name, {{2}} shop name, {{3}} amount paid, {{4}} amount remaining
-  receipt: { en: "payment_receipt", rw: "payment_receipt_rw" },
-
-  // The Monday "ShopBrain recovered X for you" message, sent to the owner.
-  // Variables: {{1}} shop name, {{2}} amount recovered, {{3}} date range, {{4}} total still owed
-  weekly: { en: "weekly_recovery", rw: "weekly_recovery_rw" },
+  receipt: { en: "receipts", rw: "receipt" },
+  weekly: { en: "updates", rw: "raporo" },
 };
+
+/**
+ * The language code each template is registered under on Meta.
+ *   English        -> "en"
+ *   Kinyarwanda    -> "rw"
+ *   English (US)   -> "en_US"
+ *
+ * Note receipt.rw is "en": the text is Kinyarwanda but Meta has it filed as
+ * English, so it must be sent with the English code.
+ */
+export const TEMPLATE_LANGUAGE_CODES: Record<TemplateKind, Record<TemplateLang, string>> = {
+  reminder: { en: "en", rw: "rw" },
+  receipt: { en: "en", rw: "en" },
+  weekly: { en: "en", rw: "rw" },
+};
+
+/** The template name to send for a kind and language. */
+export function templateName(kind: TemplateKind, lang: TemplateLang): string {
+  return TEMPLATE_NAMES[kind][lang];
+}
+
+/** The language code to send for a kind and language. Use this in the template
+ *  payload instead of writing "en" or "rw" by hand. */
+export function templateLanguageCode(kind: TemplateKind, lang: TemplateLang): string {
+  return TEMPLATE_LANGUAGE_CODES[kind][lang];
+}
 
 /**
  * Does your reminder template still have the payment details (MoMo number and
