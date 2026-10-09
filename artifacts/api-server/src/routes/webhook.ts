@@ -78,7 +78,7 @@ const sessions: Record<string, Session> = {};
 
 const T = {
   en: {
-    welcome: "👋 Welcome to *ShopBrain*\nWhat would you like to do?",
+    welcome: "👋 Welcome to *ShopBrain*",
     addDebt: "➕ Add Debt",
     findCustomer: "🔍 Find Customer",
     changeLanguage: "🌐 Change Language",
@@ -150,6 +150,8 @@ const T = {
     totalDebtNone: "✅ No outstanding debts. All customers have paid!",
     paidHint: "💡 To mark a customer as paid, type:\nPAID 0788123456\nor for partial: PAID 0788123456 2000",
     helpTitle: "📖 *ShopBrain — What I Can Do*",
+    // Only shown when STOCK_FEATURES=on (stock management is held off for now).
+    helpStock: "📦 Stock features:\n💵 Record Sale — sell from stock, cash or on credit; stock goes down automatically\n📦 Stock — add items, restock, see what's running low\n💹 Profit — today / 7 / 30 days (under Money & Reports)\n🧾 Add Expense — record money you spent (under Money & Reports)",
     helpFooter: (phone: string, link: string) => `💬 Need help with ShopBrain? Message us: ${phone}\n${link}`,
     helpBody: `Here's everything you can do:
 
@@ -158,14 +160,12 @@ const T = {
 *Using the buttons:*
 ➕ Add Debt — record a new customer debt
 ✅ Mark as Paid — enter their number, then choose Partially or Full Payment
-📋 Menu — opens the full list of actions:
+📋 Menu — the full list of actions:
 🔍 Find Customer — look up a customer's balance. On their card: View History, Send Reminder, Mark as Paid, ↩️ Undo Last Debt (removes their latest debt if you made a mistake), ✏️ Edit Customer, 📅 Promise Date (note when they promised to pay)
 🔔 Send Reminder — remind one customer, or everyone at once
 🚩 Follow-up — customers who need a call or a visit
 📋 All Customers — your full customer list
-💵 Record Sale — sell from stock, cash or on credit; stock goes down automatically
-📦 Stock — add items, restock, see what's running low
-💰 Money & Reports — Total Debt, Debt Report, Today, 💹 Profit (today / 7 / 30 days), 🧾 Add Expense, 🏆 Recovered (what ShopBrain won back for you), 📤 Export (all your debts as an Excel file)
+💰 Money & Reports — Total Debt, Debt Report, Today, 🏆 Recovered (what ShopBrain won back for you), 📤 Export (all your debts as an Excel file)
 💼 I Owe Suppliers — track what you owe your suppliers and mark it paid
 ⚙️ Settings — 💳 MoMo & contact number, ⏰ Auto Reminders, 🚧 Credit Limit, 🌐 Language, 🔒 Security
 
@@ -289,7 +289,7 @@ const T = {
     todayOwed: (total: number, count: number) => `💰 Total owed now: *${total.toLocaleString()} Frw* (${count} customers)`,
   },
   rw: {
-    welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
+    welcome: "👋 Murakaza neza kuri *ShopBrain*",
     addDebt: "➕ Ongeraho Umwenda",
     findCustomer: "🔍 Shakisha Umukiriya",
     changeLanguage: "🌐 Guhindura Ururimi",
@@ -361,6 +361,7 @@ const T = {
     totalDebtNone: "✅ Nta madeni asigaye. Abakiriya bose barishyuye!",
     paidHint: "💡 Kwishyura umukiriya, andika:\nPAID 0788123456\ncyangwa igice: PAID 0788123456 2000",
     helpTitle: "📖 *ShopBrain — Ibyo Nshobora Gukora*",
+    helpStock: "📦 Ububiko:\n💵 Andika Igurisha — gurisha mu bubiko, cash cyangwa ku mwenda; ububiko bugabanuka bwonyine\n📦 Ububiko — ongeramo ibicuruzwa, reba ibigiye gushira\n💹 Inyungu — uyu munsi / iminsi 7 / 30 (muri Amafaranga & Raporo)\n🧾 Andika Ikiguzi — andika amafaranga wakoresheje (muri Amafaranga & Raporo)",
     helpFooter: (phone: string, link: string) => `💬 Ukeneye ubufasha kuri ShopBrain? Twandikire: ${phone}\n${link}`,
     helpBody: `Dore ibyo wakoresha:
 
@@ -369,14 +370,12 @@ const T = {
 *Gukoresha buto:*
 ➕ Ongeraho Umwenda — andika umwenda mushya
 ✅ Emeza Kwishyura — andika nimero, hanyuma uhitemo Igice cyangwa Byose
-📋 Menu — fungura urutonde rwose rw'ibikorwa:
+📋 Menu — urutonde rwose rw'ibikorwa:
 🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo. Ku makuru ye: Raporo y'ideni, Kwibutsa, Emeza Kwishyura, ↩️ Siba Uheruka (usiba umwenda uheruka niba wibeshye), ✏️ Hindura Umukiriya, 📅 Itariki (andika igihe yasezeranyije kwishyura)
 🔔 Kwibutsa — wibutsa umukiriya umwe, cyangwa bose icyarimwe
 🚩 Gukurikirana — abakiriya bakeneye guhamagarwa cyangwa gusurwa
 📋 Abakiriya Bose — urutonde rw'abakiriya bawe bose
-💵 Andika Igurisha — gurisha mu bubiko, cash cyangwa ku mwenda; ububiko bugabanuka bwonyine
-📦 Ububiko — ongeramo ibicuruzwa, reba ibigiye gushira
-💰 Amafaranga & Raporo — Igiteranyo, Raporo y'Amadeni, Uyu Munsi, 💹 Inyungu (uyu munsi / iminsi 7 / 30), 🧾 Andika Ikiguzi, 🏆 Byagarutse (ibyo ShopBrain yagukuriye), 📤 Kohereza Kopi (amadeni yose muri Excel)
+💰 Amafaranga & Raporo — Igiteranyo, Raporo y'Amadeni, Uyu Munsi, 🏆 Byagarutse (ibyo ShopBrain yagukuriye), 📤 Kohereza Kopi (amadeni yose muri Excel)
 💼 Amadeni Nkwiye — andika ibyo ugomba abagemura ubyemeze igihe wishyuye
 ⚙️ Igenamiterere — 💳 MoMo & nimero, ⏰ Kwibutsa Byikora, 🚧 Ikirenga cy'Ideni, 🌐 Ururimi, 🔒 Umutekano
 
@@ -1190,12 +1189,13 @@ async function sendFirstTimeMenu(from: string, lang: Lang): Promise<void> {
 
 async function sendHelp(from: string, lang: Lang): Promise<void> {
   const supportLink = `https://wa.me/${SUPPORT_PHONE.replace(/\D/g, "")}`;
-  await sendWhatsAppMessage(from, `${T[lang].helpTitle}\n\n${T[lang].helpBody}\n\n${T[lang].helpFooter(SUPPORT_PHONE, supportLink)}`);
+  await sendWhatsAppMessage(from, `${T[lang].helpTitle}\n\n${T[lang].helpBody}${features.stockEnabled() ? `\n\n${T[lang].helpStock}` : ""}\n\n${T[lang].helpFooter(SUPPORT_PHONE, supportLink)}`);
   await sendPersistentMenu(from, lang);
 }
 
 async function sendPersistentMenu(from: string, lang: Lang): Promise<void> {
-  await sendMenuButtons(from, lang, T[lang].whatToDo);
+  // Debt-only mode: the first bubble IS the menu, so its text is just "Menu", not a question.
+  await sendMenuButtons(from, lang, features.stockEnabled() ? T[lang].whatToDo : features.strings[lang].menuTitle);
 }
 
 async function sendMomoMenu(from: string, lang: Lang): Promise<void> {

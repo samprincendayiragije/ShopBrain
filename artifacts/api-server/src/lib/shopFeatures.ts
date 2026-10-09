@@ -168,6 +168,8 @@ const en = {
   invalidAmount: "❌ Please enter a valid amount e.g. 5000",
   pcs: "pcs",
   tapButtons: "👆 Please tap one of the buttons above.",
+  stockHeldOff: "📦 Stock isn't available yet. We'll tell you when it's ready.",
+  secDebts: "Debts",
   momoHint: "❌ I couldn't read that.\n\nExample: `0788123456, NIYONZIMA ALICE, Chez Alice`\nOr send just the number.",
   stkHint: "❌ I couldn't read that.\n\nExample: `Sugar 1kg, 800, 1000, 20`\n(name, buying price, selling price, how many)\nOr send just the item name.",
   supHint: "❌ I couldn't read that.\n\nExample: `Kigali Rice, 50000, 20 bags`\n(supplier, amount, note)\nOr send just the supplier's name.",
@@ -198,7 +200,7 @@ const en = {
   addDebtBtn: "➕ Add Debt",
   markPaidBtn: "✅ Mark as Paid",
   menuBtn: "📋 Menu",
-  menuListButton: "Open Menu",
+  menuListButton: "Menu",
   secCustomers: "Customers",
   secShop: "Sell & Stock",
   secMoney: "Money",
@@ -348,6 +350,8 @@ const rw: typeof en = {
   invalidAmount: "❌ Andika umubare wemewe urugero 5000",
   pcs: "ibice",
   tapButtons: "👆 Kanda imwe muri buto zo hejuru.",
+  stockHeldOff: "📦 Ububiko ntiburaboneka ubu. Tuzakumenyesha ubwo buzaba bwiteguye.",
+  secDebts: "Amadeni",
   momoHint: "❌ Ntabwo nabisomye.\n\nUrugero: `0788123456, NIYONZIMA ALICE, Chez Alice`\nCyangwa ohereza nimero gusa.",
   stkHint: "❌ Ntabwo nabisomye.\n\nUrugero: `Isukari 1kg, 800, 1000, 20`\n(izina, igiciro ugura, igiciro ugurisha, ingano)\nCyangwa ohereza izina gusa.",
   supHint: "❌ Ntabwo nabisomye.\n\nUrugero: `Kigali Rice, 50000, imifuka 20`\n(uwagemuye, umubare, icyo wanditse)\nCyangwa ohereza izina gusa.",
@@ -377,7 +381,7 @@ const rw: typeof en = {
   addDebtBtn: "➕ Ongeraho Umwenda",
   markPaidBtn: "✅ Emeza Kwishyura",
   menuBtn: "📋 Menu",
-  menuListButton: "Fungura Menu",
+  menuListButton: "Menu",
   secCustomers: "Abakiriya",
   secShop: "Igurisha & Ububiko",
   secMoney: "Amafaranga",
@@ -523,12 +527,45 @@ export function reasonPromise(lang: Lang, dateStr: string): string {
 
 
 /* ------------------------------------------------------------------ */
+/* Stock on/off switch                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Stock management is HELD OFF for now. While this is false:
+ *   - Record Sale, Stock, Profit and Add Expense are not in any menu,
+ *   - old buttons for them (still sitting in earlier chats) answer "not available yet",
+ *   - credit sales from stock and low-stock alerts can't happen,
+ *   - only debt tracking is shown.
+ * The stock code below is all still here. To bring it back, set the environment
+ * variable STOCK_FEATURES=on and restart: the menus return to the layout that
+ * has the Shop section (Record Sale + Stock) and Money has Profit + Add Expense.
+ */
+export function stockEnabled(): boolean {
+  return process.env["STOCK_FEATURES"] === "on";
+}
+
+/** Buttons and typed answers that belong to the held-off stock / profit / expense features. */
+function isStockId(id: string): boolean {
+  return /^(stock_|stk|sell|profit_|expense_add$|exp_note_skip$|expok_)/.test(id);
+}
+
+/* ------------------------------------------------------------------ */
 /* Menus                                                               */
 /* ------------------------------------------------------------------ */
 
-/** The main menu: ONE bubble with three buttons. */
+/**
+ * The main menu.
+ *  - Stock held off (now): the FIRST bubble is the menu itself. It is one list message
+ *    with a "Menu" button, and Add Debt and Mark as Paid are the first rows. Tapping
+ *    Menu opens the options straight away: no second bubble, no question.
+ *  - Stock on: the older bubble with three buttons (Add Debt | Mark as Paid | Menu).
+ */
 export async function sendMainBubble(from: string, lang: Lang, bodyText: string): Promise<void> {
   const s = strings[lang];
+  if (!stockEnabled()) {
+    await sendDebtMenuList(from, lang, bodyText);
+    return;
+  }
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
     body: { text: bodyText },
@@ -550,6 +587,10 @@ export async function sendMainBubble(from: string, lang: Lang, bodyText: string)
 // 10 rows and the rest sit one level down (Stock, Money, Suppliers, Settings).
 export async function sendMenuList(from: string, lang: Lang): Promise<void> {
   const s = strings[lang];
+  if (!stockEnabled()) {
+    await sendDebtMenuList(from, lang, s.menuTitle);
+    return;
+  }
   await sendWhatsAppInteractiveMessage(from, {
     type: "list",
     body: { text: s.menuTitle },
@@ -591,6 +632,53 @@ export async function sendMenuList(from: string, lang: Lang): Promise<void> {
   });
 }
 
+/**
+ * The debt-tracking menu: exactly 10 rows, which is the most WhatsApp allows in one list.
+ * Money & Reports and Settings open a short list of their own.
+ */
+async function sendDebtMenuList(from: string, lang: Lang, bodyText: string): Promise<void> {
+  const s = strings[lang];
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "list",
+    body: { text: bodyText },
+    action: {
+      button: s.menuListButton,
+      sections: [
+        {
+          title: s.secDebts,
+          rows: [
+            { id: "add_debt", title: s.addDebtBtn },
+            { id: "mark_paid_menu", title: s.markPaidBtn },
+            { id: "find_customer", title: s.rowFind },
+            { id: "send_reminder_menu", title: s.rowRemind },
+          ],
+        },
+        {
+          title: s.secCustomers,
+          rows: [
+            { id: "followup_btn", title: s.rowFollow },
+            { id: "view_all_customers", title: s.rowAll },
+          ],
+        },
+        {
+          title: s.secMoney,
+          rows: [
+            { id: "money_menu", title: s.rowMoney },
+            { id: "supplier_menu", title: s.rowSuppliers },
+          ],
+        },
+        {
+          title: s.secMore,
+          rows: [
+            { id: "settings_menu", title: s.rowSettings },
+            { id: "help_btn", title: s.rowHelp },
+          ],
+        },
+      ],
+    },
+  });
+}
+
 async function sendMoneyMenu(from: string, lang: Lang): Promise<void> {
   const s = strings[lang];
   await sendWhatsAppInteractiveMessage(from, {
@@ -605,8 +693,13 @@ async function sendMoneyMenu(from: string, lang: Lang): Promise<void> {
             { id: "show_total", title: s.moneyTotal },
             { id: "report_btn", title: s.moneyReport },
             { id: "today_btn", title: s.moneyToday },
-            { id: "profit_btn", title: s.moneyProfit },
-            { id: "expense_add", title: s.moneyExpense },
+            // Profit works out of stock sales, and Add Expense only feeds Profit: held off with stock.
+            ...(stockEnabled()
+              ? [
+                  { id: "profit_btn", title: s.moneyProfit },
+                  { id: "expense_add", title: s.moneyExpense },
+                ]
+              : []),
             { id: "recovered_btn", title: s.moneyRecovered },
             { id: "export_btn", title: s.moneyExport },
           ],
@@ -1783,6 +1876,12 @@ async function quickSession(from: string, value: string, session: Session, lang:
 export async function handleInteractive(from: string, id: string, lang: Lang): Promise<boolean> {
   const s = strings[lang];
   const x = xstrings[lang];
+  // Stock is held off: an old button from an earlier chat must not start any stock flow.
+  if (!stockEnabled() && isStockId(id)) {
+    await sendWhatsAppMessage(from, s.stockHeldOff);
+    await D.sendMenu(from, lang);
+    return true;
+  }
   switch (id) {
     case "menu_list":
     case "more_menu": // old "More" buttons still sitting in earlier chats
@@ -2046,6 +2145,13 @@ export async function handleInteractive(from: string, id: string, lang: Lang): P
  * through to the older question-by-question steps below.
  */
 export async function handleSession(from: string, text: string, session: Session, lang: Lang): Promise<boolean> {
+  // A stock / expense conversation left open from before stock was held off: close it.
+  if (!stockEnabled() && /^(stk|sell|exp_|expok)/.test(session.step)) {
+    clearSession(from);
+    await sendWhatsAppMessage(from, strings[lang].stockHeldOff);
+    await D.sendMenu(from, lang);
+    return true;
+  }
   if (await quickSession(from, text.trim(), session, lang)) return true;
   return olderSession(from, text, session, lang);
 }
