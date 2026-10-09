@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { CSS, Reveal, CountUp, PhoneChat, Tilt, ScrollLine, SplitHeading, useMotion } from "./motion";
 import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -38,88 +39,6 @@ const FEATURE_ICONS: Record<string, string[]> = {
   remind: ["🔔", "🤖", "📵"],
   customers: ["💬", "✅", "🧾"],
 };
-
-// ---------------------------------------------------------------------------
-// Animations (all in one place; every moving thing respects reduced motion)
-// ---------------------------------------------------------------------------
-
-const CSS = `
-@keyframes sb-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-.sb-rise{animation:sb-rise .6s cubic-bezier(.2,.7,.2,1) both}
-@keyframes sb-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
-.sb-float{animation:sb-float 5s ease-in-out infinite}
-@keyframes sb-dot{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
-.sb-dot{animation:sb-dot 1.1s infinite}
-@keyframes sb-ring{0%{box-shadow:0 0 0 0 rgba(15,122,63,.55)}100%{box-shadow:0 0 0 18px rgba(15,122,63,0)}}
-.sb-ring{animation:sb-ring 2.4s ease-out infinite}
-@keyframes sb-pop{0%{transform:scale(.8);opacity:0}100%{transform:scale(1);opacity:1}}
-.sb-pop{animation:sb-pop .35s cubic-bezier(.2,.9,.3,1.3) both}
-.sb-reveal{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
-.sb-in{opacity:1;transform:none}
-@media (prefers-reduced-motion:reduce){
-  .sb-rise,.sb-float,.sb-dot,.sb-ring,.sb-pop{animation:none}
-  .sb-reveal{opacity:1;transform:none;transition:none}
-}
-`;
-
-const prefersReducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-function useInView<T extends HTMLElement>(threshold = 0.2) {
-  const ref = useRef<T | null>(null);
-  const [seen, setSeen] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (typeof IntersectionObserver === "undefined") {
-      setSeen(true);
-      return;
-    }
-    const io = new IntersectionObserver(
-      ([e]) => {
-        if (e.isIntersecting) {
-          setSeen(true);
-          io.disconnect();
-        }
-      },
-      { threshold }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [threshold]);
-  return { ref, seen };
-}
-
-// Used only for the "how it works" sequence, where order matters.
-function Reveal({ children, delay = 0, className = "", as: Tag = "div" }: { children: React.ReactNode; delay?: number; className?: string; as?: React.ElementType }) {
-  const { ref, seen } = useInView<HTMLElement>(0.25);
-  return (
-    <Tag ref={ref} className={`sb-reveal ${seen ? "sb-in" : ""} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
-      {children}
-    </Tag>
-  );
-}
-
-function CountUp({ to, duration = 1800 }: { to: number; duration?: number }) {
-  const { ref, seen } = useInView<HTMLSpanElement>(0.4);
-  const [v, setV] = useState(0);
-  useEffect(() => {
-    if (!seen) return;
-    if (prefersReducedMotion()) {
-      setV(to);
-      return;
-    }
-    let raf = 0;
-    const start = performance.now();
-    const step = (now: number) => {
-      const p = Math.min(1, (now - start) / duration);
-      setV(Math.round(to * (1 - Math.pow(1 - p, 3))));
-      if (p < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [seen, to, duration]);
-  return <span ref={ref}>{v.toLocaleString("en-US")}</span>;
-}
 
 // ---------------------------------------------------------------------------
 // Theme
@@ -1051,78 +970,6 @@ function LanguageSelector({ lang, setLang }: { lang: Lang; setLang: (l: Lang) =>
   );
 }
 
-// The one orchestrated moment on the page: a WhatsApp chat that plays through
-// the product's real flow (add, remind, paid, recovered), then loops.
-function PhoneChat({ msgs }: { msgs: { from: string; text: string }[] }) {
-  const [shown, setShown] = useState(0);
-
-  useEffect(() => {
-    if (prefersReducedMotion()) {
-      setShown(msgs.length);
-      return;
-    }
-    setShown(0);
-    let n = 0;
-    let id: ReturnType<typeof setTimeout>;
-    const next = () => {
-      if (n >= msgs.length) {
-        id = setTimeout(() => {
-          n = 0;
-          setShown(0);
-          next();
-        }, 4000);
-        return;
-      }
-      id = setTimeout(() => {
-        n += 1;
-        setShown(n);
-        next();
-      }, n === 0 ? 700 : 1600);
-    };
-    next();
-    return () => clearTimeout(id);
-  }, [msgs]);
-
-  const typing = shown < msgs.length && msgs[shown].from === "bot";
-
-  return (
-    <div className="mx-auto w-full max-w-[290px] rounded-[2.5rem] border-[10px] border-[#0b1020] bg-[#0b1020] shadow-2xl rotate-1">
-      <div className="rounded-[1.8rem] overflow-hidden bg-[#0b141a]">
-        <div className="flex items-center gap-3 px-4 py-3 bg-[#1f2c34] text-white">
-          <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm" style={{ background: GREEN }}>
-            SB
-          </div>
-          <div className="leading-tight">
-            <div className="text-sm font-semibold">Shop Brain</div>
-            <div className="text-[11px] text-white/60">{typing ? "typing…" : "online"}</div>
-          </div>
-        </div>
-        <div className="h-[400px] px-3 py-4 flex flex-col justify-end gap-2" aria-label="Example WhatsApp conversation">
-          {msgs.slice(0, shown).map((m, i) => (
-            <div
-              key={i}
-              className={`sb-pop max-w-[85%] px-3 py-2 rounded-xl text-[13px] leading-snug text-white ${
-                m.from === "me" ? "self-end bg-[#005c4b] rounded-tr-sm" : "self-start bg-[#202c33] rounded-tl-sm"
-              }`}
-              style={{ transformOrigin: m.from === "me" ? "bottom right" : "bottom left" }}
-            >
-              {m.text}
-              {m.from === "me" && <span className="ml-2 text-[10px] text-sky-300">✓✓</span>}
-            </div>
-          ))}
-          {typing && (
-            <div className="self-start bg-[#202c33] rounded-xl rounded-tl-sm px-3 py-3 flex gap-1" aria-hidden>
-              {[0, 1, 2].map((d) => (
-                <span key={d} className="sb-dot w-1.5 h-1.5 rounded-full bg-white/70" style={{ animationDelay: `${d * 160}ms` }} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Faq({ items }: { items: { q: string; a: string }[] }) {
   const [open, setOpen] = useState<number | null>(0);
   return (
@@ -1198,7 +1045,7 @@ function FeatureExplorer({ t }: { t: Copy }) {
           return (
             <div
               key={id}
-              className={`sb-rise rounded-2xl border bg-card overflow-hidden transition-[border-color,box-shadow] duration-300 ${
+              className={`sb-rise sb-spot rounded-2xl border bg-card overflow-hidden transition-[border-color,box-shadow] duration-300 ${
                 isOpen ? "border-foreground/30 shadow-lg" : "border-border hover:border-foreground/25"
               }`}
               style={{ animationDelay: `${i * 60}ms` }}
@@ -1313,8 +1160,8 @@ function FeatureExplorer({ t }: { t: Copy }) {
 // ---------------------------------------------------------------------------
 
 export default function Home() {
-  const [scrollY, setScrollY] = useState(0);
-  const [progress, setProgress] = useState(0);
+  const [showSticky, setShowSticky] = useState(false);
+  const barRef = useRef<HTMLDivElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [lang, setLang] = useState<Lang>(() => {
     const s = typeof window !== "undefined" ? window.localStorage.getItem("shopbrain-lang") : null;
@@ -1322,6 +1169,7 @@ export default function Home() {
   });
   const { theme, toggleTheme } = useTheme();
   const t = copy[lang];
+  useMotion();
 
   useEffect(() => {
     window.localStorage.setItem("shopbrain-lang", lang);
@@ -1350,14 +1198,26 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const onScroll = () => {
-      setScrollY(window.scrollY);
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const y = window.scrollY;
       const max = document.documentElement.scrollHeight - window.innerHeight;
-      setProgress(max > 0 ? Math.min(100, (window.scrollY / max) * 100) : 0);
+      if (barRef.current) barRef.current.style.transform = `scaleX(${max > 0 ? Math.min(1, y / max) : 0})`;
+      const show = y > 500;
+      setShowSticky((s) => (s === show ? s : show));
     };
-    onScroll();
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    update();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      cancelAnimationFrame(raf);
+    };
   }, []);
 
   const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
@@ -1371,7 +1231,7 @@ export default function Home() {
   };
 
   const ctaClass =
-    "inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full font-semibold text-white text-lg shadow-lg shadow-black/10 hover:brightness-110 active:scale-[0.98] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
+    "sb-shine inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full font-semibold text-white text-lg shadow-lg shadow-black/10 hover:brightness-110 active:scale-[0.98] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
@@ -1402,7 +1262,7 @@ export default function Home() {
             </button>
           </div>
         </div>
-        <div aria-hidden className="absolute bottom-0 left-0 h-[3px]" style={{ width: `${progress}%`, background: SUN, transition: "width .1s linear" }} />
+        <div aria-hidden ref={barRef} className="absolute bottom-0 left-0 h-[3px] w-full origin-left" style={{ background: SUN, transform: "scaleX(0)", willChange: "transform" }} />
       </header>
 
       {mobileMenuOpen && (
@@ -1434,11 +1294,7 @@ export default function Home() {
           <div className="container mx-auto max-w-6xl grid lg:grid-cols-[1.15fr_0.85fr] gap-14 items-center relative">
             <div className="space-y-7 md:pl-10">
               <h1 key={lang} className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.05] tracking-tight max-w-2xl" style={DISPLAY}>
-                {t.hero.title.split(" ").map((w, i) => (
-                  <span key={i} className="sb-rise inline-block mr-[0.25em]" style={{ animationDelay: `${i * 70}ms` }}>
-                    {w}
-                  </span>
-                ))}
+                <SplitHeading text={t.hero.title} />
               </h1>
               <p className="sb-rise text-lg md:text-xl text-foreground/75 leading-relaxed max-w-xl" style={{ animationDelay: "450ms" }}>
                 {t.hero.body}
@@ -1457,7 +1313,9 @@ export default function Home() {
             </div>
 
             <div className="relative">
-              <PhoneChat msgs={t.chat.msgs} />
+              <Tilt>
+                <PhoneChat msgs={t.chat.msgs} />
+              </Tilt>
               <div className="sb-float absolute -bottom-5 left-0 sm:-left-6 rounded-2xl border border-border bg-card px-4 py-3 shadow-xl flex items-center gap-3">
                 <span className="text-2xl" aria-hidden>
                   🎉
@@ -1477,15 +1335,15 @@ export default function Home() {
         <section className="py-20 md:py-28 px-4 md:px-6">
           <div className="container mx-auto max-w-6xl grid md:grid-cols-2 gap-14 items-center">
             <div
-              className="relative rounded-md bg-[#FBF7E8] dark:bg-[#1B2140] border border-border shadow-md -rotate-1 px-8 py-7 [--rule:#CDD6EE] dark:[--rule:#2C3566]"
+              data-seen className="relative rounded-md bg-[#FBF7E8] dark:bg-[#1B2140] border border-border shadow-md -rotate-1 px-8 py-7 [--rule:#CDD6EE] dark:[--rule:#2C3566]"
               style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 43px, var(--rule) 43px, var(--rule) 44px)" }}
             >
               {t.problem.notebook.map((line, i) => (
-                <p key={line} className={`text-3xl leading-[44px] text-[#1B2559] dark:text-white/90 ${i === 2 ? "line-through decoration-2 opacity-60" : ""}`} style={HAND}>
+                <p key={line} className={`sb-write text-3xl leading-[44px] text-[#1B2559] dark:text-white/90 ${i === 2 ? "line-through decoration-2 opacity-60" : ""}`} style={HAND}>
                   {line}
                 </p>
               ))}
-              <p className="text-3xl leading-[44px] text-red-600 dark:text-red-400 mt-2" style={HAND}>
+              <p className="sb-write text-3xl leading-[44px] text-red-600 dark:text-red-400 mt-2" style={HAND}>
                 {t.problem.notebookNote}
               </p>
             </div>
@@ -1519,7 +1377,7 @@ export default function Home() {
               {t.how.title}
             </h2>
             <ol className="relative">
-              <div aria-hidden className="absolute left-5 top-3 bottom-3 w-0.5 bg-border" />
+              <ScrollLine />
               {t.steps.map((s, i) => (
                 <Reveal as="li" delay={i * 90} key={s.title} className="relative pl-16 pb-10 last:pb-0">
                   <span className="absolute left-0 top-0 w-10 h-10 rounded-full flex items-center justify-center font-extrabold text-lg" style={{ background: SUN, color: INK, ...DISPLAY }}>
@@ -1555,7 +1413,7 @@ export default function Home() {
             <div className="grid md:grid-cols-[1fr_1.1fr] rounded-2xl overflow-hidden border border-border shadow-sm">
               <div className="p-8 md:p-10 flex flex-col justify-center" style={{ background: INK, color: "white" }}>
                 <p className="text-4xl md:text-5xl font-extrabold leading-tight" style={DISPLAY}>
-                  <span className="px-1 -mx-1 rounded" style={{ background: SUN, color: INK }}>
+                  <span data-seen className="sb-mark px-1 -mx-1 rounded" style={{ color: INK }}>
                     {t.pricing.big}
                   </span>
                 </p>
@@ -1667,7 +1525,7 @@ export default function Home() {
       </main>
 
       {/* Mobile-only sticky button, appears once the hero has scrolled away */}
-      {scrollY > 500 && (
+      {showSticky && (
         <a
           href={botLink}
           target="_blank"
