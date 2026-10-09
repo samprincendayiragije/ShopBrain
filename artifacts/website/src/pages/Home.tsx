@@ -1,37 +1,38 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Link } from "wouter";
-import { Menu, X, ArrowRight, Shield, Users, MapPin, Mail, Phone, MessageCircle, ClipboardList, Bell, CheckCircle2, LockKeyhole, Instagram, ChevronDown, Check, Sun, Moon } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus, Shield } from "lucide-react";
 
-// The bot number — this is what the QR code and Get Started button send
-// people to, since that's the actual ShopBrain system.
-const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // no + or leading zero, used for wa.me links
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
 
-// Sam's personal/support line — shown separately (footer/contact) for
-// anyone who has questions or gets confused before/after messaging the bot.
-//
-// ⚠️ CHECK THIS: the old file linked to 250795120043 but *displayed*
-// +250 799 627 713 in the contact section and footer. They are different
-// numbers. Set the correct one here — the display text is now derived from
-// this constant, so the link and the visible number can never drift apart.
+// The bot. QR code, hero button and sticky button all open this chat.
+const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // digits only, no + or leading zero
+
+// Sam's support line. Shown in contact/footer and used by the request form.
+// ⚠️ CHECK THIS NUMBER (the old file linked and displayed two different ones).
 const SUPPORT_NUMBER = "250799627713";
 
 const INSTAGRAM_URL = "https://www.instagram.com/shopbrain_kigali";
-
-const CONTACT_EMAIL = "Ndayiragijesamuelprince@gmail.com";
+const CONTACT_EMAIL = "Ndayiragijesamuelprince@gmail.com"; // tip: a hello@yourdomain address looks more trustworthy
 const CONTACT_ADDRESS = "Kigese, Ruyenzi, Southern 0000, Rwanda";
 const CONTACT_ADDRESS_SHORT = "Kigese, Ruyenzi, Rwanda";
 
-// Turns "250795120043" into "+250 795 120 043" so the number shown on the
-// page is always the number the wa.me link actually opens.
 function formatRwandaNumber(digits: string): string {
   const m = digits.match(/^(\d{3})(\d{3})(\d{3})(\d{3})$/);
   return m ? `+${m[1]} ${m[2]} ${m[3]} ${m[4]}` : `+${digits}`;
 }
-
 const SUPPORT_NUMBER_DISPLAY = formatRwandaNumber(SUPPORT_NUMBER);
 
+// Brand colours (kept inline so no CSS file needs to change)
+const INK = "#1B2559"; // ledger-pen indigo
+const GREEN = "#0F7A3F"; // WhatsApp-family green, dark enough for white text
+const SUN = "#FFC933"; // yellow from the Rwandan flag, used as a highlighter
+
+const DISPLAY = { fontFamily: "'Bricolage Grotesque', system-ui, sans-serif" } as const;
+const HAND = { fontFamily: "'Caveat', cursive" } as const;
+
 // ---------------------------------------------------------------------------
-// Theme (light / dark)
+// Theme
 // ---------------------------------------------------------------------------
 
 type Theme = "light" | "dark";
@@ -46,38 +47,15 @@ function getInitialTheme(): Theme {
 
 function useTheme() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
-
   useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle("dark", theme === "dark");
+    document.documentElement.classList.toggle("dark", theme === "dark");
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
-
-  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
-
-  return { theme, toggleTheme };
-}
-
-function ThemeToggle({ theme, toggleTheme, isScrolled }: { theme: Theme; toggleTheme: () => void; isScrolled: boolean }) {
-  const isDark = theme === "dark";
-  return (
-    <button
-      onClick={toggleTheme}
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      className={`inline-flex items-center justify-center w-9 h-9 rounded-md border transition-colors ${
-        isScrolled
-          ? "border-border text-muted-foreground hover:text-primary hover:bg-muted"
-          : "border-white/40 text-white/90 hover:text-white hover:bg-white/10 drop-shadow-sm"
-      }`}
-      data-testid="button-theme-toggle"
-    >
-      {isDark ? <Sun size={16} /> : <Moon size={16} />}
-    </button>
-  );
+  return { theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")) };
 }
 
 // ---------------------------------------------------------------------------
-// Language
+// Copy
 // ---------------------------------------------------------------------------
 
 type Lang = "rw" | "en" | "fr";
@@ -88,240 +66,273 @@ const LANGUAGES: { code: Lang; label: string; flag: string }[] = [
   { code: "fr", label: "Français", flag: "🇫🇷" },
 ];
 
-const copy: Record<Lang, {
-  nav: { about: string; how: string; getStarted: string; contact: string; privacy: string; admin: string };
-  hero: { title: string; body: string; cta: string; learnMore: string };
-  getStarted: { eyebrow: string; title: string; body: string; scanTitle: string; scanBody: string };
-  about: { eyebrow: string; title: string; body: string };
-  steps: { title: string; desc: string }[];
-  contact: { eyebrow: string; title: string; body: string; questions: string; questionsNote: string; email: string; address: string };
-  form: { title: string; body: string; name: string; namePh: string; phone: string; phonePh: string; type: string; message: string; messagePh: string; submit: string };
-  businessTypes: string[];
-  privacy: { title: string };
-  footer: { tagline: string; explore: string; contactHeading: string; builtIn: string };
-}> = {
-  rw: {
-    nav: { about: "Ibiranga", how: "Uko Bikora", getStarted: "Tangira", contact: "Twandikire", privacy: "Ibanga", admin: "Ubuyobozi" },
-    hero: {
-      title: "Genzura imyenda y'abakiriya ukoresheje WhatsApp.",
-      body: "Shop Brain ikora ibikoresho by'ubucuruzi binyuze mu butumwa, bifasha abanyabucuruzi bato n'abadafite gahunda igenga kugenzura imyenda, kohereza inyibutsa z'ubwishyu, no gucunga umubano n'abakiriya — byose biboneka kuri WhatsApp.",
-      cta: "Tangira",
-      learnMore: "Menya Byinshi",
-    },
-    getStarted: {
-      eyebrow: "Tangira",
-      title: "Koresha kode uganire, cyangwa umenye byinshi.",
-      body: "Nta porogaramu ukeneye gushyiramo. Hitamo kimwe hepfo utangire mu masegonda make.",
-      scanTitle: "Koresha kode uganire na Shop Brain",
-      scanBody: "Ifungura ikiganiro cya WhatsApp n'itsinda ryacu ako kanya.",
-    },
-    about: {
-      eyebrow: "Ibyerekeye Shop Brain",
-      title: "Igikoresho gifatika ku bucuruzi nyabwo.",
-      body: "Shop Brain ni igikoresho cyo kugenzura imyenda binyuze kuri WhatsApp, cyakorewe abanyabucuruzi bato. Turazi ko gucunga ubucuruzi bisaba umwanya, ni yo mpamvu twakoze igisubizo cyinjira mu mikorere yawe ya buri munsi. Gikora mu Cyongereza no mu Kinyarwanda.",
-    },
-    steps: [
-      { title: "Andikira Roboti", desc: "Ohereza ubutumwa kuri Shop Brain kuri WhatsApp nk'uko wandikira undi muntu — nta gushyiramo, nta kwiyandikisha." },
-      { title: "Ongeraho Umwenda", desc: "Andika icyo umukiriya abereyemo mu masegonda make, uri mu kiganiro." },
-      { title: "Roboti Yohereza Inyibutsa", desc: "Shop Brain ikurikirana ku bwayo, mu Cyongereza cyangwa mu Kinyarwanda." },
-      { title: "Umukiriya Yishyura", desc: "Shyira ko umwenda wishyuwe, konti yawe ihite ivugurura." },
-    ],
-    contact: {
-      eyebrow: "Twandikire",
-      title: "Turi hano kugira ngo dufashe ubucuruzi bwawe gukura.",
-      body: "Niba ufite ibibazo ku miterere ya Shop Brain mu iduka ryawe, cyangwa ukeneye ubufasha kuri konti yawe, itsinda ryacu riteguye kugufasha.",
-      questions: "Ibibazo? Twandikire ako kanya",
-      questionsNote: "Kubufasha n'ibibazo — ntabwo ari roboti ya ShopBrain ubwayo.",
-      email: "Imeyili",
-      address: "Aderesi",
-    },
-    form: {
-      title: "Saba Kwinjira",
-      body: "Ohereza amakuru yawe, hazafungura ikiganiro kuri WhatsApp cyuzuyemo icyo usaba.",
-      name: "Amazina Yombi",
-      namePh: "Amazina yawe",
-      phone: "Numero ya Telefone",
-      phonePh: "Numero yawe ya WhatsApp",
-      type: "Ubwoko bw'Ubucuruzi",
-      message: "Ubutumwa (si ngombwa)",
-      messagePh: "Ikindi wifuza kutumenyesha?",
-      submit: "Ohereza kuri WhatsApp",
-    },
-    businessTypes: ["Iduka / Uduka", "Salon / Umucuzi", "Imyenda", "Farumasi", "Resitora / Bar", "Ikindi"],
-    privacy: { title: "Politiki y'Ibanga" },
-    footer: {
-      tagline: "Igikoresho cyo kugenzura imyenda kuri WhatsApp, cyakorewe abanyabucuruzi bato mu Rwanda. Nta porogaramu — andika gusa utangire.",
-      explore: "Reba",
-      contactHeading: "Twandikire",
-      builtIn: "Byakozwe i Kigali 🇷🇼",
-    },
+const en = {
+  nav: { how: "How it works", pricing: "Pricing", faq: "FAQ", contact: "Contact", privacy: "Privacy" },
+  hero: {
+    title: "Know who owes you. Get paid sooner.",
+    body: "Shop Brain keeps your customers' debts in WhatsApp. Add a debt in seconds, send reminders with one message, and see your total any time.",
+    cta: "Chat on WhatsApp",
+    more: "See how it works",
+    note: "No app to install. First month free.",
   },
-  en: {
-    nav: { about: "About", how: "How it Works", getStarted: "Get Started", contact: "Contact", privacy: "Privacy", admin: "Admin" },
-    hero: {
-      title: "Manage customer debts through WhatsApp.",
-      body: "Shop Brain builds messaging-based business management tools that help small and informal shop owners in Rwanda track debts, send payment reminders, and manage customer relationships — accessible directly through WhatsApp.",
-      cta: "Get Started",
-      learnMore: "Learn More",
-    },
-    getStarted: {
-      eyebrow: "Get Started",
-      title: "Scan to chat, or scan to learn more.",
-      body: "No app to install. Choose one below to get going in seconds.",
-      scanTitle: "Scan to chat with Shop Brain",
-      scanBody: "Opens a WhatsApp chat with our team directly.",
-    },
-    about: {
-      eyebrow: "About Shop Brain",
-      title: "A practical tool for real businesses.",
-      body: "Shop Brain is a WhatsApp-based debt tracking tool designed specifically for small shop owners. We understand that running a business is demanding, so we built a solution that fits seamlessly into your daily routine. It works in both English and Kinyarwanda.",
-    },
-    steps: [
-      { title: "Text the Bot", desc: "Message Shop Brain on WhatsApp like you would any contact — no install, no login." },
-      { title: "Add Customer Debt", desc: "Record what a customer owes in seconds, right inside the chat." },
-      { title: "Bot Sends Reminder", desc: "Shop Brain follows up automatically, in English or Kinyarwanda." },
-      { title: "Customer Pays", desc: "Mark the debt as paid and your balance updates instantly." },
+  chat: {
+    msgs: [
+      { from: "me", text: "ADD Jean 5000" },
+      { from: "bot", text: "✅ Saved. Jean owes 5,000 RWF." },
+      { from: "me", text: "TOTAL" },
+      { from: "bot", text: "You are owed 48,500 RWF by 7 customers." },
+      { from: "bot", text: "🔔 Reminder sent to Jean." },
     ],
-    contact: {
-      eyebrow: "Get in Touch",
-      title: "We're here to help you grow.",
-      body: "Whether you have questions about setting up Shop Brain for your store, or need support with your account, our team is ready to assist you.",
-      questions: "Questions? Message us directly",
-      questionsNote: "For support and questions — not the ShopBrain bot itself.",
-      email: "Email",
-      address: "Address",
-    },
-    form: {
-      title: "Request Access",
-      body: "Submit your details and we'll open a WhatsApp chat pre-filled with your request.",
-      name: "Full Name",
-      namePh: "Your name",
-      phone: "Phone Number",
-      phonePh: "Your WhatsApp number",
-      type: "Business Type",
-      message: "Message (optional)",
-      messagePh: "Anything else we should know?",
-      submit: "Send via WhatsApp",
-    },
-    businessTypes: ["Grocery / Shop", "Salon / Barber", "Boutique / Clothing", "Pharmacy", "Restaurant / Bar", "Other"],
-    privacy: { title: "Privacy Policy" },
-    footer: {
-      tagline: "A WhatsApp-based debt tracking tool built for small shop owners in Rwanda. No app to install — just message and go.",
-      explore: "Explore",
-      contactHeading: "Contact",
-      builtIn: "Built in Kigali 🇷🇼",
-    },
   },
-  fr: {
-    nav: { about: "À propos", how: "Comment ça marche", getStarted: "Commencer", contact: "Contact", privacy: "Confidentialité", admin: "Admin" },
-    hero: {
-      title: "Gérez les dettes de vos clients via WhatsApp.",
-      body: "Shop Brain conçoit des outils de gestion par messagerie qui aident les petits commerçants et boutiques informelles du Rwanda à suivre les dettes, envoyer des rappels de paiement et gérer la relation client — le tout directement sur WhatsApp.",
-      cta: "Commencer",
-      learnMore: "En savoir plus",
-    },
-    getStarted: {
-      eyebrow: "Commencer",
-      title: "Scannez pour discuter, ou pour en savoir plus.",
-      body: "Aucune application à installer. Choisissez une option ci-dessous pour démarrer en quelques secondes.",
-      scanTitle: "Scannez pour discuter avec Shop Brain",
-      scanBody: "Ouvre directement une conversation WhatsApp avec notre équipe.",
-    },
-    about: {
-      eyebrow: "À propos de Shop Brain",
-      title: "Un outil pratique pour de vrais commerces.",
-      body: "Shop Brain est un outil de suivi des dettes basé sur WhatsApp, conçu spécifiquement pour les petits commerçants. Nous savons que gérer un commerce demande du temps, c'est pourquoi nous avons conçu une solution qui s'intègre à votre routine quotidienne. Disponible en anglais et en kinyarwanda.",
-    },
-    steps: [
-      { title: "Écrivez au bot", desc: "Envoyez un message à Shop Brain sur WhatsApp comme à n'importe quel contact — aucune installation, aucune connexion." },
-      { title: "Ajoutez une dette", desc: "Enregistrez ce qu'un client vous doit en quelques secondes, directement dans la conversation." },
-      { title: "Le bot envoie un rappel", desc: "Shop Brain relance automatiquement, en anglais ou en kinyarwanda." },
-      { title: "Le client paie", desc: "Marquez la dette comme payée et votre solde se met à jour instantanément." },
+  problem: {
+    title: "Still keeping debts in a notebook?",
+    body: "Pages get lost. Customers forget. Chasing them takes time you would rather spend selling.",
+    notebook: ["Jean – 5,000", "Mama K – 12,000 (?)", "Eric – paid? no…"],
+    notebookNote: "Who paid? Who didn't?",
+    afterTitle: "With Shop Brain",
+    after: ["Every debt saved, including part payments", "Reminders sent for you, in Kinyarwanda or English", "Your total owed, in one message"],
+  },
+  how: { title: "Four steps, all inside WhatsApp" },
+  steps: [
+    { title: "Text the bot", desc: "Message Shop Brain on WhatsApp like any contact. No install, no login." },
+    { title: "Add a customer's debt", desc: "Record what a customer owes in seconds, right inside the chat." },
+    { title: "The bot sends a reminder", desc: "Shop Brain follows up for you, in English or Kinyarwanda." },
+    { title: "The customer pays", desc: "Mark the debt as paid and your balance updates instantly." },
+  ],
+  pricing: {
+    title: "Simple pricing",
+    big: "1 month free",
+    after: "After that, a small monthly fee.",
+    features: ["Track each customer's debt, with part payments", "Remind one customer or everyone at once", "See your total owed any time", "Works in English and Kinyarwanda"],
+    cta: "Start your free month",
+  },
+  faq: {
+    title: "Questions shop owners ask",
+    items: [
+      { q: "Do I need to install an app?", a: "No. Shop Brain works inside WhatsApp, the app you already use." },
+      { q: "Is my customers' data safe?", a: "Only you can see your shop's records. We never sell or share them." },
+      { q: "Does it work in Kinyarwanda?", a: "Yes. The bot and the reminders work in Kinyarwanda and English." },
+      { q: "Can my customers stop the reminders?", a: "Yes. Customers can opt out of reminders at any time." },
     ],
-    contact: {
-      eyebrow: "Contactez-nous",
-      title: "Nous sommes là pour vous aider à grandir.",
-      body: "Que vous ayez des questions sur la mise en place de Shop Brain pour votre commerce, ou besoin d'assistance pour votre compte, notre équipe est prête à vous aider.",
-      questions: "Des questions ? Écrivez-nous directement",
-      questionsNote: "Pour le support et les questions — pas le bot ShopBrain lui-même.",
-      email: "E-mail",
-      address: "Adresse",
-    },
-    form: {
-      title: "Demander l'accès",
-      body: "Envoyez vos informations et nous ouvrirons une discussion WhatsApp pré-remplie avec votre demande.",
-      name: "Nom complet",
-      namePh: "Votre nom",
-      phone: "Numéro de téléphone",
-      phonePh: "Votre numéro WhatsApp",
-      type: "Type de commerce",
-      message: "Message (facultatif)",
-      messagePh: "Autre chose à nous signaler ?",
-      submit: "Envoyer via WhatsApp",
-    },
-    businessTypes: ["Épicerie / Boutique", "Salon / Coiffeur", "Boutique de vêtements", "Pharmacie", "Restaurant / Bar", "Autre"],
-    privacy: { title: "Politique de confidentialité" },
-    footer: {
-      tagline: "Un outil de suivi des dettes basé sur WhatsApp, conçu pour les petits commerçants du Rwanda. Aucune application — écrivez et c'est parti.",
-      explore: "Explorer",
-      contactHeading: "Contact",
-      builtIn: "Conçu à Kigali 🇷🇼",
-    },
+  },
+  cta: { title: "Ready to stop chasing debts?", body: "Send one message and you are set up.", qr: "On a computer? Scan with your phone." },
+  contact: {
+    title: "Need a hand?",
+    body: "Questions about setting up Shop Brain for your shop, or help with your account? Our team is ready.",
+    support: "Message our support team",
+    supportNote: "For support and questions, not the Shop Brain bot itself.",
+    email: "Email",
+    address: "Address",
+  },
+  form: {
+    title: "Get help setting up",
+    body: "Tell us about your shop and we'll message you on WhatsApp.",
+    name: "Full name",
+    namePh: "Your name",
+    phone: "Phone number",
+    phonePh: "Your WhatsApp number",
+    type: "Business type",
+    message: "Message (optional)",
+    messagePh: "Anything else we should know?",
+    submit: "Send via WhatsApp",
+  },
+  businessTypes: ["Grocery / Shop", "Salon / Barber", "Boutique / Clothing", "Pharmacy", "Restaurant / Bar", "Other"],
+  sticky: "Chat on WhatsApp",
+  privacy: { title: "Privacy Policy" },
+  footer: {
+    tagline: "A WhatsApp-based debt tracking tool built for small shop owners in Rwanda. No app to install, just message and go.",
+    explore: "Explore",
+    contactHeading: "Contact",
+    builtIn: "Built in Kigali 🇷🇼",
+  },
+};
+type Copy = typeof en;
+
+const rw: Copy = {
+  nav: { how: "Uko bikora", pricing: "Igiciro", faq: "Ibibazo", contact: "Twandikire", privacy: "Ibanga" },
+  hero: {
+    title: "Menya abakubereyemo imyenda. Wishyurwe vuba.",
+    body: "Shop Brain ibika imyenda y'abakiriya bawe kuri WhatsApp. Andika umwenda mu masegonda, ohereza inyibutsa n'ubutumwa bumwe, kandi urebe igiteranyo cyose igihe cyose.",
+    cta: "Tangira kuri WhatsApp",
+    more: "Reba uko bikora",
+    note: "Nta porogaramu ushyiramo. Ukwezi kwa mbere ni ubuntu.",
+  },
+  chat: {
+    msgs: [
+      { from: "me", text: "ADD Jean 5000" },
+      { from: "bot", text: "✅ Byanditswe. Jean abereyemo 5,000 RWF." },
+      { from: "me", text: "IGITERANYO" },
+      { from: "bot", text: "Abakubereyemo bose: 48,500 RWF (abakiriya 7)." },
+      { from: "bot", text: "🔔 Inyibutsa yoherejwe kuri Jean." },
+    ],
+  },
+  problem: {
+    title: "Aracyandika imyenda mu gatabo?",
+    body: "Impapuro zirazimira. Abakiriya baribagirwa. Kubakurikirana bigutwara umwanya wari gucuruza.",
+    notebook: ["Jean – 5,000", "Mama K – 12,000 (?)", "Eric – yishyuye? oya…"],
+    notebookNote: "Ni nde wishyuye? Ni nde utarishyura?",
+    afterTitle: "Hamwe na Shop Brain",
+    after: ["Buri mwenda urabitswe, harimo ubwishyu bw'igice", "Inyibutsa zoherezwa ku bwawe, mu Kinyarwanda cyangwa mu Cyongereza", "Igiteranyo cyawe mu butumwa bumwe"],
+  },
+  how: { title: "Intambwe enye, byose kuri WhatsApp" },
+  steps: [
+    { title: "Andikira roboti", desc: "Ohereza ubutumwa kuri Shop Brain kuri WhatsApp nk'uko wandikira undi muntu. Nta gushyiramo, nta kwiyandikisha." },
+    { title: "Ongeraho umwenda", desc: "Andika icyo umukiriya abereyemo mu masegonda make, uri mu kiganiro." },
+    { title: "Roboti yohereza inyibutsa", desc: "Shop Brain ikurikirana ku bwayo, mu Cyongereza cyangwa mu Kinyarwanda." },
+    { title: "Umukiriya yishyura", desc: "Shyira ko umwenda wishyuwe, konti yawe ihite ivugururwa." },
+  ],
+  pricing: {
+    title: "Igiciro cyoroshye",
+    big: "Ukwezi 1 k'ubuntu",
+    after: "Nyuma, wishyura amafaranga make buri kwezi.",
+    features: ["Bika umwenda wa buri mukiriya, n'ubwishyu bw'igice", "Ohereza inyibutsa ku mukiriya umwe cyangwa kuri bose", "Reba igiteranyo igihe cyose", "Bikora mu Kinyarwanda no mu Cyongereza"],
+    cta: "Tangira ukwezi k'ubuntu",
+  },
+  faq: {
+    title: "Ibibazo abacuruzi bakunze kubaza",
+    items: [
+      { q: "Ngomba gushyiramo porogaramu?", a: "Oya. Shop Brain ikorera muri WhatsApp, porogaramu usanzwe ukoresha." },
+      { q: "Amakuru y'abakiriya banjye afite umutekano?", a: "Ni wowe wenyine ubona amakuru y'iduka ryawe. Ntitwigera tuyagurisha cyangwa ngo tuyahe abandi." },
+      { q: "Ikora mu Kinyarwanda?", a: "Yego. Roboti n'inyibutsa bikora mu Kinyarwanda no mu Cyongereza." },
+      { q: "Abakiriya bashobora guhagarika inyibutsa?", a: "Yego. Umukiriya ashobora kuzihagarika igihe icyo ari cyo cyose." },
+    ],
+  },
+  cta: { title: "Witeguye kureka gukurikirana imyenda?", body: "Ohereza ubutumwa bumwe, uhite utangira.", qr: "Uri kuri mudasobwa? Sikana kode na telefone yawe." },
+  contact: {
+    title: "Ukeneye ubufasha?",
+    body: "Ufite ibibazo ku gutangira gukoresha Shop Brain mu iduka ryawe, cyangwa ukeneye ubufasha kuri konti yawe? Itsinda ryacu riteguye.",
+    support: "Ohereza ubutumwa ku itsinda ry'ubufasha",
+    supportNote: "Ni ubufasha n'ibibazo, ntabwo ari roboti ya Shop Brain ubwayo.",
+    email: "Imeyili",
+    address: "Aderesi",
+  },
+  form: {
+    title: "Dufashe gutangira",
+    body: "Tubwire iby'iduka ryawe, tuzakwandikira kuri WhatsApp.",
+    name: "Amazina yombi",
+    namePh: "Amazina yawe",
+    phone: "Numero ya telefone",
+    phonePh: "Numero yawe ya WhatsApp",
+    type: "Ubwoko bw'ubucuruzi",
+    message: "Ubutumwa (si ngombwa)",
+    messagePh: "Ikindi wifuza kutumenyesha?",
+    submit: "Ohereza kuri WhatsApp",
+  },
+  businessTypes: ["Iduka / Uduka", "Salon / Umucuzi", "Imyenda", "Farumasi", "Resitora / Bar", "Ikindi"],
+  sticky: "Tangira kuri WhatsApp",
+  privacy: { title: "Politiki y'Ibanga" },
+  footer: {
+    tagline: "Igikoresho cyo kugenzura imyenda kuri WhatsApp, cyakorewe abanyabucuruzi bato mu Rwanda. Nta porogaramu, andika gusa utangire.",
+    explore: "Reba",
+    contactHeading: "Twandikire",
+    builtIn: "Byakozwe i Kigali 🇷🇼",
   },
 };
 
+const fr: Copy = {
+  nav: { how: "Comment ça marche", pricing: "Tarif", faq: "FAQ", contact: "Contact", privacy: "Confidentialité" },
+  hero: {
+    title: "Sachez qui vous doit de l'argent. Soyez payé plus vite.",
+    body: "Shop Brain garde les dettes de vos clients dans WhatsApp. Ajoutez une dette en quelques secondes, envoyez des rappels en un message et consultez votre total à tout moment.",
+    cta: "Discuter sur WhatsApp",
+    more: "Voir comment ça marche",
+    note: "Aucune application à installer. Premier mois gratuit.",
+  },
+  chat: {
+    msgs: [
+      { from: "me", text: "ADD Jean 5000" },
+      { from: "bot", text: "✅ Enregistré. Jean doit 5 000 RWF." },
+      { from: "me", text: "TOTAL" },
+      { from: "bot", text: "On vous doit 48 500 RWF (7 clients)." },
+      { from: "bot", text: "🔔 Rappel envoyé à Jean." },
+    ],
+  },
+  problem: {
+    title: "Vous notez encore les dettes dans un cahier ?",
+    body: "Les pages se perdent. Les clients oublient. Les relancer vous prend du temps que vous préféreriez passer à vendre.",
+    notebook: ["Jean – 5 000", "Mama K – 12 000 (?)", "Eric – payé ? non…"],
+    notebookNote: "Qui a payé ? Qui n'a pas payé ?",
+    afterTitle: "Avec Shop Brain",
+    after: ["Chaque dette est enregistrée, paiements partiels compris", "Des rappels envoyés pour vous, en kinyarwanda ou en anglais", "Votre total dû, en un seul message"],
+  },
+  how: { title: "Quatre étapes, tout dans WhatsApp" },
+  steps: [
+    { title: "Écrivez au bot", desc: "Envoyez un message à Shop Brain sur WhatsApp comme à n'importe quel contact. Aucune installation, aucune connexion." },
+    { title: "Ajoutez une dette", desc: "Enregistrez ce qu'un client vous doit en quelques secondes, directement dans la conversation." },
+    { title: "Le bot envoie un rappel", desc: "Shop Brain relance pour vous, en anglais ou en kinyarwanda." },
+    { title: "Le client paie", desc: "Marquez la dette comme payée et votre solde se met à jour instantanément." },
+  ],
+  pricing: {
+    title: "Un tarif simple",
+    big: "1 mois gratuit",
+    after: "Ensuite, un petit abonnement mensuel.",
+    features: ["Suivez la dette de chaque client, avec paiements partiels", "Relancez un client ou tout le monde d'un coup", "Consultez votre total dû à tout moment", "Disponible en anglais et en kinyarwanda"],
+    cta: "Commencer le mois gratuit",
+  },
+  faq: {
+    title: "Les questions des commerçants",
+    items: [
+      { q: "Dois-je installer une application ?", a: "Non. Shop Brain fonctionne dans WhatsApp, l'application que vous utilisez déjà." },
+      { q: "Les données de mes clients sont-elles en sécurité ?", a: "Vous seul voyez les données de votre commerce. Nous ne les vendons ni ne les partageons jamais." },
+      { q: "Est-ce disponible en kinyarwanda ?", a: "Oui. Le bot et les rappels fonctionnent en kinyarwanda et en anglais." },
+      { q: "Mes clients peuvent-ils arrêter les rappels ?", a: "Oui. Les clients peuvent se désinscrire des rappels à tout moment." },
+    ],
+  },
+  cta: { title: "Prêt à arrêter de courir après les dettes ?", body: "Envoyez un message et c'est parti.", qr: "Sur ordinateur ? Scannez avec votre téléphone." },
+  contact: {
+    title: "Besoin d'aide ?",
+    body: "Des questions sur la mise en place de Shop Brain pour votre commerce, ou besoin d'aide pour votre compte ? Notre équipe est prête.",
+    support: "Écrire au support",
+    supportNote: "Pour le support et les questions, pas le bot Shop Brain lui-même.",
+    email: "E-mail",
+    address: "Adresse",
+  },
+  form: {
+    title: "Se faire aider pour démarrer",
+    body: "Parlez-nous de votre commerce et nous vous écrirons sur WhatsApp.",
+    name: "Nom complet",
+    namePh: "Votre nom",
+    phone: "Numéro de téléphone",
+    phonePh: "Votre numéro WhatsApp",
+    type: "Type de commerce",
+    message: "Message (facultatif)",
+    messagePh: "Autre chose à nous signaler ?",
+    submit: "Envoyer via WhatsApp",
+  },
+  businessTypes: ["Épicerie / Boutique", "Salon / Coiffeur", "Boutique de vêtements", "Pharmacie", "Restaurant / Bar", "Autre"],
+  sticky: "Discuter sur WhatsApp",
+  privacy: { title: "Politique de confidentialité" },
+  footer: {
+    tagline: "Un outil de suivi des dettes basé sur WhatsApp, conçu pour les petits commerçants du Rwanda. Aucune application, écrivez et c'est parti.",
+    explore: "Explorer",
+    contactHeading: "Contact",
+    builtIn: "Conçu à Kigali 🇷🇼",
+  },
+};
+
+const copy: Record<Lang, Copy> = { rw, en, fr };
+
 // ---------------------------------------------------------------------------
-// Reveal-on-scroll helper
+// Small pieces
 // ---------------------------------------------------------------------------
 
-function useReveal<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (prefersReduced) {
-      setVisible(true);
-      return;
-    }
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.15 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  return { ref, visible };
-}
-
-function Reveal({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
-  const { ref, visible } = useReveal<HTMLDivElement>();
+function ThemeToggle({ theme, toggleTheme }: { theme: Theme; toggleTheme: () => void }) {
+  const isDark = theme === "dark";
   return (
-    <div
-      ref={ref}
-      className={`transition-all duration-700 ease-out ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"} ${className}`}
-      style={{ transitionDelay: visible ? `${delay}ms` : "0ms" }}
+    <button
+      onClick={toggleTheme}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+      data-testid="button-theme-toggle"
     >
-      {children}
-    </div>
+      {isDark ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Language selector
-// ---------------------------------------------------------------------------
-
-function LanguageSelector({ lang, setLang, isScrolled }: { lang: Lang; setLang: (l: Lang) => void; isScrolled: boolean }) {
+function LanguageSelector({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
+  const ref = React.useRef<HTMLDivElement | null>(null);
   const current = LANGUAGES.find((l) => l.code === lang)!;
 
   useEffect(() => {
@@ -336,12 +347,9 @@ function LanguageSelector({ lang, setLang, isScrolled }: { lang: Lang; setLang: 
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1.5 rounded-md border transition-colors ${
-          isScrolled
-            ? "border-border hover:bg-muted"
-            : "border-white/40 text-white/90 hover:text-white hover:bg-white/10 drop-shadow-sm"
-        }`}
+        className="inline-flex items-center gap-1.5 text-sm font-medium px-2.5 h-9 rounded-md border border-border hover:bg-muted transition-colors"
         aria-label="Select language"
+        aria-expanded={open}
         data-testid="button-language-selector"
       >
         <span className="text-base leading-none">{current.flag}</span>
@@ -362,7 +370,7 @@ function LanguageSelector({ lang, setLang, isScrolled }: { lang: Lang; setLang: 
             >
               <span className="text-base leading-none">{l.flag}</span>
               <span className="flex-1">{l.label}</span>
-              {l.code === lang && <Check size={14} className="text-primary" />}
+              {l.code === lang && <Check size={14} />}
             </button>
           ))}
         </div>
@@ -371,56 +379,77 @@ function LanguageSelector({ lang, setLang, isScrolled }: { lang: Lang; setLang: 
   );
 }
 
-// ---------------------------------------------------------------------------
-// Full-bleed hero background
-// ---------------------------------------------------------------------------
-
-// Background photos for the hero.
-//
-// These live in website/public/images/, which Vite copies to the site root
-// as-is. Files in public/ are NOT modules — importing them (the old
-// `import heroImage1 from "@assets/images/shop-hero.jpg"` lines) fails the
-// build because the path resolves to nothing. Reference them by URL instead,
-// exactly like the QR code below does.
-//
-// To add a photo: drop the file in website/public/images/ and add its
-// filename to this array.
-const HERO_IMAGE_FILES = ["shop-hero.jpg", "shop-hero-2.jpg", "shop-hero-3.jpg"];
-const HERO_IMAGES = HERO_IMAGE_FILES.map((f) => `${import.meta.env.BASE_URL}images/${f}`);
-const HERO_IMAGE_DURATION_MS = 5000;
-
-// Crossfading full-bleed background used behind the hero's text. Renders as
-// a stack of absolutely-positioned divs with a CSS background-image (same
-// technique as a standard full-bleed hero), each fading in/out in turn.
-function HeroBackground() {
-  const [imgIdx, setImgIdx] = useState(0);
+// The one animated moment on the page: a WhatsApp chat that plays through
+// the product's real flow, then loops. Pure HTML/CSS, no images.
+function PhoneChat({ msgs }: { msgs: { from: string; text: string }[] }) {
+  const [shown, setShown] = useState(0);
 
   useEffect(() => {
-    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (prefersReduced || HERO_IMAGES.length <= 1) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setShown(msgs.length);
+      return;
+    }
+    setShown(0);
+    let tick = 0;
     const id = setInterval(() => {
-      setImgIdx((i) => (i + 1) % HERO_IMAGES.length);
-    }, HERO_IMAGE_DURATION_MS);
+      tick = tick > msgs.length + 2 ? 0 : tick + 1;
+      setShown(Math.min(tick, msgs.length));
+    }, 1300);
     return () => clearInterval(id);
-  }, []);
+  }, [msgs]);
 
   return (
-    <>
-      {HERO_IMAGES.map((src, idx) => (
-        <div
-          key={src}
-          aria-hidden={idx !== imgIdx}
-          className={`absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transition-opacity duration-1000 ${idx === imgIdx ? "opacity-100" : "opacity-0"}`}
-          style={{ backgroundImage: `url('${src}')` }}
-        />
-      ))}
-      {/* Dark overlay for text contrast, sits above the photos but below content.
-          Using z-0 (not -z-10): the hero <section> below has no z-index of its
-          own, so a negative z-index here escapes past it and renders behind
-          the page's opaque background instead of behind just the hero text —
-          that's what was causing the white-on-white "blank" hero. */}
-      <div className="absolute inset-0 z-0 bg-gray-950/70" />
-    </>
+    <div className="mx-auto w-full max-w-[290px] rounded-[2.5rem] border-[10px] border-[#0b1020] bg-[#0b1020] shadow-2xl rotate-1">
+      <div className="rounded-[1.8rem] overflow-hidden bg-[#0b141a]">
+        <div className="flex items-center gap-3 px-4 py-3 bg-[#1f2c34] text-white">
+          <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm" style={{ background: GREEN }}>
+            SB
+          </div>
+          <div className="leading-tight">
+            <div className="text-sm font-semibold">Shop Brain</div>
+            <div className="text-[11px] text-white/60">online</div>
+          </div>
+        </div>
+        <div className="h-[400px] px-3 py-4 flex flex-col justify-end gap-2" aria-label="Example WhatsApp conversation">
+          {msgs.slice(0, shown).map((m, i) => (
+            <div
+              key={i}
+              className={`max-w-[85%] px-3 py-2 rounded-xl text-[13px] leading-snug text-white animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+                m.from === "me" ? "self-end bg-[#005c4b] rounded-tr-sm" : "self-start bg-[#202c33] rounded-tl-sm"
+              }`}
+            >
+              {m.text}
+              {m.from === "me" && <span className="ml-2 text-[10px] text-sky-300">✓✓</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Faq({ items }: { items: { q: string; a: string }[] }) {
+  const [open, setOpen] = useState<number | null>(0);
+  return (
+    <div className="divide-y divide-border border-y border-border">
+      {items.map((it, i) => {
+        const isOpen = open === i;
+        return (
+          <div key={it.q}>
+            <button
+              onClick={() => setOpen(isOpen ? null : i)}
+              aria-expanded={isOpen}
+              className="w-full flex items-center justify-between gap-4 py-5 text-left text-lg font-semibold"
+              style={DISPLAY}
+            >
+              {it.q}
+              {isOpen ? <Minus size={18} className="shrink-0" /> : <Plus size={18} className="shrink-0" />}
+            </button>
+            {isOpen && <p className="pb-5 pr-10 text-muted-foreground leading-relaxed animate-in fade-in duration-200">{it.a}</p>}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -429,370 +458,380 @@ function HeroBackground() {
 // ---------------------------------------------------------------------------
 
 export default function Home() {
-  const [isScrolled, setIsScrolled] = useState(false);
+  const [scrollY, setScrollY] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [lang, setLang] = useState<Lang>("rw");
   const { theme, toggleTheme } = useTheme();
-
   const t = copy[lang];
 
+  const botLink = `https://wa.me/${WHATSAPP_BUSINESS_NUMBER}`;
+  const supportLink = `https://wa.me/${SUPPORT_NUMBER}`;
+
   const navLinks = [
-    { name: t.nav.about, href: "#about" },
     { name: t.nav.how, href: "#how-it-works" },
-    { name: t.nav.getStarted, href: "#get-started" },
+    { name: t.nav.pricing, href: "#pricing" },
+    { name: t.nav.faq, href: "#faq" },
     { name: t.nav.contact, href: "#contact" },
-    { name: t.nav.privacy, href: "#privacy" },
   ];
 
+  // Load the two fonts at runtime so no CSS/HTML file has to change.
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 20);
-    };
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
+    if (document.getElementById("shopbrain-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "shopbrain-fonts";
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Caveat:wght@600&display=swap";
+    document.head.appendChild(link);
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => setScrollY(window.scrollY);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     e.preventDefault();
     const element = document.querySelector(href);
     if (element) {
-      const top = element.getBoundingClientRect().top + window.scrollY - 80;
+      const top = element.getBoundingClientRect().top + window.scrollY - 72;
       window.scrollTo({ top, behavior: "smooth" });
     }
     setMobileMenuOpen(false);
   };
 
+  const ctaClass =
+    "inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full font-semibold text-white text-lg shadow-lg shadow-black/10 hover:brightness-110 active:scale-[0.98] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
+
   return (
-    <div className="min-h-[100dvh] flex flex-col bg-background font-sans text-foreground">
+    <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
       {/* Header */}
-      <header className={`fixed top-0 w-full z-50 transition-all duration-300 ${isScrolled ? "bg-background/95 backdrop-blur-md shadow-sm py-3" : "bg-transparent py-5"}`}>
-        <div className="container mx-auto px-4 md:px-6 flex items-center justify-between">
-          <a href="#hero" onClick={(e) => scrollToSection(e, "#hero")} className="text-2xl font-bold font-display tracking-tight text-primary">
+      <header className="fixed top-0 w-full z-50 bg-background/90 backdrop-blur-md border-b border-border">
+        <div className="container mx-auto px-4 md:px-6 h-16 flex items-center justify-between">
+          <a href="#hero" onClick={(e) => scrollToSection(e, "#hero")} className="text-2xl font-extrabold tracking-tight" style={DISPLAY}>
             Shop Brain
           </a>
 
-          {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-8">
-            {navLinks.map((link) => (
-              <a
-                key={link.name}
-                href={link.href}
-                onClick={(e) => scrollToSection(e, link.href)}
-                className={`text-sm font-medium transition-colors ${
-                  isScrolled
-                    ? "text-muted-foreground hover:text-primary"
-                    : "text-white/90 hover:text-white drop-shadow-sm"
-                }`}
-              >
-                {link.name}
+          <nav className="hidden md:flex items-center gap-7">
+            {navLinks.map((l) => (
+              <a key={l.href} href={l.href} onClick={(e) => scrollToSection(e, l.href)} className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                {l.name}
               </a>
             ))}
-            <Link
-              href="/admin"
-              className={`inline-flex items-center gap-1.5 text-sm font-medium rounded-md px-3 py-1.5 border transition-colors ${
-                isScrolled
-                  ? "text-muted-foreground hover:text-primary border-border"
-                  : "text-white/90 hover:text-white border-white/40 drop-shadow-sm"
-              }`}
-              data-testid="link-admin"
-            >
-              <LockKeyhole size={14} /> {t.nav.admin}
-            </Link>
-            <ThemeToggle theme={theme} toggleTheme={toggleTheme} isScrolled={isScrolled} />
-            <LanguageSelector lang={lang} setLang={setLang} isScrolled={isScrolled} />
+            <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
+            <LanguageSelector lang={lang} setLang={setLang} />
           </nav>
 
-          {/* Mobile: theme toggle + language selector + menu toggle */}
           <div className="flex items-center gap-2 md:hidden">
-            <ThemeToggle theme={theme} toggleTheme={toggleTheme} isScrolled={isScrolled} />
-            <LanguageSelector lang={lang} setLang={setLang} isScrolled={isScrolled} />
-            <button
-              className={isScrolled ? "p-2 text-foreground" : "p-2 text-white drop-shadow-sm"}
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              aria-label="Toggle menu"
-            >
+            <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
+            <LanguageSelector lang={lang} setLang={setLang} />
+            <button className="p-2" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} aria-label="Toggle menu">
               {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
           </div>
         </div>
       </header>
 
-      {/* Mobile Nav */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 bg-background pt-20 px-4 md:hidden">
-          <nav className="flex flex-col gap-6 p-4">
-            {navLinks.map((link) => (
-              <a
-                key={link.name}
-                href={link.href}
-                onClick={(e) => scrollToSection(e, link.href)}
-                className="text-lg font-medium text-foreground py-2 border-b border-border/50"
-              >
-                {link.name}
+          <nav className="flex flex-col gap-2 p-4">
+            {navLinks.map((l) => (
+              <a key={l.href} href={l.href} onClick={(e) => scrollToSection(e, l.href)} className="text-xl font-semibold py-3 border-b border-border/60" style={DISPLAY}>
+                {l.name}
               </a>
             ))}
-            <Link
-              href="/admin"
-              className="flex items-center gap-2 text-lg font-medium text-foreground py-2 border-b border-border/50"
-            >
-              <LockKeyhole size={18} /> {t.nav.admin}
-            </Link>
           </nav>
         </div>
       )}
 
       <main className="flex-1">
-        {/* Hero Section — full-bleed background photo, text overlaid on top */}
-        <section id="hero" className="relative w-full min-h-screen flex items-center overflow-hidden bg-gray-950">
-          <HeroBackground />
-
-          <div className="relative z-10 w-full pt-28 md:pt-16 pb-16 px-4 md:px-6">
-            <div className="container mx-auto max-w-6xl space-y-8 animate-in slide-in-from-bottom-8 duration-700 fade-in">
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-display font-bold leading-[1.1] text-white max-w-3xl">
+        {/* Hero: ledger paper, with the product playing next to the headline */}
+        <section
+          id="hero"
+          className="relative overflow-hidden pt-28 pb-20 md:pt-36 md:pb-28 px-4 md:px-6 bg-[#EEF1FA] dark:bg-[#0F1530] [--rule:#D3DBF0] dark:[--rule:#222B58]"
+          style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, var(--rule) 35px, var(--rule) 36px)" }}
+        >
+          <div aria-hidden className="absolute inset-y-0 left-3 md:left-14 w-px bg-red-400/40" />
+          <div className="container mx-auto max-w-6xl grid lg:grid-cols-[1.15fr_0.85fr] gap-14 items-center relative">
+            <div className="space-y-7 md:pl-10">
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.05] tracking-tight max-w-2xl" style={DISPLAY}>
                 {t.hero.title}
               </h1>
-              <p className="text-lg md:text-xl text-white/90 leading-relaxed max-w-2xl">
-                {t.hero.body}
+              <p className="text-lg md:text-xl text-foreground/75 leading-relaxed max-w-xl">{t.hero.body}</p>
+              <div className="flex flex-wrap items-center gap-4 pt-2">
+                <a href={`${botLink}?text=Hi`} target="_blank" rel="noopener noreferrer" className={ctaClass} style={{ background: GREEN }} data-testid="link-hero-whatsapp">
+                  <MessageCircle size={20} /> {t.hero.cta}
+                </a>
+                <a href="#how-it-works" onClick={(e) => scrollToSection(e, "#how-it-works")} className="px-5 py-3.5 rounded-full font-semibold border-2 border-foreground/20 hover:border-foreground/50 transition-colors">
+                  {t.hero.more}
+                </a>
+              </div>
+              <p className="text-sm text-foreground/60">{t.hero.note}</p>
+            </div>
+            <PhoneChat msgs={t.chat.msgs} />
+          </div>
+        </section>
+
+        {/* Problem: notebook vs Shop Brain */}
+        <section className="py-20 md:py-28 px-4 md:px-6">
+          <div className="container mx-auto max-w-6xl grid md:grid-cols-2 gap-14 items-center">
+            <div
+              className="relative rounded-md bg-[#FBF7E8] dark:bg-[#1B2140] border border-border shadow-md -rotate-1 px-8 py-7 [--rule:#CDD6EE] dark:[--rule:#2C3566]"
+              style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 43px, var(--rule) 43px, var(--rule) 44px)" }}
+            >
+              {t.problem.notebook.map((line, i) => (
+                <p key={line} className={`text-3xl leading-[44px] text-[#1B2559] dark:text-white/90 ${i === 2 ? "line-through decoration-2 opacity-60" : ""}`} style={HAND}>
+                  {line}
+                </p>
+              ))}
+              <p className="text-3xl leading-[44px] text-red-600 dark:text-red-400 mt-2" style={HAND}>
+                {t.problem.notebookNote}
               </p>
-              <div className="flex flex-wrap items-center gap-4 pt-4">
-                <a
-                  href="#get-started"
-                  onClick={(e) => scrollToSection(e, "#get-started")}
-                  className="inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-md font-medium hover:bg-primary/90 transition-colors shadow-sm"
-                >
-                  {t.hero.cta} <ArrowRight size={18} />
-                </a>
-                <a
-                  href="#about"
-                  onClick={(e) => scrollToSection(e, "#about")}
-                  className="inline-flex items-center justify-center px-6 py-3 rounded-md font-medium text-white hover:bg-white/10 transition-colors border border-white/30"
-                >
-                  {t.hero.learnMore}
+            </div>
+
+            <div>
+              <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-4" style={DISPLAY}>
+                {t.problem.title}
+              </h2>
+              <p className="text-lg text-muted-foreground leading-relaxed mb-8 max-w-lg">{t.problem.body}</p>
+              <h3 className="text-xl font-bold mb-4" style={DISPLAY}>
+                {t.problem.afterTitle}
+              </h3>
+              <ul className="space-y-3">
+                {t.problem.after.map((item) => (
+                  <li key={item} className="flex items-start gap-3 text-lg">
+                    <span className="mt-1 w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-white" style={{ background: GREEN }}>
+                      <Check size={14} strokeWidth={3} />
+                    </span>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* How it works: a real sequence, so numbered */}
+        <section id="how-it-works" className="py-20 md:py-28 px-4 md:px-6 bg-muted/50 border-y border-border">
+          <div className="container mx-auto max-w-4xl">
+            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-12" style={DISPLAY}>
+              {t.how.title}
+            </h2>
+            <ol className="relative">
+              <div aria-hidden className="absolute left-5 top-3 bottom-3 w-0.5 bg-border" />
+              {t.steps.map((s, i) => (
+                <li key={s.title} className="relative pl-16 pb-10 last:pb-0">
+                  <span className="absolute left-0 top-0 w-10 h-10 rounded-full flex items-center justify-center font-extrabold text-lg" style={{ background: SUN, color: INK, ...DISPLAY }}>
+                    {i + 1}
+                  </span>
+                  <h3 className="text-xl font-bold mb-1" style={DISPLAY}>
+                    {s.title}
+                  </h3>
+                  <p className="text-muted-foreground leading-relaxed max-w-xl">{s.desc}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        {/* Pricing: one ticket, not a grid of cards */}
+        <section id="pricing" className="py-20 md:py-28 px-4 md:px-6">
+          <div className="container mx-auto max-w-4xl">
+            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-10" style={DISPLAY}>
+              {t.pricing.title}
+            </h2>
+            <div className="grid md:grid-cols-[1fr_1.1fr] rounded-2xl overflow-hidden border border-border shadow-sm">
+              <div className="p-8 md:p-10 flex flex-col justify-center" style={{ background: INK, color: "white" }}>
+                <p className="text-4xl md:text-5xl font-extrabold leading-tight" style={DISPLAY}>
+                  <span className="px-1 -mx-1 rounded" style={{ background: SUN, color: INK }}>
+                    {t.pricing.big}
+                  </span>
+                </p>
+                <p className="mt-4 text-white/75 text-lg">{t.pricing.after}</p>
+              </div>
+              <div className="p-8 md:p-10 bg-card">
+                <ul className="space-y-3 mb-8">
+                  {t.pricing.features.map((f) => (
+                    <li key={f} className="flex items-start gap-3">
+                      <Check size={20} className="mt-0.5 shrink-0" style={{ color: GREEN }} strokeWidth={3} />
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+                <a href={botLink} target="_blank" rel="noopener noreferrer" className={`${ctaClass} w-full`} style={{ background: GREEN }}>
+                  <MessageCircle size={20} /> {t.pricing.cta}
                 </a>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Get Started / QR Section */}
-        <section id="get-started" className="py-20 md:py-28 bg-card px-4 md:px-6 border-y border-border">
-          <div className="container mx-auto max-w-5xl">
-            <Reveal className="max-w-2xl mx-auto text-center mb-12">
-              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">{t.getStarted.eyebrow}</h2>
-              <h3 className="text-3xl md:text-4xl font-display font-bold mb-4">{t.getStarted.title}</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed">{t.getStarted.body}</p>
-            </Reveal>
-
-            <Reveal className="max-w-sm mx-auto" delay={150}>
-              {/* WhatsApp QR */}
-              <div className="bg-background rounded-2xl border border-border shadow-sm p-6 flex flex-col items-center text-center">
-                <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-xl overflow-hidden border border-border mb-5 bg-white">
-                  <img
-                    src={`${import.meta.env.BASE_URL}images/qr-whatsapp.png`}
-                    alt="QR code to chat with Shop Brain on WhatsApp"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-                <div className="flex items-center gap-2 text-primary font-bold mb-2">
-                  <MessageCircle size={20} />
-                  <span>{t.getStarted.scanTitle}</span>
-                </div>
-                <p className="text-sm text-muted-foreground mb-4">{t.getStarted.scanBody}</p>
-                <a
-                  href={`https://wa.me/${WHATSAPP_BUSINESS_NUMBER}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium text-primary hover:underline break-all"
-                  data-testid="link-whatsapp-fallback"
-                >
-                  wa.me/{WHATSAPP_BUSINESS_NUMBER}
-                </a>
-              </div>
-            </Reveal>
+        {/* FAQ */}
+        <section id="faq" className="pb-20 md:pb-28 px-4 md:px-6">
+          <div className="container mx-auto max-w-3xl">
+            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-8" style={DISPLAY}>
+              {t.faq.title}
+            </h2>
+            <Faq key={lang} items={t.faq.items} />
           </div>
         </section>
 
-        {/* About / How it Works Section */}
-        <section id="about" className="py-20 md:py-32 px-4 md:px-6">
-          <div className="container mx-auto max-w-6xl">
-            <Reveal className="max-w-3xl mb-16">
-              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">{t.about.eyebrow}</h2>
-              <h3 className="text-3xl md:text-4xl font-display font-bold mb-6">{t.about.title}</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed">{t.about.body}</p>
-            </Reveal>
-
-            <div id="how-it-works" className="mt-12">
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {t.steps.map((item, idx) => {
-                  const icons = [MessageCircle, ClipboardList, Bell, CheckCircle2];
-                  const Icon = icons[idx];
-                  return (
-                    <Reveal key={item.title} delay={idx * 120}>
-                      <div className="relative bg-card p-6 rounded-xl border border-border shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 h-full">
-                        <span className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shadow-sm">
-                          {idx + 1}
-                        </span>
-                        <div className="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mb-5">
-                          <Icon size={22} />
-                        </div>
-                        <h4 className="text-lg font-bold mb-2 font-display">{item.title}</h4>
-                        <p className="text-muted-foreground leading-relaxed text-sm">{item.desc}</p>
-                        {idx < 3 && (
-                          <ArrowRight className="hidden lg:block absolute top-1/2 -right-4 -translate-y-1/2 text-border" size={20} />
-                        )}
-                      </div>
-                    </Reveal>
-                  );
-                })}
-              </div>
+        {/* Get started: button everywhere, QR only where it can be scanned */}
+        <section id="get-started" className="py-20 md:py-24 px-4 md:px-6 text-white" style={{ background: INK }}>
+          <div className="container mx-auto max-w-5xl flex flex-col md:flex-row items-center justify-between gap-10">
+            <div className="max-w-xl text-center md:text-left">
+              <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-3" style={DISPLAY}>
+                {t.cta.title}
+              </h2>
+              <p className="text-lg text-white/75 mb-7">{t.cta.body}</p>
+              <a href={botLink} target="_blank" rel="noopener noreferrer" className={ctaClass} style={{ background: GREEN }} data-testid="link-whatsapp-fallback">
+                <MessageCircle size={20} /> {t.hero.cta}
+              </a>
             </div>
+            <figure className="hidden md:flex flex-col items-center gap-3 text-center">
+              <div className="w-44 h-44 rounded-2xl bg-white p-2">
+                <img
+                  src={`${import.meta.env.BASE_URL}images/qr-whatsapp.png`}
+                  alt="QR code to chat with Shop Brain on WhatsApp"
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    const fig = e.currentTarget.closest("figure");
+                    if (fig) (fig as HTMLElement).style.display = "none";
+                  }}
+                />
+              </div>
+              <figcaption className="text-sm text-white/70 max-w-[11rem]">{t.cta.qr}</figcaption>
+            </figure>
           </div>
         </section>
 
-        {/* Contact Section */}
-        <section id="contact" className="py-20 md:py-32 bg-card px-4 md:px-6 border-y border-border">
-          <div className="container mx-auto max-w-6xl grid md:grid-cols-2 gap-16 items-center">
-            <Reveal>
-              <h2 className="text-sm font-bold tracking-wider text-primary uppercase mb-3">{t.contact.eyebrow}</h2>
-              <h3 className="text-3xl md:text-4xl font-display font-bold mb-6">{t.contact.title}</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed mb-10">{t.contact.body}</p>
-
-              <div className="space-y-8">
+        {/* Contact */}
+        <section id="contact" className="py-20 md:py-28 px-4 md:px-6">
+          <div className="container mx-auto max-w-6xl grid md:grid-cols-2 gap-14 items-start">
+            <div>
+              <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-4" style={DISPLAY}>
+                {t.contact.title}
+              </h2>
+              <p className="text-lg text-muted-foreground leading-relaxed mb-10 max-w-lg">{t.contact.body}</p>
+              <div className="space-y-7">
                 <div className="flex items-start gap-4">
-                  <div className="mt-1 bg-primary/10 p-3 rounded-lg text-primary">
-                    <Phone size={24} />
-                  </div>
+                  <Phone size={22} className="mt-1 shrink-0" style={{ color: GREEN }} />
                   <div>
-                    <h5 className="font-bold text-lg">{t.contact.questions}</h5>
-                    <a
-                      href={`https://wa.me/${SUPPORT_NUMBER}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block text-muted-foreground hover:text-primary transition-colors mt-1 text-lg"
-                      data-testid="link-contact-whatsapp"
-                    >
+                    <h3 className="font-bold text-lg">{t.contact.support}</h3>
+                    <a href={supportLink} target="_blank" rel="noopener noreferrer" className="text-lg text-muted-foreground hover:text-foreground transition-colors" data-testid="link-contact-whatsapp">
                       {SUPPORT_NUMBER_DISPLAY}
                     </a>
-                    <p className="text-sm text-muted-foreground mt-1">{t.contact.questionsNote}</p>
+                    <p className="text-sm text-muted-foreground mt-1">{t.contact.supportNote}</p>
                   </div>
                 </div>
-
                 <div className="flex items-start gap-4">
-                  <div className="mt-1 bg-primary/10 p-3 rounded-lg text-primary">
-                    <Mail size={24} />
-                  </div>
+                  <Mail size={22} className="mt-1 shrink-0" style={{ color: GREEN }} />
                   <div>
-                    <h5 className="font-bold text-lg">{t.contact.email}</h5>
-                    <a
-                      href={`mailto:${CONTACT_EMAIL}`}
-                      className="block text-muted-foreground hover:text-primary transition-colors mt-1 text-lg break-all"
-                    >
+                    <h3 className="font-bold text-lg">{t.contact.email}</h3>
+                    <a href={`mailto:${CONTACT_EMAIL}`} className="text-lg text-muted-foreground hover:text-foreground transition-colors break-all">
                       {CONTACT_EMAIL}
                     </a>
                   </div>
                 </div>
-
                 <div className="flex items-start gap-4">
-                  <div className="mt-1 bg-primary/10 p-3 rounded-lg text-primary">
-                    <MapPin size={24} />
-                  </div>
+                  <MapPin size={22} className="mt-1 shrink-0" style={{ color: GREEN }} />
                   <div>
-                    <h5 className="font-bold text-lg">{t.contact.address}</h5>
-                    <p className="text-muted-foreground mt-1 text-lg">{CONTACT_ADDRESS}</p>
+                    <h3 className="font-bold text-lg">{t.contact.address}</h3>
+                    <p className="text-lg text-muted-foreground">{CONTACT_ADDRESS}</p>
                   </div>
                 </div>
               </div>
-            </Reveal>
+            </div>
 
-            <Reveal delay={150} className="bg-background p-8 md:p-10 rounded-2xl border border-border shadow-xl">
-              <h4 className="text-xl font-bold font-display mb-1">{t.form.title}</h4>
+            <div className="bg-card p-8 md:p-10 rounded-2xl border border-border shadow-lg">
+              <h3 className="text-xl font-bold mb-1" style={DISPLAY}>
+                {t.form.title}
+              </h3>
               <p className="text-sm text-muted-foreground mb-6">{t.form.body}</p>
-              <RequestAccessForm t={t.form} businessTypes={t.businessTypes} />
-            </Reveal>
+              <SupportForm t={t.form} businessTypes={t.businessTypes} supportNumber={SUPPORT_NUMBER} />
+            </div>
           </div>
         </section>
 
-        {/* Privacy Policy */}
-        <section id="privacy" className="py-20 bg-muted px-4 md:px-6">
-          <Reveal className="container mx-auto max-w-4xl bg-card p-8 md:p-12 rounded-2xl border border-border shadow-sm">
-            <h2 className="text-2xl md:text-3xl font-display font-bold mb-8 text-foreground flex items-center gap-3">
-              <Shield className="text-primary" /> {t.privacy.title}
-            </h2>
-            <div className="space-y-6 text-muted-foreground leading-relaxed">
+        {/* Privacy: collapsed so it stays on the page without dominating it */}
+        <section id="privacy" className="pb-16 px-4 md:px-6">
+          <details className="container mx-auto max-w-3xl rounded-xl border border-border bg-card px-6 py-4 group">
+            <summary className="cursor-pointer list-none flex items-center gap-3 font-bold text-lg" style={DISPLAY}>
+              <Shield size={20} style={{ color: GREEN }} /> {t.privacy.title}
+              <ChevronDown size={18} className="ml-auto transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="mt-5 space-y-4 text-muted-foreground leading-relaxed">
               <p>Shop Brain Ltd collects WhatsApp phone numbers and customer debt records on behalf of shop owners.</p>
               <p>All data is stored securely and is only accessible to the authorised shop owner.</p>
               <p>Shop Brain Ltd does not sell, share, or transfer customer data to any third party.</p>
               <p>Data is retained as long as the shop owner uses the service.</p>
               <p>WhatsApp messages sent to Shop Brain are processed to extract commands (e.g. ADD, PAID, customer lookup) and are not stored beyond what is needed to fulfil the request.</p>
-              <div className="mt-8 p-6 bg-background rounded-xl border border-border">
-                <p className="font-medium text-foreground mb-2">For data deletion requests, contact:</p>
-                <a href={`mailto:${CONTACT_EMAIL}`} className="text-primary hover:underline font-medium text-lg break-all">{CONTACT_EMAIL}</a>
+              <div className="p-5 bg-background rounded-lg border border-border">
+                <p className="font-medium text-foreground mb-1">For data deletion requests, contact:</p>
+                <a href={`mailto:${CONTACT_EMAIL}`} className="font-medium underline break-all">
+                  {CONTACT_EMAIL}
+                </a>
               </div>
             </div>
-          </Reveal>
+          </details>
         </section>
       </main>
 
-      {/* Footer — hardcoded pitch-black regardless of light/dark theme,
-          rather than bg-foreground/text-background, since those CSS
-          variables don't reliably resolve to black/white on this site. */}
-      <footer className="bg-black text-white pt-16 pb-8 px-4 md:px-6">
+      {/* Mobile-only sticky button, appears once the hero has scrolled away */}
+      {scrollY > 500 && (
+        <a
+          href={botLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${ctaClass} fixed bottom-4 inset-x-4 z-40 md:hidden animate-in fade-in slide-in-from-bottom-4 duration-300`}
+          style={{ background: GREEN }}
+          data-testid="link-sticky-whatsapp"
+        >
+          <MessageCircle size={20} /> {t.sticky}
+        </a>
+      )}
+
+      {/* Footer */}
+      <footer className="text-white pt-16 pb-8 px-4 md:px-6" style={{ background: "#0F1530" }}>
         <div className="container mx-auto max-w-6xl">
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-10 pb-12 border-b border-white/10">
-            {/* Brand */}
             <div className="lg:col-span-2">
-              <div className="text-2xl font-bold font-display tracking-tight text-white mb-3">
+              <div className="text-2xl font-extrabold tracking-tight mb-3" style={DISPLAY}>
                 Shop Brain
               </div>
               <p className="text-white/60 leading-relaxed max-w-sm mb-6">{t.footer.tagline}</p>
               <div className="flex items-center gap-3">
-                <a
-                  href={INSTAGRAM_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Shop Brain on Instagram"
-                  className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-primary hover:scale-110 transition-all duration-300"
-                  data-testid="link-instagram"
-                >
+                <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label="Shop Brain on Instagram" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors" data-testid="link-instagram">
                   <Instagram size={18} />
                 </a>
-                <a
-                  href={`https://wa.me/${SUPPORT_NUMBER}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Message Shop Brain support on WhatsApp"
-                  className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-primary hover:scale-110 transition-all duration-300"
-                  data-testid="link-footer-whatsapp"
-                >
+                <a href={supportLink} target="_blank" rel="noopener noreferrer" aria-label="Message Shop Brain support on WhatsApp" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors" data-testid="link-footer-whatsapp">
                   <MessageCircle size={18} />
                 </a>
               </div>
             </div>
 
-            {/* Quick links */}
             <div>
-              <h6 className="text-sm font-bold uppercase tracking-wider text-white/50 mb-4">{t.footer.explore}</h6>
+              <h4 className="font-bold text-white/90 mb-4" style={DISPLAY}>
+                {t.footer.explore}
+              </h4>
               <ul className="space-y-3">
-                {navLinks.map((link) => (
-                  <li key={link.name}>
-                    <a
-                      href={link.href}
-                      onClick={(e) => scrollToSection(e, link.href)}
-                      className="text-white/70 hover:text-white transition-colors"
-                    >
-                      {link.name}
+                {[...navLinks, { name: t.nav.privacy, href: "#privacy" }].map((l) => (
+                  <li key={l.href}>
+                    <a href={l.href} onClick={(e) => scrollToSection(e, l.href)} className="text-white/70 hover:text-white transition-colors">
+                      {l.name}
                     </a>
                   </li>
                 ))}
               </ul>
             </div>
 
-            {/* Contact */}
             <div>
-              <h6 className="text-sm font-bold uppercase tracking-wider text-white/50 mb-4">{t.footer.contactHeading}</h6>
+              <h4 className="font-bold text-white/90 mb-4" style={DISPLAY}>
+                {t.footer.contactHeading}
+              </h4>
               <ul className="space-y-3 text-white/70">
                 <li>
-                  <a href={`https://wa.me/${SUPPORT_NUMBER}`} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors break-all">
+                  <a href={supportLink} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors break-all">
                     {SUPPORT_NUMBER_DISPLAY}
                   </a>
                 </li>
@@ -806,11 +845,9 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-white/50 text-sm">
-              © {new Date().getFullYear()} Shop Brain Ltd — Registered in Rwanda.
-            </p>
-            <p className="text-white/50 text-sm">{t.footer.builtIn}</p>
+          <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-white/50 text-sm">
+            <p>© {new Date().getFullYear()} Shop Brain Ltd. Registered in Rwanda.</p>
+            <p>{t.footer.builtIn}</p>
           </div>
         </div>
       </footer>
@@ -818,24 +855,25 @@ export default function Home() {
   );
 }
 
-function RequestAccessForm({ t, businessTypes }: { t: typeof copy["en"]["form"]; businessTypes: string[] }) {
+// ---------------------------------------------------------------------------
+// Support form (opens a WhatsApp chat with the support line, pre-filled)
+// ---------------------------------------------------------------------------
+
+function SupportForm({ t, businessTypes, supportNumber }: { t: Copy["form"]; businessTypes: string[]; supportNumber: string }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [businessType, setBusinessType] = useState(businessTypes[0]);
   const [message, setMessage] = useState("");
 
-  // Business types are translated, so the selected value becomes stale when
-  // the visitor switches language mid-form. Reset to the first option of the
-  // new list so we never submit a label from the previous language.
+  // Labels are translated, so reset when the language changes.
   useEffect(() => {
     setBusinessType(businessTypes[0]);
   }, [businessTypes]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
     const text = [
-      "Hi Shop Brain, I'd like to request access.",
+      "Hi Shop Brain, I'd like help getting set up.",
       `Name: ${name}`,
       `Phone: ${phone}`,
       `Business type: ${businessType}`,
@@ -843,48 +881,25 @@ function RequestAccessForm({ t, businessTypes }: { t: typeof copy["en"]["form"];
     ]
       .filter(Boolean)
       .join("\n");
-
-    const url = `https://wa.me/${SUPPORT_NUMBER}?text=${encodeURIComponent(text)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.open(`https://wa.me/${supportNumber}?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
   };
 
+  const field =
+    "w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-[#0F7A3F]/50 transition-shadow";
+
   return (
-    <form className="space-y-6" onSubmit={handleSubmit}>
+    <form className="space-y-5" onSubmit={handleSubmit}>
       <div className="space-y-2">
         <label htmlFor="name" className="text-sm font-medium">{t.name}</label>
-        <input
-          type="text"
-          id="name"
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-          placeholder={t.namePh}
-          data-testid="input-request-name"
-        />
+        <input type="text" id="name" required value={name} onChange={(e) => setName(e.target.value)} className={field} placeholder={t.namePh} data-testid="input-request-name" />
       </div>
       <div className="space-y-2">
         <label htmlFor="phone" className="text-sm font-medium">{t.phone}</label>
-        <input
-          type="tel"
-          id="phone"
-          required
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-          placeholder={t.phonePh}
-          data-testid="input-request-phone"
-        />
+        <input type="tel" id="phone" required value={phone} onChange={(e) => setPhone(e.target.value)} className={field} placeholder={t.phonePh} data-testid="input-request-phone" />
       </div>
       <div className="space-y-2">
         <label htmlFor="business-type" className="text-sm font-medium">{t.type}</label>
-        <select
-          id="business-type"
-          value={businessType}
-          onChange={(e) => setBusinessType(e.target.value)}
-          className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-          data-testid="select-request-business-type"
-        >
+        <select id="business-type" value={businessType} onChange={(e) => setBusinessType(e.target.value)} className={field} data-testid="select-request-business-type">
           {businessTypes.map((type) => (
             <option key={type} value={type}>{type}</option>
           ))}
@@ -892,19 +907,12 @@ function RequestAccessForm({ t, businessTypes }: { t: typeof copy["en"]["form"];
       </div>
       <div className="space-y-2">
         <label htmlFor="message" className="text-sm font-medium">{t.message}</label>
-        <textarea
-          id="message"
-          rows={4}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          className="w-full px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow resize-none"
-          placeholder={t.messagePh}
-          data-testid="input-request-message"
-        ></textarea>
+        <textarea id="message" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} className={`${field} resize-none`} placeholder={t.messagePh} data-testid="input-request-message" />
       </div>
       <button
         type="submit"
-        className="w-full inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-md font-bold text-lg hover:bg-primary/90 transition-colors shadow-sm"
+        className="w-full inline-flex items-center justify-center gap-2 text-white py-3.5 rounded-full font-semibold text-lg hover:brightness-110 transition"
+        style={{ background: GREEN }}
         data-testid="button-request-access"
       >
         <MessageCircle size={20} /> {t.submit}
