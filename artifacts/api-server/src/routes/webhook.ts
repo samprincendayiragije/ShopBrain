@@ -515,7 +515,7 @@ const STOP_CONFIRMATION =
 
 // Words a debtor can send to opt out. Compared after stripping everything
 // except letters, so "Stop", "stop!" and " STOP " all match.
-const STOP_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "GUHAGARIKA"]);
+const STOP_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "GUHAGARIKA", "HAGARIKA"]);
 
 function isStopKeyword(text: string): boolean {
   return STOP_KEYWORDS.has(text.toUpperCase().replace(/[^A-Z]/g, ""));
@@ -689,7 +689,7 @@ async function handleNonOwnerMessage(from: string, text: string, req: Request): 
     await handleDebtorStart(from, req);
     return;
   }
-  // A customer of some shop: show My Balance / WANT TO PAY / Stop buttons instead of making them type.
+  // A customer of some shop: show My Balance / How to Pay / Stop buttons instead of making them type.
   if (await extras.handleCustomerMessage(from)) return;
   await sendWhatsAppMessage(from, NON_OWNER_REPLY);
 }
@@ -1062,12 +1062,14 @@ router.post("/webhook", async (req: Request, res: Response) => {
     try {
       if (msg.type === "button") {
         const label = msg.button?.payload || msg.button?.text || "";
-        if (isStopKeyword(label)) {
+        // The "stop" button counts whatever its wording is: English "stop", Kinyarwanda
+        // "hagarika" (the words are listed in templateSettings.ts).
+        if (isStopKeyword(label) || extras.isStopButton(msg.button?.text || label)) {
           await handleDebtorStop(from, req);
         } else if (isStartKeyword(label)) {
           await handleDebtorStart(from, req);
         } else {
-          // Buttons on the reminder template: "PAID", "WANT TO PAY", "My Balance".
+          // Buttons on the reminder template: "I've paid", "How to Pay", "My Balance".
           const action = extras.classifyCustomerButton(msg.button?.text || label);
           if (action) await extras.handleCustomerAction(from, action, msg.context?.id ?? null);
         }
@@ -1451,7 +1453,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
 
-  // Customer buttons (My Balance / WANT TO PAY / PAID) - answered for anyone, owner or not.
+  // Customer buttons (My Balance / How to Pay / I've Paid) - answered for anyone, owner or not.
   if (replyId === "cb_balance" || replyId === "cb_pay" || replyId === "cb_paid") {
     const action = replyId === "cb_balance" ? "balance" : replyId === "cb_pay" ? "pay" : "paid";
     await extras.handleCustomerAction(from, action, null);
@@ -2310,7 +2312,7 @@ async function sendReminder(from: string, phone: string, lang: Lang, force = fal
   }).select().single();
 
   // Which approved template to use (the old one with payment details inside, or the
-  // new short one with the WANT TO PAY button) and its variables: see buildReminderPayload.
+  // new short one with the How to Pay button) and its variables: see buildReminderPayload.
   const payload = extras.buildReminderPayload(reminderLang, {
     customerName: customer.name,
     shopName,

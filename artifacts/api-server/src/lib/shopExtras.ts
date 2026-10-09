@@ -14,6 +14,12 @@
 //   EXPORT            exportBackup (CSV file sent on WhatsApp)
 //   REMINDER SENDING  buildReminderPayload (which template + variables to use)
 
+import {
+  BUTTON_WORDS,
+  REMINDER_INCLUDES_PAYMENT_DETAILS,
+  TEMPLATE_NAMES,
+  labelHasWord,
+} from "./templateSettings.js";
 import { supabase } from "./supabase.js";
 import {
   sendWhatsAppMessage,
@@ -426,16 +432,15 @@ export interface ReminderPayload {
 }
 
 /**
- * Picks the reminder template and fills its variables.
+ * Picks the reminder template and fills its variables. Names and layout come from
+ * templateSettings.ts.
  *
- *  NEW short template (payment details live behind the "How to Pay" button):
+ *  Payment details NOT in the message (they sit behind the "How to Pay" button):
  *     English     {{1}} customer, {{2}} shop, {{3}} total, {{4}} items, {{5}} contact
  *     Kinyarwanda same, with the contact number repeated as {{6}}
- *  It is used when you set REMINDER_TEMPLATE_EN_V2 / REMINDER_TEMPLATE_RW_V2
- *  to the new template names (do that once Meta has approved them).
- *
- *  OLD template (payment details inside the message) is used until then,
- *  so nothing breaks while Meta reviews the new ones.
+ *  Payment details inside the message (the older kind of template):
+ *     English     {{1}} customer, {{2}} shop, {{3}} total, {{4}} items, {{5}} payment details, {{6}} contact
+ *     Kinyarwanda same, with the contact number repeated as {{7}}
  */
 export function buildReminderPayload(
   lang: Lang,
@@ -448,21 +453,21 @@ export function buildReminderPayload(
     owner: OwnerMomoFields;
   },
 ): ReminderPayload {
-  const newName = lang === "rw" ? process.env["REMINDER_TEMPLATE_RW_V2"] : process.env["REMINDER_TEMPLATE_EN_V2"];
   const totalText = p.total.toLocaleString();
-  if (newName) {
+  const templateName = TEMPLATE_NAMES.reminder[lang];
+  if (REMINDER_INCLUDES_PAYMENT_DETAILS[lang]) {
+    const momoBlock = D.buildMomoBlock(p.owner, lang);
     const vars =
       lang === "rw"
-        ? [p.customerName, p.shopName, totalText, p.itemized, p.contactPhone, p.contactPhone]
-        : [p.customerName, p.shopName, totalText, p.itemized, p.contactPhone];
-    return { templateName: newName, languageCode: D.metaLanguageCode(lang), vars };
+        ? [p.customerName, p.shopName, totalText, p.itemized, momoBlock, p.contactPhone, p.contactPhone]
+        : [p.customerName, p.shopName, totalText, p.itemized, momoBlock, p.contactPhone];
+    return { templateName, languageCode: D.metaLanguageCode(lang), vars };
   }
-  const momoBlock = D.buildMomoBlock(p.owner, lang);
   const vars =
     lang === "rw"
-      ? [p.customerName, p.shopName, totalText, p.itemized, momoBlock, p.contactPhone, p.contactPhone]
-      : [p.customerName, p.shopName, totalText, p.itemized, momoBlock, p.contactPhone];
-  return { templateName: D.reminderTemplateName(lang), languageCode: D.metaLanguageCode(lang), vars };
+      ? [p.customerName, p.shopName, totalText, p.itemized, p.contactPhone, p.contactPhone]
+      : [p.customerName, p.shopName, totalText, p.itemized, p.contactPhone];
+  return { templateName, languageCode: D.metaLanguageCode(lang), vars };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1025,13 +1030,22 @@ let autoJobRunning = false;
 
 export type CustomerAction = "balance" | "pay" | "paid";
 
-/** Turns a tapped template button's text into an action (works for English and Kinyarwanda labels). */
+/**
+ * Turns a tapped template button's text into an action. The words that count as
+ * "paid", "pay" and "balance" are listed in templateSettings.ts (BUTTON_WORDS), so
+ * whatever you wrote on your buttons works, in English or Kinyarwanda.
+ */
 export function classifyCustomerButton(label: string): CustomerAction | null {
-  const n = label.toUpperCase().replace(/[^A-Z]/g, "");
-  if (n === "IVEPAID" || n === "IHAVEPAID" || n === "NISHYUYE") return "paid";
-  if (n === "HOWTOPAY" || n === "UKONISHYURA") return "pay";
-  if (n === "MYBALANCE" || n === "BALANCE" || n === "IDENIRYANJYE") return "balance";
+  if (labelHasWord(label, BUTTON_WORDS.stop)) return null; // STOP is handled separately
+  if (labelHasWord(label, BUTTON_WORDS.paid)) return "paid";
+  if (labelHasWord(label, BUTTON_WORDS.pay)) return "pay";
+  if (labelHasWord(label, BUTTON_WORDS.balance)) return "balance";
   return null;
+}
+
+/** True when a tapped button is the "stop reminders" button (English "stop", Kinyarwanda "hagarika"). */
+export function isStopButton(label: string): boolean {
+  return labelHasWord(label, BUTTON_WORDS.stop);
 }
 
 interface Target {
@@ -1196,7 +1210,7 @@ async function notifyPaidClaim(t: Target): Promise<void> {
 
 /**
  * Sends the customer a receipt after a payment is recorded.
- * Needs a Meta template (names via RECEIPT_TEMPLATE_EN / RECEIPT_TEMPLATE_RW,
+ * Needs a Meta template (names in templateSettings.ts,
  * defaults payment_receipt / payment_receipt_rw) with 4 variables:
  *   {{1}} customer name, {{2}} shop name, {{3}} amount paid, {{4}} amount still owed
  * Only sent to customers who have a number, agreed to reminders and did not reply STOP.
@@ -1221,8 +1235,8 @@ export async function sendPaymentReceipt(shopId: string, customerId: string, pai
 
     const templateName =
       lang === "rw"
-        ? process.env["RECEIPT_TEMPLATE_RW"] ?? "payment_receipt_rw"
-        : process.env["RECEIPT_TEMPLATE_EN"] ?? "payment_receipt";
+        ? TEMPLATE_NAMES.receipt.rw
+        : TEMPLATE_NAMES.receipt.en;
     await sendWhatsAppTemplateMessage(customer.phone, templateName, D.metaLanguageCode(lang), [
       customer.name,
       owner.name ?? "Shop",
@@ -1334,8 +1348,8 @@ async function totalOwed(shopId: string): Promise<number> {
 
 /**
  * Every Monday morning: sends each owner last week's number (Monday to Monday),
- * whenever they registered. Needs a Meta template (names via WEEKLY_TEMPLATE_EN /
- * WEEKLY_TEMPLATE_RW, defaults weekly_recovery / weekly_recovery_rw) with 4 variables:
+ * whenever they registered. Needs a Meta template (name in templateSettings.ts)
+ * with 4 variables:
  *   {{1}} shop name, {{2}} amount recovered, {{3}} date range, {{4}} total still owed
  * If the template isn't approved yet (or the send fails) the same text is saved and
  * shown the next time the owner opens the bot.
@@ -1371,8 +1385,8 @@ export async function runWeeklyRecovery(): Promise<{ owners: number; sent: numbe
       const shop = o.name ?? "Shop";
       const templateName =
         lang === "rw"
-          ? process.env["WEEKLY_TEMPLATE_RW"] ?? "weekly_recovery_rw"
-          : process.env["WEEKLY_TEMPLATE_EN"] ?? "weekly_recovery";
+          ? TEMPLATE_NAMES.weekly.rw
+          : TEMPLATE_NAMES.weekly.en;
       try {
         await sendWhatsAppTemplateMessage(o.phone, templateName, D.metaLanguageCode(lang), [
           shop,
