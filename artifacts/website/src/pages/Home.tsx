@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus, Shield } from "lucide-react";
+import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -1316,9 +1316,17 @@ export default function Home() {
   const [scrollY, setScrollY] = useState(0);
   const [progress, setProgress] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [lang, setLang] = useState<Lang>("rw");
+  const [lang, setLang] = useState<Lang>(() => {
+    const s = typeof window !== "undefined" ? window.localStorage.getItem("shopbrain-lang") : null;
+    return s === "rw" || s === "en" || s === "fr" ? s : "rw";
+  });
   const { theme, toggleTheme } = useTheme();
   const t = copy[lang];
+
+  useEffect(() => {
+    window.localStorage.setItem("shopbrain-lang", lang);
+    document.documentElement.lang = lang; // keeps screen readers and browser translation correct
+  }, [lang]);
 
   const botLink = `https://wa.me/${WHATSAPP_BUSINESS_NUMBER}`;
   const supportLink = `https://wa.me/${SUPPORT_NUMBER}`;
@@ -1656,30 +1664,6 @@ export default function Home() {
             </div>
           </div>
         </section>
-
-        {/* Privacy: collapsed so it stays on the page without dominating it */}
-        <section id="privacy" className="pb-16 px-4 md:px-6">
-          <details className="container mx-auto max-w-3xl rounded-xl border border-border bg-card px-6 py-4 group">
-            <summary className="cursor-pointer list-none flex items-center gap-3 font-bold text-lg" style={DISPLAY}>
-              <Shield size={20} style={{ color: GREEN }} /> {t.privacy.title}
-              <ChevronDown size={18} className="ml-auto transition-transform group-open:rotate-180" />
-            </summary>
-            <div className="mt-5 space-y-4 text-muted-foreground leading-relaxed">
-              <p>Shop Brain Ltd collects WhatsApp phone numbers and customer debt records on behalf of shop owners.</p>
-              <p>All data is stored securely and is only accessible to the authorised shop owner.</p>
-              <p>Shop Brain Ltd does not sell, share, or transfer customer data to any third party.</p>
-              <p>Reminders are only sent to customers who agreed to receive them, and never after a customer replies STOP.</p>
-              <p>Data is retained as long as the shop owner uses the service.</p>
-              <p>WhatsApp messages sent to Shop Brain are processed to extract commands (e.g. adding a debt, recording a payment, customer lookup) and are not stored beyond what is needed to fulfil the request.</p>
-              <div className="p-5 bg-background rounded-lg border border-border">
-                <p className="font-medium text-foreground mb-1">For data deletion requests, contact:</p>
-                <a href={`mailto:${CONTACT_EMAIL}`} className="font-medium underline break-all">
-                  {CONTACT_EMAIL}
-                </a>
-              </div>
-            </div>
-          </details>
-        </section>
       </main>
 
       {/* Mobile-only sticky button, appears once the hero has scrolled away */}
@@ -1720,13 +1704,22 @@ export default function Home() {
                 {t.footer.explore}
               </h4>
               <ul className="space-y-3">
-                {[...navLinks, { name: t.nav.privacy, href: "#privacy" }].map((l) => (
+                {navLinks.map((l) => (
                   <li key={l.href}>
-                    <a href={l.href} onClick={(e) => scrollToSection(e, l.href)} className="text-white/70 hover:text-white transition-colors">
+                    <a
+                      href={l.href}
+                      onClick={(e) => scrollToSection(e, l.href)}
+                      className="text-white/70 hover:text-white transition-colors"
+                    >
                       {l.name}
                     </a>
                   </li>
                 ))}
+                <li>
+                  <a href="/privacy" className="text-white/70 hover:text-white transition-colors">
+                    {t.nav.privacy}
+                  </a>
+                </li>
               </ul>
             </div>
 
