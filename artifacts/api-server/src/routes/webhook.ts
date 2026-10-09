@@ -3071,7 +3071,7 @@ async function handleLegacyPaid(from: string, text: string, lang: Lang): Promise
   }
 }
 
-// Connect the feature module (menus, stock, sales, profit, expenses, supplier
+ Connect the feature module (menus, stock, sales, profit, expenses, supplier
 // debts, auto-reminders, promise dates, credit limit) to this file's helpers.
 features.initShopFeatures({
   sessions,
