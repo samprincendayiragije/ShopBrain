@@ -1,29 +1,40 @@
 // src/lib/shopFeatures.ts
 //
-// ShopBrain feature pack. Wired into routes/webhook.ts via a handful of small
-// hooks (see webhook-edits.md). Run shopbrain_migration.sql in Supabase FIRST.
+// ShopBrain feature pack, part 1. Wired into routes/webhook.ts (see the
+// "features." lines there). Run shopbrain_migration.sql in Supabase FIRST.
 //
-// What lives here:
-//   MENUS      sendMainBubble (Add Debt | Mark as Paid | Menu), sendMenuList and
-//              its sub-menus (WhatsApp lists allow max 10 rows, so the menu is
-//              split into short lists)
-//   1  Add stock / restock            stock_add      -> startAddStock + stk_* steps
-//   2  My Stock list (low-stock flags) stock_view     -> showStock
-//   3  Record Sale (cash or credit)   sell_start     -> sell_* steps, commitSale
-//   4  Low-stock alerts               sendLowStockAlert (after every sale)
-//   5  Profit report                  profit_btn     -> showProfit
-//   6  Expenses                       expense_add    -> exp_* steps
-//   7  Auto-reminders                 autoremind_menu + runAutoReminders (daily job)
-//   8  Promise-to-pay date            promise_set    -> promise_days step
-//   9  Credit limit warning           creditlimit_menu + creditLimitCheck
-//   10 Supplier debts ("I owe")       supplier_menu  -> sup_* steps
+// Part 2 is shopExtras.ts (auto-reminders, customer buttons, receipts,
+// scoreboard, export, no-number fix). Parsing of "type everything in one
+// message" lives in shopParsing.ts.
+//
+// What lives HERE:
+//   MENUS      sendMainBubble (Add Debt | Mark as Paid | Menu) and sendMenuList
+//              with its sub-menus (a WhatsApp list holds at most 10 rows, so the
+//              menu is split into short lists)
+//   STOCK      add / restock / list, Record Sale (cash or credit), low-stock
+//              alerts, profit report, expenses   <- explained step by step below
+//   ONE MESSAGE  typed shortcuts for Add Debt, Mark as Paid, MoMo, Stock, Sale,
+//              Expense, Supplier debt and Edit Customer, each with a confirm step
+//   OTHER      promise-to-pay date, credit limit, supplier debts
 
 import { supabase } from "./supabase.js";
+import { sendWhatsAppMessage, sendWhatsAppInteractiveMessage } from "./whatsapp.js";
 import {
-  sendWhatsAppMessage,
-  sendWhatsAppInteractiveMessage,
-  sendWhatsAppTemplateMessage,
-} from "./whatsapp.js";
+  isPhoneLike,
+  parseAmountToken,
+  parseCustomerEdit,
+  parseDebtMessage,
+  parseExpenseMessage,
+  parseMomoMessage,
+  parsePaidMessage,
+  parseSaleMessage,
+  parseStockMessage,
+  parseSupplierMessage,
+  type ParsedDebt,
+  type ParsedMomo,
+  type ParsedStock,
+} from "./shopParsing.js";
+import { xstrings } from "./shopExtras.js";
 
 export type Lang = "en" | "rw";
 export interface Session {
@@ -31,26 +42,28 @@ export interface Session {
   data: Record<string, string>;
 }
 
-interface OwnerMomoFields {
-  momo_number?: string | null;
-  momo_code?: string | null;
-  momo_receiver_name?: string | null;
-  shop_nickname?: string | null;
-}
-
+/** Everything this module needs from webhook.ts. Passed in once at start-up. */
 export interface FeatureDeps {
   sessions: Record<string, Session | undefined>;
   cleanPhone: (phone: string) => string;
   /** Sends the main menu bubble (webhook's sendPersistentMenu). */
   sendMenu: (from: string, lang: Lang) => Promise<void>;
-  /** Sends the "customer phone number?" prompt of the Add Debt flow. */
+  /** Sends the "customer's phone number?" prompt of the Add Debt flow (credit sales use it). */
   sendAddDebtPhonePrompt: (from: string, lang: Lang) => Promise<void>;
-  buildItemizedList: (customerId: string) => Promise<string>;
-  buildMomoBlock: (owner: OwnerMomoFields, lang: Lang) => string;
-  reminderTemplateName: (lang: Lang) => string;
-  metaLanguageCode: (lang: Lang) => string;
-  getOptedOutSet: (phones: string[]) => Promise<Set<string>>;
-  reminderCooldownDays: number;
+  /** Saves a debt from session data (phone, name, item, consent) - webhook's finishAddDebt. */
+  finishAddDebt: (from: string, lang: Lang, amount: number) => Promise<void>;
+  /** Records a partial (or full) payment for a customer. */
+  applyPartialPayment: (
+    from: string,
+    customer: { id: string; name: string; phone: string },
+    amount: number,
+    lang: Lang,
+    item: string,
+  ) => Promise<void>;
+  /** Marks every unpaid debt of a customer as paid. */
+  markAllPaid: (from: string, lang: Lang, customer: { id: string; name: string }) => Promise<void>;
+  /** Saves the edited customer held in the session (webhook's saveEditedCustomer). */
+  saveEditedCustomer: (from: string, lang: Lang) => Promise<void>;
 }
 
 let D!: FeatureDeps;
@@ -58,11 +71,11 @@ export function initShopFeatures(deps: FeatureDeps): void {
   D = deps;
 }
 
+
 /* ------------------------------------------------------------------ */
 /* Constants + small helpers                                           */
 /* ------------------------------------------------------------------ */
 
-export const AUTO_REMIND_MIN_DEBT_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const KIGALI_OFFSET_MS = 2 * 60 * 60 * 1000; // Africa/Kigali is UTC+2, no DST
 
@@ -70,7 +83,10 @@ function money(n: number): string {
   return `${n.toLocaleString()} Frw`;
 }
 
+/** "2000", "2,000" and "2k" all give a number; anything else gives NaN. */
 function parseNum(text: string): number {
+  const shorthand = parseAmountToken(text.trim(), true); // understands 2k = 2000
+  if (shorthand !== null) return shorthand;
   const n = parseInt(text.replace(/\D/g, ""), 10);
   return Number.isNaN(n) ? NaN : n;
 }
@@ -138,6 +154,7 @@ interface StockItem {
   low_threshold: number;
 }
 
+
 /* ------------------------------------------------------------------ */
 /* Strings (English + Kinyarwanda). Please proofread the Kinyarwanda.  */
 /* ------------------------------------------------------------------ */
@@ -150,6 +167,32 @@ const en = {
   nameInvalid: "❌ Please enter a name (max 60 characters):",
   invalidAmount: "❌ Please enter a valid amount e.g. 5000",
   pcs: "pcs",
+  tapButtons: "👆 Please tap one of the buttons above.",
+  momoHint: "❌ I couldn't read that.\n\nExample: `0788123456, NIYONZIMA ALICE, Chez Alice`\nOr send just the number.",
+  stkHint: "❌ I couldn't read that.\n\nExample: `Sugar 1kg, 800, 1000, 20`\n(name, buying price, selling price, how many)\nOr send just the item name.",
+  supHint: "❌ I couldn't read that.\n\nExample: `Kigali Rice, 50000, 20 bags`\n(supplier, amount, note)\nOr send just the supplier's name.",
+  cancelledGeneric: "✖️ Cancelled, nothing was saved.",
+  saveBtn: "✅ Save",
+  noCustomerFound: (q: string) => `❌ No customer found matching "${q}".`,
+  menuTitle: "📋 *Menu*",
+  titleMoney: "💰 *Money & Reports*",
+  titleSettings: "⚙️ *Settings*",
+  titleStock: "📦 *Stock*",
+  titleSuppliers: "💼 *I Owe Suppliers*",
+  moneyRecovered: "🏆 Recovered",
+  moneyExport: "📤 Export",
+  stockConfirm: (name: string, cost: number, price: number, qty: number, existingQty: number | null) =>
+    existingQty === null
+      ? `📦 *Save this item?*\n\n${name}\n💵 Buy ${money(cost)} · Sell ${money(price)}\n🔢 ${qty} pcs`
+      : `📦 *${name}* is already in stock (${existingQty} pcs).\n\nAdd ${qty} more (→ ${existingQty + qty}) and set Buy ${money(cost)} · Sell ${money(price)}?`,
+  expenseConfirm: (amount: number, note: string | null) =>
+    `🧾 *Save this expense?*\n\n💸 ${money(amount)}${note ? `\n📝 ${note}` : ""}`,
+  supplierConfirm: (supplier: string, amount: number, note: string | null) =>
+    `💼 *Save this supplier debt?*\n\n${supplier}\n💰 ${money(amount)}${note ? `\n📝 ${note}` : ""}`,
+  momoConfirm: (number: string, receiver: string, nickname: string, code: string) =>
+    `💳 *Save MoMo details?*\n\n📱 ${number}${code ? `\n🔑 ${code}` : ""}\n👤 ${receiver}${nickname ? `\n🏪 ${nickname}` : ""}`,
+  momoSaved: (number: string, name: string) =>
+    `✅ *MoMo details saved!*\n\n📱 ${number}\n👤 ${name}\n\nCustomers see these when they ask how to pay.`,
 
   // main bubble + menus
   addDebtBtn: "➕ Add Debt",
@@ -186,7 +229,7 @@ const en = {
   supListBtn: "📋 View / Pay",
 
   // stock
-  stkAskName: "📦 *Add Stock*\n\nItem name? (e.g. Sugar 1kg)",
+  stkAskName: "📦 *Add Stock*\n\nType it all in one message:\n\n`Sugar 1kg, 800, 1000, 20`\n(name, buying price, selling price, how many)\n\nOr send just the item name and I\'ll ask the rest.",
   stkAskCost: (name: string) => `Buying price of *${name}* (per piece, Frw)?\n\nIf you don't know, type 0.`,
   stkAskPrice: "Selling price (per piece, Frw)?",
   stkAskQty: "How many pieces do you have now?",
@@ -208,7 +251,7 @@ const en = {
   stkLowNote: "\n⚠️ = running low",
 
   // sell
-  sellAskItem: "💵 *Record Sale*\n\nType the item name (or part of it):",
+  sellAskItem: "💵 *Record Sale*\n\nType the item and how many:\n\n`sugar 2`\n\nOr send just the item name and I\'ll ask how many.",
   sellNoStock: "📦 You have no stock items yet. Add stock first.",
   sellNoMatch: (q: string) => `❌ No stock item matching "${q}". Try again:`,
   sellPick: (q: string) => `🔍 Several items match "${q}". Tap one:`,
@@ -246,20 +289,10 @@ const en = {
   profitNote: "ℹ️ Credit sales count as profit when sold, even before the customer pays.",
 
   // expenses
-  expAskAmount: "🧾 *Add Expense*\n\nHow much did you spend? (Frw)",
+  expAskAmount: "🧾 *Add Expense*\n\nType the amount and what it was for:\n\n`2000 transport`\n\nOr send just the amount.",
   expAskNote: "What was it for? (e.g. transport, rent)",
   expSaved: (amount: number, note: string | null, todayTotal: number) =>
     `✅ *Expense saved*\n\n💸 ${money(amount)}${note ? `\n📝 ${note}` : ""}\n📆 Today's expenses: ${money(todayTotal)}`,
-
-  // auto reminders
-  arStatus: (on: boolean, minDays: number, cooldown: number) =>
-    `⏰ *Auto Reminders: ${on ? "ON ✅" : "OFF"}*\n\nWhen ON, ShopBrain reminds customers who have owed you for ${minDays}+ days, at most once every ${cooldown} days.\n\nOnly customers who agreed to reminders (and haven't replied STOP) are reminded. Customers with a promise date are left alone until it passes.`,
-  arOnBtn: "✅ Turn On",
-  arOffBtn: "⛔ Turn Off",
-  arNowOn: "✅ Auto reminders are ON.",
-  arNowOff: "⛔ Auto reminders are OFF.",
-  arOwnerSummary: (sent: number, total: number, failed: number) =>
-    `⏰ *Auto reminders sent*\n\n${sent} customers reminded · ${money(total)} outstanding${failed ? `\n❌ ${failed} failed` : ""}`,
 
   // promise date
   promiseBtn: "📅 Promise Date",
@@ -290,7 +323,7 @@ const en = {
   clCancelled: "✖️ Debt not added.",
 
   // suppliers
-  supAskName: "💼 *New Supplier Debt*\n\nWho do you owe? (supplier name)",
+  supAskName: "💼 *New Supplier Debt*\n\nType it all in one message:\n\n`Kigali Rice, 50000, 20 bags`\n(supplier, amount, note)\n\nOr send just the supplier\'s name and I\'ll ask the rest.",
   supAskAmount: (name: string) => `How much do you owe *${name}*? (Frw)`,
   supAskNote: "Any note? (e.g. 20 bags of rice)",
   supSaved: (name: string, amount: number, total: number) =>
@@ -314,6 +347,32 @@ const rw: typeof en = {
   nameInvalid: "❌ Andika izina (ntirirenze inyuguti 60):",
   invalidAmount: "❌ Andika umubare wemewe urugero 5000",
   pcs: "ibice",
+  tapButtons: "👆 Kanda imwe muri buto zo hejuru.",
+  momoHint: "❌ Ntabwo nabisomye.\n\nUrugero: `0788123456, NIYONZIMA ALICE, Chez Alice`\nCyangwa ohereza nimero gusa.",
+  stkHint: "❌ Ntabwo nabisomye.\n\nUrugero: `Isukari 1kg, 800, 1000, 20`\n(izina, igiciro ugura, igiciro ugurisha, ingano)\nCyangwa ohereza izina gusa.",
+  supHint: "❌ Ntabwo nabisomye.\n\nUrugero: `Kigali Rice, 50000, imifuka 20`\n(uwagemuye, umubare, icyo wanditse)\nCyangwa ohereza izina gusa.",
+  cancelledGeneric: "✖️ Byahagaritswe, nta cyabitswe.",
+  saveBtn: "✅ Bika",
+  noCustomerFound: (q: string) => `❌ Nta mukiriya ubonetse witwa "${q}".`,
+  menuTitle: "📋 *Menu*",
+  titleMoney: "💰 *Amafaranga & Raporo*",
+  titleSettings: "⚙️ *Igenamiterere*",
+  titleStock: "📦 *Ububiko*",
+  titleSuppliers: "💼 *Amadeni Nkwiye*",
+  moneyRecovered: "🏆 Byagarutse",
+  moneyExport: "📤 Kohereza Kopi",
+  stockConfirm: (name: string, cost: number, price: number, qty: number, existingQty: number | null) =>
+    existingQty === null
+      ? `📦 *Ubike iki gicuruzwa?*\n\n${name}\n💵 Kugura ${money(cost)} · Kugurisha ${money(price)}\n🔢 ${qty}`
+      : `📦 *${name}* isanzwe mu bubiko (${existingQty}).\n\nWongeremo ${qty} (→ ${existingQty + qty}) ushyireho Kugura ${money(cost)} · Kugurisha ${money(price)}?`,
+  expenseConfirm: (amount: number, note: string | null) =>
+    `🧾 *Ubike iki kiguzi?*\n\n💸 ${money(amount)}${note ? `\n📝 ${note}` : ""}`,
+  supplierConfirm: (supplier: string, amount: number, note: string | null) =>
+    `💼 *Ubike uyu mwenda w'uwagemuye?*\n\n${supplier}\n💰 ${money(amount)}${note ? `\n📝 ${note}` : ""}`,
+  momoConfirm: (number: string, receiver: string, nickname: string, code: string) =>
+    `💳 *Ubike amakuru ya MoMo?*\n\n📱 ${number}${code ? `\n🔑 ${code}` : ""}\n👤 ${receiver}${nickname ? `\n🏪 ${nickname}` : ""}`,
+  momoSaved: (number: string, name: string) =>
+    `✅ *Amakuru ya MoMo yabitswe!*\n\n📱 ${number}\n👤 ${name}\n\nAbakiriya bayabona igihe babajije uko bishyura.`,
 
   addDebtBtn: "➕ Ongeraho Umwenda",
   markPaidBtn: "✅ Emeza Kwishyura",
@@ -348,7 +407,7 @@ const rw: typeof en = {
   supAddBtn: "➕ Umwenda Mushya",
   supListBtn: "📋 Reba / Ishyura",
 
-  stkAskName: "📦 *Ongeramo Ibicuruzwa*\n\nIzina ry'igicuruzwa? (urugero: Isukari 1kg)",
+  stkAskName: "📦 *Ongeramo Ibicuruzwa*\n\nAndika byose mu butumwa bumwe:\n\n`Isukari 1kg, 800, 1000, 20`\n(izina, igiciro ugura, igiciro ugurisha, ingano)\n\nCyangwa ohereza izina gusa, nzakubaza ibindi.",
   stkAskCost: (name: string) => `Igiciro ugurishaho *${name}* ugura (kimwe, Frw)?\n\nNiba utakizi, andika 0.`,
   stkAskPrice: "Igiciro ugurishaho (kimwe, Frw)?",
   stkAskQty: "Ufite ibice bingahe ubu?",
@@ -369,7 +428,7 @@ const rw: typeof en = {
     `${low ? "⚠️" : "•"} *${name}* — ${qty} — ${money(price)}`,
   stkLowNote: "\n⚠️ = bigiye gushira",
 
-  sellAskItem: "💵 *Andika Igurisha*\n\nAndika izina ry'igicuruzwa (cyangwa igice cyaryo):",
+  sellAskItem: "💵 *Andika Igurisha*\n\nAndika igicuruzwa n\'ingano:\n\n`isukari 2`\n\nCyangwa ohereza izina gusa, nzakubaza ingano.",
   sellNoStock: "📦 Nta bicuruzwa mu bubiko. Banza ubyongere.",
   sellNoMatch: (q: string) => `❌ Nta gicuruzwa gihuye na "${q}". Ongera ugerageze:`,
   sellPick: (q: string) => `🔍 Hari ibicuruzwa byinshi bihuye na "${q}". Kanda kimwe:`,
@@ -405,19 +464,10 @@ const rw: typeof en = {
   profitNone: "Nta gurisha cyangwa ikiguzi cyanditswe muri iki gihe.",
   profitNote: "ℹ️ Igurisha ku mwenda ribarwa nk'inyungu igihe ryabaye, n'iyo umukiriya atarishyura.",
 
-  expAskAmount: "🧾 *Andika Ikiguzi*\n\nWakoresheje angahe? (Frw)",
+  expAskAmount: "🧾 *Andika Ikiguzi*\n\nAndika umubare n\'icyo wakoreshejwe:\n\n`2000 transport`\n\nCyangwa ohereza umubare gusa.",
   expAskNote: "Byari bigenewe iki? (urugero: transport, inzu)",
   expSaved: (amount: number, note: string | null, todayTotal: number) =>
     `✅ *Ikiguzi cyabitswe*\n\n💸 ${money(amount)}${note ? `\n📝 ${note}` : ""}\n📆 Ibiguzi by'uyu munsi: ${money(todayTotal)}`,
-
-  arStatus: (on: boolean, minDays: number, cooldown: number) =>
-    `⏰ *Kwibutsa Byikora: ${on ? "BIRIKORA ✅" : "BIHAGARITSWE"}*\n\nIyo bikora, ShopBrain yibutsa abakiriya bamaze iminsi ${minDays}+ bagufitiye ideni, rimwe mu minsi ${cooldown} cyane.\n\nHibutswa gusa abemeye kwibutswa (kandi batanditse STOP). Abahaye itariki yo kwishyura ntibibutswa itarashira.`,
-  arOnBtn: "✅ Fungura",
-  arOffBtn: "⛔ Hagarika",
-  arNowOn: "✅ Kwibutsa byikora birakora.",
-  arNowOff: "⛔ Kwibutsa byikora byahagaritswe.",
-  arOwnerSummary: (sent: number, total: number, failed: number) =>
-    `⏰ *Ubutumwa bwoherejwe bwikora*\n\nAbakiriya ${sent} bibutswe · ${money(total)} asigaye${failed ? `\n❌ ${failed} byanze` : ""}`,
 
   promiseBtn: "📅 Itariki",
   promiseAsk: (name: string) =>
@@ -445,7 +495,7 @@ const rw: typeof en = {
   clCancelBtn: "✖️ Reka",
   clCancelled: "✖️ Umwenda ntiwongeweho.",
 
-  supAskName: "💼 *Umwenda Mushya w'Uwangemurira*\n\nUgomba nde? (izina ry'uwagemuye)",
+  supAskName: "💼 *Umwenda Mushya w\'Uwangemurira*\n\nAndika byose mu butumwa bumwe:\n\n`Kigali Rice, 50000, imifuka 20`\n(uwagemuye, umubare, icyo wanditse)\n\nCyangwa ohereza izina gusa, nzakubaza ibindi.",
   supAskAmount: (name: string) => `Ugomba *${name}* angahe? (Frw)`,
   supAskNote: "Hari icyo wandika? (urugero: imifuka 20 y'umuceri)",
   supSaved: (name: string, amount: number, total: number) =>
@@ -471,11 +521,12 @@ export function reasonPromise(lang: Lang, dateStr: string): string {
   return strings[lang].reasonPromise(prettyDate(dateStr));
 }
 
+
 /* ------------------------------------------------------------------ */
 /* Menus                                                               */
 /* ------------------------------------------------------------------ */
 
-/** The new main menu: one bubble, three buttons. */
+/** The main menu: ONE bubble with three buttons. */
 export async function sendMainBubble(from: string, lang: Lang, bodyText: string): Promise<void> {
   const s = strings[lang];
   await sendWhatsAppInteractiveMessage(from, {
@@ -491,14 +542,17 @@ export async function sendMainBubble(from: string, lang: Lang, bodyText: string)
   });
 }
 
-// WhatsApp list messages hold at most 10 rows in total, so the full menu has
-// exactly 10 rows and the rest sit one level down (Stock, Money, Suppliers,
-// Settings).
+// "Menu" opens this list straight away. The text above it is just the word
+// "Menu", not a question. (WhatsApp keeps a list folded until the person taps
+// its button, so that one tap can't be removed, but no question is asked.)
+//
+// WhatsApp lists hold at most 10 rows in total, so the full menu has exactly
+// 10 rows and the rest sit one level down (Stock, Money, Suppliers, Settings).
 export async function sendMenuList(from: string, lang: Lang): Promise<void> {
   const s = strings[lang];
   await sendWhatsAppInteractiveMessage(from, {
     type: "list",
-    body: { text: s.whatToDo },
+    body: { text: s.menuTitle },
     action: {
       button: s.menuListButton,
       sections: [
@@ -541,7 +595,7 @@ async function sendMoneyMenu(from: string, lang: Lang): Promise<void> {
   const s = strings[lang];
   await sendWhatsAppInteractiveMessage(from, {
     type: "list",
-    body: { text: s.whatToDo },
+    body: { text: s.titleMoney },
     action: {
       button: s.listButton,
       sections: [
@@ -553,6 +607,8 @@ async function sendMoneyMenu(from: string, lang: Lang): Promise<void> {
             { id: "today_btn", title: s.moneyToday },
             { id: "profit_btn", title: s.moneyProfit },
             { id: "expense_add", title: s.moneyExpense },
+            { id: "recovered_btn", title: s.moneyRecovered },
+            { id: "export_btn", title: s.moneyExport },
           ],
         },
       ],
@@ -564,7 +620,7 @@ async function sendSettingsMenu(from: string, lang: Lang): Promise<void> {
   const s = strings[lang];
   await sendWhatsAppInteractiveMessage(from, {
     type: "list",
-    body: { text: s.whatToDo },
+    body: { text: s.titleSettings },
     action: {
       button: s.listButton,
       sections: [
@@ -587,7 +643,7 @@ async function sendStockMenu(from: string, lang: Lang): Promise<void> {
   const s = strings[lang];
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
-    body: { text: s.whatToDo },
+    body: { text: s.titleStock },
     action: {
       buttons: [
         { type: "reply", reply: { id: "stock_view", title: s.stockViewBtn } },
@@ -601,7 +657,7 @@ async function sendSupplierMenu(from: string, lang: Lang): Promise<void> {
   const s = strings[lang];
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
-    body: { text: s.whatToDo },
+    body: { text: s.titleSuppliers },
     action: {
       buttons: [
         { type: "reply", reply: { id: "supplier_add", title: s.supAddBtn } },
@@ -611,15 +667,125 @@ async function sendSupplierMenu(from: string, lang: Lang): Promise<void> {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/* 1 + 2. Stock: add / restock / list                                  */
-/* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* STOCK MANAGEMENT  (adding stock, restocking, the stock list)         */
+/* ------------------------------------------------------------------ */
+//
+// HOW STOCK WORKS  (read this first if you are new to this code)
+//
+//   * Every product a shop sells is ONE ROW in the Supabase table "stock_items":
+//        name, qty (how many are left), cost_price (what the shop pays for one),
+//        sell_price (what the shop sells one for) and low_threshold
+//        (the "running low" level; we start it at 3).
+//   * Every row has a shop_id. That is the owner's WhatsApp number, so one shop
+//     never sees another shop's products. Every query below filters on it.
+//   * Every sale is ONE ROW in the table "sales": what was sold, how many, the
+//     money received (revenue) and what those pieces cost the shop (cost).
+//     Profit is simply revenue minus cost, so the Profit report can be worked
+//     out later from this table.
+//   * Selling something REMOVES pieces from qty, and when qty falls to the
+//     low_threshold the owner gets a "running low" warning.
+//
+// The pieces, in the order an owner meets them:
+//   1. startAddStock / askStockConfirm / saveStockConfirmed   add or restock an item
+//   2. showStock                                              see everything in stock
+//   3. startSale / chooseSellItem / showSellConfirm           pick an item and a quantity
+//   4. sellByCash / sellOnCredit / completeCreditSale         finish the sale
+//   5. deductStock / commitSale / sendLowStockAlert           the part that touches the numbers
+
+/** Starts "Add Stock". The owner types everything in one message, e.g.  Sugar 1kg, 800, 1000, 20 */
 async function startAddStock(from: string, lang: Lang): Promise<void> {
   D.sessions[from] = { step: "stk_name", data: {} };
   await sendWhatsAppMessage(from, strings[lang].stkAskName);
 }
 
+/** Looks for a product of THIS shop with exactly this name (capital letters don't matter). */
+async function findStockByName(shopId: string, name: string): Promise<StockItem | null> {
+  const { data } = await supabase
+    .from("stock_items")
+    .select("*")
+    .eq("shop_id", shopId)
+    .ilike("name", escLike(name))
+    .limit(1)
+    .maybeSingle();
+  return (data as StockItem | null) ?? null;
+}
+
+/**
+ * Shows what we understood from the owner's message and asks "Save?".
+ * If the product already exists, this becomes a RESTOCK: the typed quantity is
+ * added on top of what is already there and the prices are updated.
+ */
+async function askStockConfirm(from: string, lang: Lang, parsed: ParsedStock): Promise<void> {
+  const s = strings[lang];
+  const existing = await findStockByName(from, parsed.name);
+  D.sessions[from] = {
+    step: "stk_confirm",
+    data: {
+      name: existing?.name ?? parsed.name,
+      cost: String(parsed.cost),
+      price: String(parsed.price),
+      qty: String(parsed.qty),
+      existingId: existing ? String(existing.id) : "",
+    },
+  };
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: s.stockConfirm(existing?.name ?? parsed.name, parsed.cost, parsed.price, parsed.qty, existing ? existing.qty : null) },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "stkok_yes", title: s.saveBtn } },
+        { type: "reply", reply: { id: "stkok_no", title: s.cancelBtn } },
+      ],
+    },
+  });
+}
+
+/** The owner tapped "Save": create the product, or add the pieces to the existing one. */
+async function saveStockConfirmed(from: string, lang: Lang): Promise<void> {
+  const session = D.sessions[from];
+  if (!session || session.step !== "stk_confirm") return; // an old button tap, ignore
+  const s = strings[lang];
+  const d = session.data;
+  const name = g(d, "name");
+  const cost = Number(g(d, "cost"));
+  const price = Number(g(d, "price"));
+  const qty = Number(g(d, "qty"));
+  const existingId = g(d, "existingId");
+  clearSession(from);
+
+  if (existingId) {
+    // RESTOCK: read the current number again (it may have changed since the question), then add.
+    const { data } = await supabase.from("stock_items").select("*").eq("id", existingId).eq("shop_id", from).maybeSingle();
+    const item = data as StockItem | null;
+    if (item) {
+      const newQty = item.qty + qty;
+      await supabase
+        .from("stock_items")
+        .update({ qty: newQty, cost_price: cost, sell_price: price })
+        .eq("id", existingId)
+        .eq("shop_id", from);
+      await sendWhatsAppMessage(from, s.stkRestocked(item.name, qty, newQty));
+      menuSoon(from, lang);
+      return;
+    }
+  }
+
+  // NEW PRODUCT: one new row in stock_items.
+  const { error } = await supabase
+    .from("stock_items")
+    .insert({ shop_id: from, name, qty, cost_price: cost, sell_price: price });
+  if (error) {
+    console.error("Failed to save stock item:", error);
+    await sendWhatsAppMessage(from, "❌ Something went wrong. Please try again.");
+    return;
+  }
+  await sendWhatsAppMessage(from, s.stkSaved(name, qty, cost, price));
+  menuSoon(from, lang);
+}
+
+/** "My Stock": lists every product with how many are left. A ⚠️ marks the ones running low. */
 async function showStock(from: string, lang: Lang): Promise<void> {
   const s = strings[lang];
   const items = await fetchAll<StockItem>((a, b) =>
@@ -630,16 +796,22 @@ async function showStock(from: string, lang: Lang): Promise<void> {
     menuSoon(from, lang);
     return;
   }
+  // "Running low" means qty is at or below the product's low_threshold.
   const lines = items.map((i) => s.stkLine(i.name, i.qty, i.sell_price, i.qty <= i.low_threshold));
-  const chunk = 20;
-  for (let i = 0; i < lines.length; i += chunk) {
+  // WhatsApp messages have a length limit, so a long list is sent in pieces of 20 lines.
+  const piece = 20;
+  for (let i = 0; i < lines.length; i += piece) {
     const head = i === 0 ? s.stkHeader(items.length) : "";
-    const isLast = i + chunk >= lines.length;
-    await sendWhatsAppMessage(from, head + lines.slice(i, i + chunk).join("\n") + (isLast ? s.stkLowNote : ""));
+    const isLast = i + piece >= lines.length;
+    await sendWhatsAppMessage(from, head + lines.slice(i, i + piece).join("\n") + (isLast ? s.stkLowNote : ""));
   }
   menuSoon(from, lang);
 }
 
+/**
+ * After a restock typed step by step (the older, slower way), asks if the prices changed too.
+ * The one-message way (name, buy, sell, quantity) already includes the prices.
+ */
 async function sendChangePricesQuestion(from: string, lang: Lang, text: string): Promise<void> {
   const s = strings[lang];
   await sendWhatsAppInteractiveMessage(from, {
@@ -655,26 +827,34 @@ async function sendChangePricesQuestion(from: string, lang: Lang, text: string):
 }
 
 /* ------------------------------------------------------------------ */
-/* 3 + 4. Record sale (cash / credit) + low-stock alerts               */
+/* STOCK MANAGEMENT  (selling from stock, low-stock alerts)             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Takes `qty` pieces out of stock.
+ *
+ * Why the loop? Imagine two sales of the same product happening at the same
+ * moment. Both would read "10 left" and both would write "9 left", so one
+ * sale would be lost. To prevent that, the update only succeeds if qty is STILL
+ * the number we just read (the .eq("qty", item.qty) line). If someone else
+ * changed it first, nothing is updated, so we read again and retry (up to 3 times).
+ */
 async function deductStock(
   shopId: string,
   stockId: string,
   qty: number,
 ): Promise<{ ok: boolean; left: number; item?: StockItem }> {
-  // Optimistic lock on qty so two quick sales can't both read the same stock.
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data } = await supabase.from("stock_items").select("*").eq("id", stockId).eq("shop_id", shopId).maybeSingle();
     const item = data as StockItem | null;
     if (!item) return { ok: false, left: 0 };
-    if (item.qty < qty) return { ok: false, left: item.qty, item };
+    if (item.qty < qty) return { ok: false, left: item.qty, item }; // not enough pieces left
     const { data: updated, error } = await supabase
       .from("stock_items")
       .update({ qty: item.qty - qty })
       .eq("id", stockId)
       .eq("shop_id", shopId)
-      .eq("qty", item.qty)
+      .eq("qty", item.qty) // only if nobody changed qty in the meantime
       .select();
     if (error) throw error;
     if (updated && updated.length > 0) return { ok: true, left: item.qty - qty, item };
@@ -682,6 +862,12 @@ async function deductStock(
   return { ok: false, left: 0 };
 }
 
+/**
+ * Records one sale: removes the pieces from stock AND writes a row in "sales".
+ *   revenue = the money the shop receives (or is owed, for a credit sale)
+ *   cost    = what those pieces cost the shop (cost_price x qty)
+ *   profit  = revenue - cost  (returned so we can show it to the owner)
+ */
 async function commitSale(
   shopId: string,
   stockId: string,
@@ -706,13 +892,34 @@ async function commitSale(
   return { ok: true, left: res.left, profit: revenue - cost, item: res.item };
 }
 
+/** Warns the owner when a product is running low (or finished) after a sale. */
 async function sendLowStockAlert(from: string, lang: Lang, item: StockItem, left: number): Promise<void> {
   if (left <= item.low_threshold) {
     await sendWhatsAppMessage(from, strings[lang].lowStock(item.name, left));
   }
 }
 
-async function chooseSellItem(from: string, lang: Lang, item: StockItem): Promise<void> {
+/** "Record Sale": the owner types the product and how many, e.g.  sugar 2 */
+async function startSale(from: string, lang: Lang): Promise<void> {
+  const s = strings[lang];
+  const { count } = await supabase.from("stock_items").select("id", { count: "exact", head: true }).eq("shop_id", from);
+  if (!count) {
+    // Nothing in stock yet, so there is nothing to sell: send them to Add Stock.
+    await sendWhatsAppMessage(from, s.sellNoStock);
+    await sendStockMenu(from, lang);
+    return;
+  }
+  D.sessions[from] = { step: "sell_item", data: {} };
+  await sendWhatsAppMessage(from, s.sellAskItem);
+}
+
+/**
+ * The product is chosen. If the owner already typed a quantity (sugar 2) we go
+ * straight to "how did they pay?"; otherwise we ask how many.
+ * We remember the price, the cost and how many are left in the session, so the
+ * next steps don't have to look them up again.
+ */
+async function chooseSellItem(from: string, lang: Lang, item: StockItem, wantedQty: number | null): Promise<void> {
   const s = strings[lang];
   if (item.qty <= 0) {
     await sendWhatsAppMessage(from, s.sellOut(item.name));
@@ -727,6 +934,10 @@ async function chooseSellItem(from: string, lang: Lang, item: StockItem): Promis
       avail: String(item.qty),
     },
   };
+  if (wantedQty !== null) {
+    await applySellQty(from, lang, wantedQty);
+    return;
+  }
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
     body: { text: s.sellAskQty(item.name, item.qty, item.sell_price) },
@@ -740,6 +951,7 @@ async function chooseSellItem(from: string, lang: Lang, item: StockItem): Promis
   });
 }
 
+/** Shows the total (price x quantity) and asks how the customer paid. */
 async function showSellConfirm(from: string, lang: Lang): Promise<void> {
   const session = D.sessions[from];
   if (!session) return;
@@ -760,6 +972,7 @@ async function showSellConfirm(from: string, lang: Lang): Promise<void> {
   });
 }
 
+/** Checks the quantity (a real number, and not more than what is in stock), then moves on. */
 async function applySellQty(from: string, lang: Lang, qty: number): Promise<void> {
   const session = D.sessions[from];
   if (!session || session.step !== "sell_qty") return;
@@ -777,6 +990,7 @@ async function applySellQty(from: string, lang: Lang, qty: number): Promise<void
   await showSellConfirm(from, lang);
 }
 
+/** "Paid Cash": take the pieces out of stock, log the sale, show the profit, warn if low. */
 async function sellByCash(from: string, lang: Lang): Promise<void> {
   const session = D.sessions[from];
   if (!session || session.step !== "sell_confirm") return;
@@ -789,6 +1003,7 @@ async function sellByCash(from: string, lang: Lang): Promise<void> {
 
   const r = await commitSale(from, g(d, "stockId"), qty, qty * price, false, null);
   if (!r.ok || !r.item) {
+    // Someone sold the last pieces a moment ago: tell the owner how many are really left.
     await sendWhatsAppMessage(from, s.sellNotEnough(name, r.left));
     menuSoon(from, lang);
     return;
@@ -798,14 +1013,18 @@ async function sellByCash(from: string, lang: Lang): Promise<void> {
   menuSoon(from, lang);
 }
 
+/**
+ * "On Credit": the customer will pay later, so this is also a DEBT.
+ * We hand over to the normal Add Debt flow with the item and amount already
+ * filled in (so the owner only has to give the customer). The stock is taken
+ * out afterwards, by completeCreditSale(), once the debt has really been saved.
+ */
 async function sellOnCredit(from: string, lang: Lang): Promise<void> {
   const session = D.sessions[from];
   if (!session || session.step !== "sell_confirm") return;
   const d = session.data;
   const qty = Number(g(d, "qty"));
   const price = Number(g(d, "price"));
-  // Hand over to the normal Add Debt flow with item + amount pre-filled; the
-  // webhook calls completeCreditSale() once the debt is saved.
   D.sessions[from] = {
     step: "add_phone",
     data: {
@@ -818,7 +1037,10 @@ async function sellOnCredit(from: string, lang: Lang): Promise<void> {
   await D.sendAddDebtPhonePrompt(from, lang);
 }
 
-/** Called by the webhook after a credit sale's debt row has been saved. */
+/**
+ * Called by the webhook right after a credit sale's debt has been saved.
+ * Now we take the pieces out of stock and write the row in "sales" (marked on_credit).
+ */
 export async function completeCreditSale(
   from: string,
   lang: Lang,
@@ -827,12 +1049,14 @@ export async function completeCreditSale(
   const s = strings[lang];
   const r = await commitSale(from, p.stockId, p.qty, p.revenue, true, p.customerName);
   if (!r.ok || !r.item) {
+    // The debt IS saved; only the stock could not be reduced (for example it ran out).
     await sendWhatsAppMessage(from, s.stockNotUpdated);
     return;
   }
   await sendWhatsAppMessage(from, s.creditStockNote(r.item.name, r.left, money(r.profit)));
   await sendLowStockAlert(from, lang, r.item, r.left);
 }
+
 
 /* ------------------------------------------------------------------ */
 /* 5. Profit report                                                    */
@@ -942,191 +1166,6 @@ async function saveExpense(from: string, lang: Lang, note: string | null): Promi
   menuSoon(from, lang);
 }
 
-/* ------------------------------------------------------------------ */
-/* 7. Auto-reminders (toggle + daily job)                              */
-/* ------------------------------------------------------------------ */
-
-async function showAutoRemindMenu(from: string, lang: Lang): Promise<void> {
-  const s = strings[lang];
-  const { data } = await supabase.from("owners").select("auto_remind").eq("phone", D.cleanPhone(from)).single();
-  const on = !!data?.auto_remind;
-  await sendWhatsAppInteractiveMessage(from, {
-    type: "button",
-    body: { text: s.arStatus(on, AUTO_REMIND_MIN_DEBT_DAYS, D.reminderCooldownDays) },
-    action: {
-      buttons: [
-        on
-          ? { type: "reply", reply: { id: "autoremind_off", title: s.arOffBtn } }
-          : { type: "reply", reply: { id: "autoremind_on", title: s.arOnBtn } },
-      ],
-    },
-  });
-}
-
-async function setAutoRemind(from: string, lang: Lang, on: boolean): Promise<void> {
-  await supabase.from("owners").update({ auto_remind: on }).eq("phone", D.cleanPhone(from));
-  await sendWhatsAppMessage(from, on ? strings[lang].arNowOn : strings[lang].arNowOff);
-  menuSoon(from, lang);
-}
-
-async function notifyOwner(ownerPhone: string, text: string): Promise<void> {
-  // The 24h window is usually closed when the job runs, so fall back to the
-  // owner_notices table; the webhook delivers it the next time they message.
-  try {
-    await sendWhatsAppMessage(ownerPhone, text);
-  } catch {
-    await supabase.from("owner_notices").insert({ shop_id: ownerPhone, text });
-  }
-}
-
-// Same variable layout as sendReminder / sendReminderAll in webhook.ts.
-function reminderVars(
-  lang: Lang,
-  customerName: string,
-  shopName: string,
-  total: number,
-  itemized: string,
-  momoBlock: string,
-  contactPhone: string,
-): string[] {
-  return lang === "rw"
-    ? [customerName, shopName, total.toLocaleString(), itemized, momoBlock, contactPhone, contactPhone]
-    : [customerName, shopName, total.toLocaleString(), itemized, momoBlock, contactPhone];
-}
-
-interface AutoOwner extends OwnerMomoFields {
-  phone: string;
-  name: string | null;
-  language: string | null;
-  contact_phone: string | null;
-  is_active: boolean | null;
-}
-
-interface AutoCustomer {
-  id: string;
-  name: string;
-  phone: string | null;
-  reminders_consent: boolean | null;
-  last_reminded_at: string | null;
-  promise_date: string | null;
-}
-
-let autoRunning = false;
-
-async function autoRemindOwner(owner: AutoOwner): Promise<{ sent: number; failed: number }> {
-  const shopId = owner.phone;
-  const lang: Lang = owner.language === "rw" ? "rw" : "en";
-  const shopName = owner.name ?? `Shop (${shopId.slice(-4)})`;
-  const contactPhone = owner.contact_phone || shopId;
-  const momoBlock = D.buildMomoBlock(owner, lang);
-  const today = kigaliDate();
-
-  const { data: custRows } = await supabase.from("customers").select("*").eq("shop_id", shopId);
-  const customers = (custRows ?? []) as AutoCustomer[];
-  if (customers.length === 0) return { sent: 0, failed: 0 };
-
-  // Unpaid totals + oldest debt per customer (chunked to keep URLs short).
-  const agg = new Map<string, { total: number; oldest: number }>();
-  const ids = customers.map((c) => c.id);
-  for (let i = 0; i < ids.length; i += 150) {
-    const { data: tx } = await supabase
-      .from("transactions")
-      .select("customer_id, amount, date")
-      .in("customer_id", ids.slice(i, i + 150))
-      .eq("paid", false);
-    for (const t of (tx ?? []) as { customer_id: string; amount: number; date: string }[]) {
-      const ts = new Date(t.date).getTime();
-      const cur = agg.get(t.customer_id) ?? { total: 0, oldest: ts };
-      cur.total += t.amount;
-      if (ts < cur.oldest) cur.oldest = ts;
-      agg.set(t.customer_id, cur);
-    }
-  }
-
-  const optedOut = await D.getOptedOutSet(customers.map((c) => c.phone ?? ""));
-  const cooldownMs = D.reminderCooldownDays * DAY_MS;
-
-  let sent = 0;
-  let failed = 0;
-  let sentTotal = 0;
-
-  for (const c of customers) {
-    if (!c.phone || optedOut.has(c.phone) || !c.reminders_consent) continue;
-    const a = agg.get(c.id);
-    if (!a || a.total <= 0) continue;
-    if (Date.now() - a.oldest < AUTO_REMIND_MIN_DEBT_DAYS * DAY_MS) continue;
-    if (c.last_reminded_at && Date.now() - new Date(c.last_reminded_at).getTime() < cooldownMs) continue;
-    if (c.promise_date && c.promise_date >= today) continue; // they promised a date; wait for it to pass
-
-    const itemized = await D.buildItemizedList(c.id);
-    const { data: logRow } = await supabase
-      .from("reminder_logs")
-      .insert({
-        message_id: `pending_${c.phone}_${Date.now()}`,
-        owner_phone: shopId,
-        customer_name: c.name,
-        customer_phone: c.phone,
-        amount: a.total,
-        status: "pending",
-        is_auto: true,
-      })
-      .select()
-      .single();
-
-    try {
-      const messageId = await sendWhatsAppTemplateMessage(
-        c.phone,
-        D.reminderTemplateName(lang),
-        D.metaLanguageCode(lang),
-        reminderVars(lang, c.name, shopName, a.total, itemized, momoBlock, contactPhone),
-      );
-      if (logRow) await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", logRow.id);
-      await supabase
-        .from("customers")
-        .update({ last_reminded_at: new Date().toISOString(), last_reminder_status: "pending" })
-        .eq("id", c.id);
-      sent++;
-      sentTotal += a.total;
-    } catch (err) {
-      console.error("Auto reminder failed:", { shopId, customer: c.phone, err });
-      if (logRow) await supabase.from("reminder_logs").update({ status: "failed" }).eq("id", logRow.id);
-      failed++;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-
-  if (sent > 0 || failed > 0) {
-    await notifyOwner(shopId, strings[lang].arOwnerSummary(sent, sentTotal, failed));
-  }
-  return { sent, failed };
-}
-
-/** Daily job. Called by GET /jobs/auto-reminders (see webhook-edits.md). */
-export async function runAutoReminders(): Promise<{ owners: number; sent: number; failed: number; skipped?: boolean }> {
-  if (autoRunning) return { owners: 0, sent: 0, failed: 0, skipped: true };
-  autoRunning = true;
-  try {
-    const { data } = await supabase
-      .from("owners")
-      .select("phone, name, language, momo_number, momo_code, momo_receiver_name, shop_nickname, contact_phone, is_active")
-      .eq("auto_remind", true);
-    const owners = ((data ?? []) as AutoOwner[]).filter((o) => o.is_active !== false);
-    let sent = 0;
-    let failed = 0;
-    for (const o of owners) {
-      try {
-        const r = await autoRemindOwner(o);
-        sent += r.sent;
-        failed += r.failed;
-      } catch (err) {
-        console.error("Auto reminders failed for owner:", { owner: o.phone, err });
-      }
-    }
-    return { owners: owners.length, sent, failed };
-  } finally {
-    autoRunning = false;
-  }
-}
 
 /* ------------------------------------------------------------------ */
 /* 8. Promise-to-pay date                                              */
@@ -1354,6 +1393,388 @@ async function markSupplierPaid(from: string, lang: Lang, id: string): Promise<v
   menuSoon(from, lang);
 }
 
+
+/* ------------------------------------------------------------------ */
+/* ONE-MESSAGE FLOWS ("type everything together")                      */
+/* ------------------------------------------------------------------ */
+//
+// Shop owners should not have to answer five questions in a row. Each flow
+// below accepts ONE typed message, shows what it understood and asks for a tap
+// before saving anything (so a wrong guess can never be saved by accident).
+// If a message can't be understood, or only part of it was typed, the bot
+// falls back to the older question-by-question way, so nobody gets stuck.
+// The reading of the messages itself lives in shopParsing.ts.
+
+async function unpaidTotalOf(customerId: string): Promise<number> {
+  const { data } = await supabase.from("transactions").select("amount").eq("customer_id", customerId).eq("paid", false);
+  return ((data ?? []) as { amount: number }[]).reduce((sum, t) => sum + t.amount, 0);
+}
+
+/* ---------------- Add Debt:  0788123456 Jean sugar 2000 ---------------- */
+
+/** The "Add Debt" button: one prompt that explains the one-message way. */
+export async function startAddDebt(from: string, lang: Lang): Promise<void> {
+  D.sessions[from] = { step: "add_phone", data: {} };
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: xstrings[lang].addDebtPrompt },
+    action: {
+      buttons: [{ type: "reply", reply: { id: "phone_skip", title: lang === "rw" ? "Nta Nimero" : "No Number" } }],
+    },
+  });
+}
+
+/** Shows "Add this debt?" with the right buttons for this customer. */
+async function askDebtConfirm(from: string, lang: Lang, session: Session, parsed: ParsedDebt): Promise<void> {
+  const x = xstrings[lang];
+  const phone = parsed.phone ? D.cleanPhone(parsed.phone) : null;
+
+  // A known number means a known customer: use the name we already have for them.
+  let name = parsed.name;
+  let known = false;
+  if (phone) {
+    const { data } = await supabase.from("customers").select("name").eq("phone", phone).eq("shop_id", from).maybeSingle();
+    if (data) {
+      name = data.name;
+      known = true;
+    }
+  }
+  // Two different people without a number but with the same name are easy to mix up: warn.
+  let dupName = false;
+  if (!phone) {
+    const { data } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("shop_id", from)
+      .is("phone", null)
+      .ilike("name", escLike(name))
+      .limit(1)
+      .maybeSingle();
+    dupName = !!data;
+  }
+  const isNew = !known && !!phone;
+
+  session.step = "add_confirm";
+  session.data["phone"] = phone ?? "";
+  session.data["name"] = name;
+  session.data["item"] = parsed.item;
+  session.data["amount"] = String(parsed.amount);
+
+  const buttons =
+    isNew
+      ? [
+          { type: "reply", reply: { id: "addok_remind", title: x.debtSaveRemindersBtn } },
+          { type: "reply", reply: { id: "addok_only", title: x.debtSaveOnlyBtn } },
+          { type: "reply", reply: { id: "addok_cancel", title: x.cancelBtn } },
+        ]
+      : [
+          { type: "reply", reply: { id: "addok_save", title: x.debtSaveBtn } },
+          { type: "reply", reply: { id: "addok_cancel", title: x.cancelBtn } },
+        ];
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: x.debtConfirmBody(name, phone, parsed.item, parsed.amount, isNew, dupName) },
+    action: { buttons },
+  });
+}
+
+/* ---------------- Mark as Paid:  0788123456 2000  |  Jean ---------------- */
+
+export async function startMarkPaid(from: string, lang: Lang): Promise<void> {
+  D.sessions[from] = { step: "paid_phone", data: {} };
+  await sendWhatsAppMessage(from, xstrings[lang].markPaidPromptQuick);
+}
+
+/** Shows "Mark paid?" for one customer. An empty amount means the full debt. */
+async function askPayConfirm(
+  from: string,
+  lang: Lang,
+  customer: { id: string; name: string; phone: string | null },
+  amount: number | null,
+): Promise<void> {
+  const x = xstrings[lang];
+  const owed = await unpaidTotalOf(String(customer.id));
+  if (owed <= 0) {
+    clearSession(from);
+    await sendWhatsAppMessage(from, x.payNoDebt(customer.name));
+    menuSoon(from, lang);
+    return;
+  }
+  const full = amount === null || amount >= owed; // typing more than they owe counts as paying it all
+  D.sessions[from] = {
+    step: "pay_confirm",
+    data: {
+      customerId: String(customer.id),
+      name: customer.name,
+      phone: customer.phone ?? "",
+      amount: full ? "" : String(amount),
+    },
+  };
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: full ? x.payConfirmFull(customer.name, owed) : x.payConfirmPart(customer.name, amount ?? 0, owed) },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "payyes", title: x.payYesBtn } },
+        { type: "reply", reply: { id: "paycancel", title: x.cancelBtn } },
+      ],
+    },
+  });
+}
+
+async function findCustomersForPayment(
+  from: string,
+  p: { phone: string | null; name: string | null },
+): Promise<{ id: string; name: string; phone: string | null }[]> {
+  if (p.phone) {
+    const { data } = await supabase
+      .from("customers")
+      .select("id, name, phone")
+      .eq("shop_id", from)
+      .eq("phone", D.cleanPhone(p.phone))
+      .limit(1);
+    return (data ?? []) as { id: string; name: string; phone: string | null }[];
+  }
+  const { data } = await supabase
+    .from("customers")
+    .select("id, name, phone")
+    .eq("shop_id", from)
+    .ilike("name", `%${escLike(p.name ?? "")}%`)
+    .limit(10);
+  return (data ?? []) as { id: string; name: string; phone: string | null }[];
+}
+
+/* ---------------- MoMo:  0788123456, NIYONZIMA ALICE, Chez Alice ---------------- */
+
+export async function startMomo(from: string, lang: Lang): Promise<void> {
+  D.sessions[from] = { step: "momo_number", data: {} };
+  await sendWhatsAppMessage(from, xstrings[lang].momoQuick);
+}
+
+async function askMomoConfirm(from: string, lang: Lang, session: Session, m: ParsedMomo): Promise<void> {
+  const s = strings[lang];
+  session.step = "momo_confirm";
+  session.data["m_number"] = D.cleanPhone(m.number);
+  session.data["m_code"] = m.code;
+  session.data["m_name"] = m.receiverName.toUpperCase();
+  session.data["m_nick"] = m.nickname;
+  await sendWhatsAppInteractiveMessage(from, {
+    type: "button",
+    body: { text: s.momoConfirm(session.data["m_number"], session.data["m_name"], m.nickname, m.code) },
+    action: {
+      buttons: [
+        { type: "reply", reply: { id: "momoyes", title: s.saveBtn } },
+        { type: "reply", reply: { id: "momono", title: s.cancelBtn } },
+      ],
+    },
+  });
+}
+
+/* ---------------- the typed-message router for these flows ---------------- */
+
+/**
+ * Runs before the older question-by-question handlers. Returns true when it
+ * dealt with the message, false to let the older handler take over.
+ */
+async function quickSession(from: string, value: string, session: Session, lang: Lang): Promise<boolean> {
+  const s = strings[lang];
+  const x = xstrings[lang];
+  const d = session.data;
+
+  switch (session.step) {
+    case "add_phone":
+    case "add_name": {
+      if (d["presetAmount"]) return false; // a credit sale from stock: only the customer is missing
+      const parsed = parseDebtMessage(value);
+      if (parsed) {
+        await askDebtConfirm(from, lang, session, parsed);
+        return true;
+      }
+      if (session.step === "add_phone" && !isPhoneLike(value)) {
+        await sendWhatsAppMessage(from, x.addDebtHint);
+        return true;
+      }
+      return false; // just a phone number (or a name): continue the older way
+    }
+
+    case "paid_phone": {
+      const p = parsePaidMessage(value);
+      if (!p) return false;
+      const rows = await findCustomersForPayment(from, p);
+      if (rows.length === 0) {
+        await sendWhatsAppMessage(from, s.noCustomerFound(p.phone ?? p.name ?? value));
+        return true;
+      }
+      if (rows.length > 1) {
+        d["payAmount"] = p.amount === null ? "" : String(p.amount);
+        await sendWhatsAppMessage(from, x.payPick(p.name ?? value));
+        await sendWhatsAppInteractiveMessage(from, {
+          type: "list",
+          body: { text: s.menuTitle },
+          action: {
+            button: s.listButton,
+            sections: [
+              {
+                title: s.secCustomers,
+                rows: rows.map((r) => ({
+                  id: `paypick_${r.id}`,
+                  title: r.name.slice(0, 24),
+                  description: (r.phone ?? (lang === "rw" ? "nta nimero" : "no number")).slice(0, 72),
+                })),
+              },
+            ],
+          },
+        });
+        return true;
+      }
+      const only = rows[0];
+      if (only) await askPayConfirm(from, lang, only, p.amount);
+      return true;
+    }
+
+    case "momo_number": {
+      const m = parseMomoMessage(value);
+      if (m) {
+        await askMomoConfirm(from, lang, session, m);
+        return true;
+      }
+      if (value.includes(",")) {
+        await sendWhatsAppMessage(from, s.momoHint);
+        return true;
+      }
+      return false; // just the number: continue the older way
+    }
+
+    case "edit_name": {
+      // "Jean, 0788123456" (or just a number) changes name and number in one go.
+      const e = parseCustomerEdit(value);
+      if (e.phone && D.cleanPhone(e.phone).length >= 9) {
+        if (e.name) d["editName"] = e.name;
+        d["editPhone"] = D.cleanPhone(e.phone);
+        await D.saveEditedCustomer(from, lang);
+        return true;
+      }
+      return false;
+    }
+
+    // ---- stock: Sugar 1kg, 800, 1000, 20 ----
+    case "stk_name": {
+      const parsed = parseStockMessage(value);
+      if (parsed) {
+        await askStockConfirm(from, lang, parsed);
+        return true;
+      }
+      if (value.includes(",") || /\d$/.test(value)) {
+        await sendWhatsAppMessage(from, s.stkHint);
+        return true;
+      }
+      return false; // just the item name: continue the older way
+    }
+
+    // ---- sale: sugar 2 ----
+    case "sell_item": {
+      const parsed = parseSaleMessage(value);
+      const { data } = await supabase
+        .from("stock_items")
+        .select("*")
+        .eq("shop_id", from)
+        .ilike("name", `%${escLike(parsed.query)}%`)
+        .order("name", { ascending: true })
+        .limit(10);
+      const items = (data ?? []) as StockItem[];
+      if (items.length === 0) {
+        await sendWhatsAppMessage(from, s.sellNoMatch(parsed.query));
+        return true;
+      }
+      const exact = items.find((i) => i.name.toLowerCase() === parsed.query.toLowerCase());
+      const single = exact ?? (items.length === 1 ? items[0] : undefined);
+      if (single) {
+        await chooseSellItem(from, lang, single, parsed.qty);
+        return true;
+      }
+      // Several products match: remember the quantity the owner typed and let them pick.
+      d["preQty"] = parsed.qty === null ? "" : String(parsed.qty);
+      await sendWhatsAppMessage(from, s.sellPick(parsed.query));
+      await sendWhatsAppInteractiveMessage(from, {
+        type: "list",
+        body: { text: s.menuTitle },
+        action: {
+          button: s.listButton,
+          sections: [
+            {
+              title: s.rowStock.slice(0, 24),
+              rows: items.map((i) => ({
+                id: `sellpick_${i.id}`,
+                title: i.name.slice(0, 24),
+                description: `${i.qty} ${s.pcs} — ${money(i.sell_price)}`.slice(0, 72),
+              })),
+            },
+          ],
+        },
+      });
+      return true;
+    }
+
+    // ---- expense: 2000 transport ----
+    case "exp_amount": {
+      const e = parseExpenseMessage(value);
+      if (e && e.note) {
+        session.step = "exp_confirm";
+        d["amount"] = String(e.amount);
+        d["note"] = e.note;
+        await sendWhatsAppInteractiveMessage(from, {
+          type: "button",
+          body: { text: s.expenseConfirm(e.amount, e.note) },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "expok_yes", title: s.saveBtn } },
+              { type: "reply", reply: { id: "expok_no", title: s.cancelBtn } },
+            ],
+          },
+        });
+        return true;
+      }
+      return false; // only an amount: continue the older way (it asks for a note)
+    }
+
+    // ---- supplier debt: Kigali Rice, 50000, 20 bags ----
+    case "sup_name": {
+      const sp = parseSupplierMessage(value);
+      if (sp) {
+        session.step = "sup_confirm";
+        d["supplier"] = sp.supplier;
+        d["amount"] = String(sp.amount);
+        d["note"] = sp.note ?? "";
+        await sendWhatsAppInteractiveMessage(from, {
+          type: "button",
+          body: { text: s.supplierConfirm(sp.supplier, sp.amount, sp.note) },
+          action: {
+            buttons: [
+              { type: "reply", reply: { id: "supok_yes", title: s.saveBtn } },
+              { type: "reply", reply: { id: "supok_no", title: s.cancelBtn } },
+            ],
+          },
+        });
+        return true;
+      }
+      if (value.includes(",")) {
+        await sendWhatsAppMessage(from, s.supHint);
+        return true;
+      }
+      return false; // just the supplier's name: continue the older way
+    }
+  }
+
+  // The owner typed instead of tapping a confirm button: remind them to tap.
+  if (
+    ["add_confirm", "pay_confirm", "momo_confirm", "stk_confirm", "exp_confirm", "sup_confirm"].includes(session.step)
+  ) {
+    await sendWhatsAppMessage(from, s.tapButtons);
+    return true;
+  }
+  return false;
+}
+
 /* ------------------------------------------------------------------ */
 /* Router: button / list taps                                          */
 /* ------------------------------------------------------------------ */
@@ -1361,6 +1782,7 @@ async function markSupplierPaid(from: string, lang: Lang, id: string): Promise<v
 /** Returns true when the tap belonged to this module. */
 export async function handleInteractive(from: string, id: string, lang: Lang): Promise<boolean> {
   const s = strings[lang];
+  const x = xstrings[lang];
   switch (id) {
     case "menu_list":
     case "more_menu": // old "More" buttons still sitting in earlier chats
@@ -1383,38 +1805,104 @@ export async function handleInteractive(from: string, id: string, lang: Lang): P
       await D.sendMenu(from, lang);
       return true;
 
-    // stock
+    // ---- Add Debt confirm ----
+    case "addok_remind":
+    case "addok_only":
+    case "addok_save": {
+      const sess = D.sessions[from];
+      if (!sess || sess.step !== "add_confirm") return true; // an old button tap
+      if (id === "addok_remind") sess.data["consent"] = "yes"; // "this customer agreed to reminders"
+      else if (id === "addok_only") sess.data["consent"] = "no";
+      sess.step = "add_amount";
+      await D.finishAddDebt(from, lang, Number(g(sess.data, "amount")));
+      return true;
+    }
+    case "addok_cancel":
+      clearSession(from);
+      await sendWhatsAppMessage(from, x.debtCancelled);
+      menuSoon(from, lang);
+      return true;
+
+    // ---- Mark as Paid confirm ----
+    case "payyes": {
+      const sess = D.sessions[from];
+      if (!sess || sess.step !== "pay_confirm") return true; // an old button tap
+      const customerId = g(sess.data, "customerId");
+      const name = g(sess.data, "name");
+      const phone = g(sess.data, "phone");
+      const amount = g(sess.data, "amount");
+      clearSession(from);
+      if (amount) {
+        await D.applyPartialPayment(from, { id: customerId, name, phone }, Number(amount), lang, x.payGeneric);
+      } else {
+        await D.markAllPaid(from, lang, { id: customerId, name });
+      }
+      menuSoon(from, lang);
+      return true;
+    }
+    case "paycancel":
+      clearSession(from);
+      await sendWhatsAppMessage(from, x.payCancelled);
+      menuSoon(from, lang);
+      return true;
+
+    // ---- MoMo confirm ----
+    case "momoyes": {
+      const sess = D.sessions[from];
+      if (!sess || sess.step !== "momo_confirm") return true; // an old button tap
+      const d = sess.data;
+      clearSession(from);
+      await supabase
+        .from("owners")
+        .update({
+          momo_number: g(d, "m_number"),
+          momo_code: g(d, "m_code") || null,
+          momo_receiver_name: g(d, "m_name"),
+          shop_nickname: g(d, "m_nick") || null,
+        })
+        .eq("phone", D.cleanPhone(from));
+      await sendWhatsAppMessage(from, s.momoSaved(g(d, "m_number"), g(d, "m_name")));
+      menuSoon(from, lang);
+      return true;
+    }
+    case "momono":
+      clearSession(from);
+      await sendWhatsAppMessage(from, s.cancelledGeneric);
+      menuSoon(from, lang);
+      return true;
+
+    // ---- stock ----
     case "stock_view":
       await showStock(from, lang);
       return true;
     case "stock_add":
       await startAddStock(from, lang);
       return true;
+    case "stkok_yes":
+      await saveStockConfirmed(from, lang);
+      return true;
+    case "stkok_no":
+      clearSession(from);
+      await sendWhatsAppMessage(from, s.cancelledGeneric);
+      menuSoon(from, lang);
+      return true;
     case "stk_keep":
-      if (D.sessions[from]?.step !== "stk_prices") return true; // stale tap
+      if (D.sessions[from]?.step !== "stk_prices") return true; // an old button tap
       clearSession(from);
       menuSoon(from, lang);
       return true;
     case "stk_change": {
       const sess = D.sessions[from];
-      if (!sess || sess.step !== "stk_prices") return true; // stale tap
+      if (!sess || sess.step !== "stk_prices") return true; // an old button tap
       sess.step = "stk_new_cost";
       await sendWhatsAppMessage(from, s.stkAskCost(g(sess.data, "name")));
       return true;
     }
 
-    // sell
-    case "sell_start": {
-      const { count } = await supabase.from("stock_items").select("id", { count: "exact", head: true }).eq("shop_id", from);
-      if (!count) {
-        await sendWhatsAppMessage(from, s.sellNoStock);
-        await sendStockMenu(from, lang);
-        return true;
-      }
-      D.sessions[from] = { step: "sell_item", data: {} };
-      await sendWhatsAppMessage(from, s.sellAskItem);
+    // ---- selling from stock ----
+    case "sell_start":
+      await startSale(from, lang);
       return true;
-    }
     case "sell_cash":
       await sellByCash(from, lang);
       return true;
@@ -1423,13 +1911,13 @@ export async function handleInteractive(from: string, id: string, lang: Lang): P
       return true;
     case "sell_price": {
       const sess = D.sessions[from];
-      if (!sess || sess.step !== "sell_confirm") return true; // stale tap
+      if (!sess || sess.step !== "sell_confirm") return true; // an old button tap
       sess.step = "sell_price_input";
       await sendWhatsAppMessage(from, s.sellAskPrice);
       return true;
     }
 
-    // profit + expenses
+    // ---- profit + expenses ----
     case "profit_btn":
       await sendProfitPicker(from, lang);
       return true;
@@ -1447,22 +1935,22 @@ export async function handleInteractive(from: string, id: string, lang: Lang): P
       await sendWhatsAppMessage(from, s.expAskAmount);
       return true;
     case "exp_note_skip":
-      if (D.sessions[from]?.step !== "exp_note") return true; // stale tap
+      if (D.sessions[from]?.step !== "exp_note") return true; // an old button tap
       await saveExpense(from, lang, null);
       return true;
+    case "expok_yes": {
+      const sess = D.sessions[from];
+      if (!sess || sess.step !== "exp_confirm") return true; // an old button tap
+      await saveExpense(from, lang, g(sess.data, "note") || null);
+      return true;
+    }
+    case "expok_no":
+      clearSession(from);
+      await sendWhatsAppMessage(from, s.cancelledGeneric);
+      menuSoon(from, lang);
+      return true;
 
-    // auto reminders
-    case "autoremind_menu":
-      await showAutoRemindMenu(from, lang);
-      return true;
-    case "autoremind_on":
-      await setAutoRemind(from, lang, true);
-      return true;
-    case "autoremind_off":
-      await setAutoRemind(from, lang, false);
-      return true;
-
-    // promise date
+    // ---- promise date ----
     case "promise_set":
       await startPromise(from, lang);
       return true;
@@ -1476,16 +1964,16 @@ export async function handleInteractive(from: string, id: string, lang: Lang): P
       await savePromise(from, lang, 7);
       return true;
 
-    // credit limit
+    // ---- credit limit ----
     case "creditlimit_menu":
       await startCreditLimit(from, lang);
       return true;
     case "cl_none":
-      if (D.sessions[from]?.step !== "limit_amount") return true; // stale tap
+      if (D.sessions[from]?.step !== "limit_amount") return true; // an old button tap
       await saveCreditLimit(from, lang, null);
       return true;
 
-    // suppliers
+    // ---- suppliers ----
     case "supplier_add":
       await startSupplierAdd(from, lang);
       return true;
@@ -1493,19 +1981,46 @@ export async function handleInteractive(from: string, id: string, lang: Lang): P
       await showSupplierList(from, lang);
       return true;
     case "sup_note_skip":
-      if (D.sessions[from]?.step !== "sup_note") return true; // stale tap
+      if (D.sessions[from]?.step !== "sup_note") return true; // an old button tap
       await saveSupplierDebt(from, lang, null);
+      return true;
+    case "supok_yes": {
+      const sess = D.sessions[from];
+      if (!sess || sess.step !== "sup_confirm") return true; // an old button tap
+      await saveSupplierDebt(from, lang, g(sess.data, "note") || null);
+      return true;
+    }
+    case "supok_no":
+      clearSession(from);
+      await sendWhatsAppMessage(from, s.cancelledGeneric);
+      menuSoon(from, lang);
       return true;
   }
 
   if (id.startsWith("sellpick_")) {
+    // The owner picked one product from the list. Use the quantity they typed earlier, if any.
+    const typedQty = D.sessions[from]?.data["preQty"];
     const stockId = id.slice("sellpick_".length);
     const { data } = await supabase.from("stock_items").select("*").eq("id", stockId).eq("shop_id", from).maybeSingle();
-    if (data) await chooseSellItem(from, lang, data as StockItem);
+    if (data) await chooseSellItem(from, lang, data as StockItem, typedQty ? Number(typedQty) : null);
     return true;
   }
   if (id.startsWith("sellqty_")) {
     await applySellQty(from, lang, parseInt(id.slice("sellqty_".length), 10));
+    return true;
+  }
+  if (id.startsWith("paypick_")) {
+    // The owner picked one customer from the list of matching names.
+    const amountText = D.sessions[from]?.data["payAmount"];
+    const { data } = await supabase
+      .from("customers")
+      .select("id, name, phone")
+      .eq("id", id.slice("paypick_".length))
+      .eq("shop_id", from)
+      .maybeSingle();
+    if (data) {
+      await askPayConfirm(from, lang, data as { id: string; name: string; phone: string | null }, amountText ? Number(amountText) : null);
+    }
     return true;
   }
   if (id.startsWith("suprow_")) {
@@ -1519,12 +2034,25 @@ export async function handleInteractive(from: string, id: string, lang: Lang): P
   return false;
 }
 
+
+
 /* ------------------------------------------------------------------ */
 /* Router: typed answers inside this module's flows                    */
 /* ------------------------------------------------------------------ */
 
-/** Returns true when the typed text was consumed by one of this module's flows. */
+/**
+ * Returns true when the typed text was consumed by one of this module's flows.
+ * The one-message shortcuts run first; anything they don't understand falls
+ * through to the older question-by-question steps below.
+ */
 export async function handleSession(from: string, text: string, session: Session, lang: Lang): Promise<boolean> {
+  if (await quickSession(from, text.trim(), session, lang)) return true;
+  return olderSession(from, text, session, lang);
+}
+
+/** The older question-by-question steps (still used when only part of a message was typed). */
+
+async function olderSession(from: string, text: string, session: Session, lang: Lang): Promise<boolean> {
   const s = strings[lang];
   const value = text.trim();
   const d = session.data;
@@ -1636,44 +2164,6 @@ export async function handleSession(from: string, text: string, session: Session
     }
 
     // ---- record sale ----
-    case "sell_item": {
-      const { data } = await supabase
-        .from("stock_items")
-        .select("*")
-        .eq("shop_id", from)
-        .ilike("name", `%${escLike(value)}%`)
-        .order("name", { ascending: true })
-        .limit(10);
-      const items = (data ?? []) as StockItem[];
-      if (items.length === 0) {
-        await sendWhatsAppMessage(from, s.sellNoMatch(value));
-        return true;
-      }
-      const exact = items.find((i) => i.name.toLowerCase() === value.toLowerCase());
-      if (items.length === 1 || exact) {
-        await chooseSellItem(from, lang, (exact ?? items[0]) as StockItem);
-        return true;
-      }
-      await sendWhatsAppMessage(from, s.sellPick(value));
-      await sendWhatsAppInteractiveMessage(from, {
-        type: "list",
-        body: { text: s.whatToDo },
-        action: {
-          button: s.listButton,
-          sections: [
-            {
-              title: s.rowStock.slice(0, 24),
-              rows: items.map((i) => ({
-                id: `sellpick_${i.id}`,
-                title: i.name.slice(0, 24),
-                description: `${i.qty} ${s.pcs} — ${money(i.sell_price)}`.slice(0, 72),
-              })),
-            },
-          ],
-        },
-      });
-      return true;
-    }
     case "sell_qty": {
       await applySellQty(from, lang, parseNum(value));
       return true;
