@@ -9,6 +9,9 @@
 //    Meta. WhatsApp only delivers a template when the language code sent
 //    matches the one it was registered with, even if the words inside are in
 //    another language. Check the "Language" column in WhatsApp Manager.
+//    (whatsapp.ts also retries once with the sibling code if Meta answers
+//    error 132001, and logs which code worked, so a wrong guess here shows up
+//    in the logs instead of silently killing every message.)
 // 3) The switch below says whether your reminder templates still contain the
 //    payment details.
 // 4) BUTTON_WORDS: the words written on the buttons of your reminder
@@ -30,6 +33,9 @@ export type TemplateLang = "en" | "rw";
  *           rw = "receipt"   (Kinyarwanda text, but REGISTERED AS ENGLISH on Meta)
  *           The old names payment_receipt / payment_receipt_rw do not exist in
  *           WhatsApp Manager, so every receipt using them failed.
+ *           NOTE: the two receipt templates do not have the same {{n}} layout
+ *           (receipts has the date at {{5}}, receipt has it at {{4}}), so the
+ *           params array must be built per language.
  *
  * weekly:   the Monday "ShopBrain recovered X for you" message to the owner.
  *           en = "updates"  (English)
@@ -47,16 +53,17 @@ export const TEMPLATE_NAMES: Record<TemplateKind, Record<TemplateLang, string>> 
 /**
  * The language code each template is registered under on Meta.
  *   English        -> "en"
- *   Kinyarwanda    -> "rw"
+ *   Kinyarwanda    -> "rw_RW"   (Meta's code for Kinyarwanda; webhook.ts has
+ *                                always used this one for the reminder)
  *   English (US)   -> "en_US"
  *
  * Note receipt.rw is "en": the text is Kinyarwanda but Meta has it filed as
  * English, so it must be sent with the English code.
  */
 export const TEMPLATE_LANGUAGE_CODES: Record<TemplateKind, Record<TemplateLang, string>> = {
-  reminder: { en: "en", rw: "rw" },
+  reminder: { en: "en", rw: "rw_RW" },
   receipt: { en: "en", rw: "en" },
-  weekly: { en: "en", rw: "rw" },
+  weekly: { en: "en", rw: "rw_RW" },
 };
 
 /** The template name to send for a kind and language. */
@@ -89,13 +96,13 @@ export const REMINDER_INCLUDES_PAYMENT_DETAILS = { en: false, rw: false };
  * Use lowercase letters only. Add a word here if you ever rename a button.
  */
 export const BUTTON_WORDS = {
-  // "I've paid" button: English "paid", Kinyarwanda "yishyuwe"
+  // "I've paid" button: English "paid", Kinyarwanda "yishyuwe" / "nishyuye"
   paid: ["paid", "yishyuwe", "nishyuye"],
-  // "How to pay" button: English "want to pay", Kinyarwanda "kwishyura"
+  // "How to pay" button: English "pay", Kinyarwanda "kwishyura" / "nishyura"
   pay: ["pay", "kwishyura", "nishyura"],
   // "Stop reminders" button: English "stop", Kinyarwanda "hagarika"
   stop: ["stop", "hagarika", "unsubscribe"],
-  // "My balance" button (only if you ever add one)
+  // "My balance" button: English "balance", Kinyarwanda "ideni"
   balance: ["balance", "ideni"],
 };
 
