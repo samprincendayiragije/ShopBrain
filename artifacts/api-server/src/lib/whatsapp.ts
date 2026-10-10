@@ -94,17 +94,48 @@ export async function markMessageAsRead(messageId: string): Promise<void> {
 }
 
 /**
+ * Meta rejects a template variable (error 132018 / 132000) when it:
+ *   - contains a new line or tab
+ *   - contains 4 or more spaces in a row
+ *   - is empty
+ *   - is longer than 1024 characters
+ * The itemized debt list is the usual offender because it is built from
+ * several lines. This turns it into one clean line:
+ *   "sugar 2000\nbread 500"  ->  "sugar 2000 | bread 500"
+ * Every template param goes through this, so callers don't have to care.
+ */
+function cleanTemplateParam(value: unknown): string {
+  let s = String(value ?? "")
+    .split(/[\r\n]+/)
+    .map((line) => line.replace(/\t/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join(" | ");
+  s = s.replace(/ {2,}/g, " ").trim();
+  if (s.length > 1000) s = s.slice(0, 997) + "...";
+  return s.length > 0 ? s : "-";
+}
+
+/**
  * Sends a pre-approved WhatsApp message template.
  * Required for messaging customers outside the 24h customer service window
  * (i.e. anyone who hasn't messaged the bot recently, or ever).
  *
  * `params` are inserted in order into the {{1}}, {{2}}, {{3}}... placeholders
- * in the template body, as configured in WhatsApp Manager.
+ * in the template body, as configured in WhatsApp Manager. The number of
+ * params MUST equal the number of placeholders in that template, or Meta
+ * rejects it with error 132000.
+ *
+ * Quick-reply buttons (I've paid / My balance / How to pay / Stop) are part of
+ * the approved template itself and need nothing extra here.
  *
  * `languageCode` MUST match the language the template is registered under in
  * WhatsApp Manager ("en", "rw", "en_US"...), otherwise Meta rejects it with
  * error 132001. Prefer sendWhatsAppTemplateByKind below, which looks the name
  * and code up in templateSettings.ts so they can never drift apart.
+ *
+ * Returns the WhatsApp message id (wamid). The sent / delivered / read
+ * status callbacks that arrive on the webhook carry this same id, so store it
+ * against the reminder when you log it.
  */
 export async function sendWhatsAppTemplateMessage(
   to: string,
@@ -113,6 +144,27 @@ export async function sendWhatsAppTemplateMessage(
   params: string[],
 ): Promise<string> {
   const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+
+  const template: {
+    name: string;
+    language: { code: string };
+    components?: object[];
+  } = {
+    name: templateName,
+    language: { code: languageCode },
+  };
+  if (params.length > 0) {
+    template.components = [
+      {
+        type: "body",
+        parameters: params.map((p) => ({
+          type: "text",
+          text: cleanTemplateParam(p),
+        })),
+      },
+    ];
+  }
+
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -123,20 +175,17 @@ export async function sendWhatsAppTemplateMessage(
       messaging_product: "whatsapp",
       to,
       type: "template",
-      template: {
-        name: templateName,
-        language: { code: languageCode },
-        components: [
-          {
-            type: "body",
-            parameters: params.map((text) => ({ type: "text", text })),
-          },
-        ],
-      },
+      template,
     }),
   });
   if (!res.ok) {
     const body = await res.text();
+    // Logged here too, in case a caller swallows the thrown error. The Meta
+    // error code in this line (132000, 132001, 132018, 131047...) tells you
+    // exactly what is wrong.
+    console.error(
+      `[template] "${templateName}" (${languageCode}) to ${to} failed, ${res.status}, ${params.length} params: ${body}`,
+    );
     throw new Error(
       `WhatsApp template "${templateName}" (${languageCode}) failed, ${res.status}: ${body}`,
     );
