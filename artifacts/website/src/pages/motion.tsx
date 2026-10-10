@@ -1,8 +1,23 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-// v2. All animation lives here. Design, colours and copy stay in Home.tsx.
-// GPU-friendly (transform / opacity / clip-path / mask), rAF-driven where it
-// follows pointer or scroll, paused when off-screen, off for reduced motion.
+// v3. All animation lives here. Home.tsx needs NO changes: same exports, same
+// class names, same colours. Only motion is added.
+//
+// What is new in v3 (everything is scroll-linked and reverses when you scroll up):
+//   1. One shared scroll engine: a single rAF loop with smoothed scroll (inertia)
+//      and scroll velocity. It sleeps when the page is still.
+//   2. Hero exit: the headline and phone recede in depth as you scroll away, and
+//      the phone tips back in 3D.
+//   3. Section headings: ink wipe + de-blur that is scrubbed by scroll.
+//   4. Notebook: the handwriting is written line by line as you scroll, and the
+//      highlighter on the pricing card is drawn by scroll.
+//   5. How it works: the timeline has a comet dot that stretches with scroll
+//      speed, and each step slides in, staggered, as the line reaches it.
+//   6. Feature cards rise with a depth lag (right column trails the left).
+//   7. Pricing ticket: both halves slide together and lock in.
+//   8. QR code spins and scales in. Check lists tick in one by one.
+//   9. Fast scrolling gives the card grids a very slight velocity skew.
+// Everything respects prefers-reduced-motion and pauses when off-screen.
 
 const GREEN = "#0F7A3F";
 const EASE = "cubic-bezier(.16,1,.3,1)"; // expo-out
@@ -11,6 +26,96 @@ const SPRING = "cubic-bezier(.34,1.56,.64,1)"; // soft overshoot
 export const prefersReducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 const isFine = () => typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+const useIso = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+const ease = (p: number) => 1 - Math.pow(1 - p, 2.4);
+const setProp = (el: HTMLElement, prop: string, val: string) => {
+  if (val) el.style.setProperty(prop, val);
+  else el.style.removeProperty(prop);
+};
+
+// ---------------------------------------------------------------------------
+// Scroll engine
+// One scroll listener and one rAF loop for the whole page. Every subscriber
+// reads layout first and returns a write function, so all reads happen before
+// all writes (no layout thrashing). The loop stops when scroll has settled.
+// ---------------------------------------------------------------------------
+
+type Frame = { y: number; sy: number; vel: number; vh: number; max: number };
+type Tick = (f: Frame) => void | (() => void);
+
+const ticks = new Set<Tick>();
+let rafId = 0;
+let lastT = 0;
+let sy = 0; // smoothed scroll position (lags behind the real one)
+let lastY = 0;
+let vel = 0; // scroll velocity, px per 60fps frame, smoothed
+let quietUntil = 0;
+
+const maxScroll = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+const snapshot = (): Frame => ({ y: window.scrollY, sy, vel, vh: window.innerHeight, max: maxScroll() });
+
+function frame(now: number) {
+  rafId = 0;
+  const y = window.scrollY;
+  const dt = clamp(now - lastT, 1, 50);
+  lastT = now;
+  sy += (y - sy) * (1 - Math.exp(-dt / 85));
+  if (Math.abs(y - sy) < 0.05) sy = y;
+  vel += (((y - lastY) / dt) * 16.67 - vel) * (1 - Math.exp(-dt / 110));
+  if (Math.abs(vel) < 0.02) vel = 0;
+  lastY = y;
+
+  const f: Frame = { y, sy, vel, vh: window.innerHeight, max: maxScroll() };
+  const writes: (() => void)[] = [];
+  ticks.forEach((t) => {
+    const w = t(f);
+    if (w) writes.push(w);
+  });
+  for (let i = 0; i < writes.length; i++) writes[i]();
+
+  if (sy !== y || vel !== 0 || now < quietUntil) rafId = requestAnimationFrame(frame);
+}
+
+export function wake() {
+  quietUntil = performance.now() + 240;
+  if (!rafId && ticks.size) {
+    lastT = performance.now();
+    rafId = requestAnimationFrame(frame);
+  }
+}
+
+function subscribe(t: Tick) {
+  if (!ticks.size) {
+    sy = lastY = window.scrollY;
+    vel = 0;
+    window.addEventListener("scroll", wake, { passive: true });
+    window.addEventListener("resize", wake);
+  }
+  ticks.add(t);
+  const w = t(snapshot()); // paint the first state immediately, no flash
+  if (w) w();
+  wake();
+  return () => {
+    ticks.delete(t);
+    if (!ticks.size) {
+      window.removeEventListener("scroll", wake);
+      window.removeEventListener("resize", wake);
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+  };
+}
+
+// 0 -> 1 as an element's top travels from `start` to `end` (fractions of the
+// viewport height). If the element can never scroll far enough (it sits near
+// the end of the page) the range shrinks, so it always finishes.
+function progress(top: number, f: Frame, start: number, end: number) {
+  const sL = f.vh * start;
+  const reach = top - (f.max - f.y); // where this element ends up at the very bottom
+  const eL = Math.max(f.vh * end, reach + 2);
+  if (sL - eL < 24) return top <= sL ? 1 : 0;
+  return clamp((sL - top) / (sL - eL), 0, 1);
+}
 
 // ---------------------------------------------------------------------------
 // CSS
@@ -36,24 +141,27 @@ export const CSS = `
 @keyframes sb-pop{0%{opacity:0;transform:translateY(18px) scale(.7)}55%{opacity:1}100%{opacity:1;transform:none}}
 .sb-pop{animation:sb-pop .65s ${SPRING} both}
 
-.sb-reveal{opacity:0;transform:translateY(40px);filter:blur(8px);transition:opacity 1s ${EASE},transform 1s ${EASE},filter 1s ${EASE}}
-.sb-in{opacity:1;transform:none;filter:none}
+/* how-it-works steps: the number badge and the text slide in, staggered, driven by --p (set from JS) */
+.sb-rv{--p:0}
+.sb-rv>*{--q:clamp(0,calc(var(--p) * 1.7 - var(--k,0) * .22),1);opacity:var(--q);translate:calc((1 - var(--q)) * 36px) 0;filter:blur(calc((1 - var(--q)) * 8px))}
+.sb-rv>*:nth-child(2){--k:1}
+.sb-rv>*:nth-child(3){--k:2}
+.sb-rv>*:nth-child(4){--k:3}
+.sb-rv.is-done>*{filter:none}
 
-/* section headings: soft ink wipe, left to right (class added by useMotion) */
-.sb-h2{opacity:0;transform:translateY(14px);-webkit-mask-image:linear-gradient(90deg,#000 42%,transparent 58%);mask-image:linear-gradient(90deg,#000 42%,transparent 58%);-webkit-mask-size:260% 100%;mask-size:260% 100%;-webkit-mask-position:100% 0;mask-position:100% 0;transition:opacity .6s ease,transform 1.1s ${EASE},-webkit-mask-position 1.3s cubic-bezier(.5,0,.2,1),mask-position 1.3s cubic-bezier(.5,0,.2,1)}
-.sb-h2.is-seen{opacity:1;transform:none;-webkit-mask-position:0 0;mask-position:0 0}
+/* section headings: ink wipe, left to right, scrubbed by scroll (--p is set from JS, translate too) */
+.sb-h2{--p:0;opacity:clamp(0,calc(var(--p) * 2.2),1);filter:blur(calc((1 - var(--p)) * 10px));-webkit-mask-image:linear-gradient(90deg,#000 42%,transparent 58%);mask-image:linear-gradient(90deg,#000 42%,transparent 58%);-webkit-mask-size:260% 100%;mask-size:260% 100%;-webkit-mask-position:calc((1 - var(--p)) * 100%) 0;mask-position:calc((1 - var(--p)) * 100%) 0}
+.sb-h2.is-done{filter:none;-webkit-mask-image:none;mask-image:none}
 
-/* handwriting */
-@keyframes sb-write{from{clip-path:inset(-10% 100% -10% 0)}to{clip-path:inset(-10% 0 -10% 0)}}
-.sb-write{clip-path:inset(-10% 100% -10% 0)}
-[data-seen].is-seen .sb-write{animation:sb-write 1s cubic-bezier(.6,.05,.3,1) both;animation-delay:calc(var(--i,0) * .5s)}
+/* handwriting: each line is written in turn as the notebook scrolls into view */
+.sb-write{clip-path:inset(-10% calc((1 - clamp(0,calc(var(--p,0) * 4.4 - var(--i,0)),1)) * 100%) -10% 0)}
 [data-seen] .sb-write:nth-child(2){--i:1}
 [data-seen] .sb-write:nth-child(3){--i:2}
 [data-seen] .sb-write:nth-child(4){--i:3.2}
+[data-seen].is-done .sb-write{clip-path:none}
 
-/* highlighter pen */
-.sb-mark{background:linear-gradient(#FFC933,#FFC933) no-repeat 0 0/0% 100%;transition:background-size 1.2s ${EASE} .3s;-webkit-box-decoration-break:clone;box-decoration-break:clone}
-.sb-mark.is-seen{background-size:100% 100%}
+/* highlighter pen: drawn by scroll */
+.sb-mark{background-image:linear-gradient(#FFC933,#FFC933);background-repeat:no-repeat;background-position:0 0;background-size:calc(clamp(0,calc((var(--p,0) - .15) * 2),1) * 100%) 100%;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 
 /* cursor glow on cards */
 .sb-spot{position:relative}
@@ -72,11 +180,10 @@ export const CSS = `
 
 @media (prefers-reduced-motion:reduce){
   .sb-rise,.sb-float,.sb-dot,.sb-ring,.sb-pop,.sb-word,.sb-shine::after{animation:none}
-  .sb-reveal{opacity:1;transform:none;filter:none;transition:none}
-  .sb-h2{opacity:1;transform:none;-webkit-mask-image:none;mask-image:none;transition:none}
+  .sb-rv>*{opacity:1;translate:none;filter:none}
+  .sb-h2{opacity:1;filter:none;-webkit-mask-image:none;mask-image:none}
   .sb-write{clip-path:none}
-  [data-seen].is-seen .sb-write{animation:none}
-  .sb-mark{background-size:100% 100%;transition:none}
+  .sb-mark{background-size:100% 100%}
   .sb-tl > li > span:first-child{transition:none}
 }
 `;
@@ -123,6 +230,98 @@ function burst(el: HTMLElement) {
 }
 
 // ---------------------------------------------------------------------------
+// Scroll-scrubbed targets
+// Found by selector so Home.tsx needs nothing extra. If you restructure Home.tsx,
+// this is the one place that knows about its markup.
+// ---------------------------------------------------------------------------
+
+type Mode = "var" | "seen" | "fade" | "card" | "pop";
+type Item = { el: HTMLElement; mode: Mode; start: number; end: number; ax: number; ay: number; p: number; off: number };
+
+function paint(it: Item, p: number) {
+  const e = ease(p);
+  const done = e >= 0.999;
+  const tx = done ? 0 : (1 - e) * it.ax;
+  const ty = done ? 0 : (1 - e) * it.ay;
+  const move = !tx && !ty ? "" : `${tx.toFixed(1)}px ${ty.toFixed(1)}px`;
+  const el = it.el;
+  switch (it.mode) {
+    case "var":
+    case "seen":
+      el.style.setProperty("--p", (done ? 1 : e).toFixed(4));
+      setProp(el, "translate", move);
+      break;
+    case "fade":
+      el.style.opacity = done ? "" : Math.min(1, e * 1.5).toFixed(3);
+      setProp(el, "translate", move);
+      break;
+    case "card":
+      setProp(el, "translate", move);
+      break;
+    case "pop":
+      el.style.opacity = done ? "" : Math.min(1, e * 1.6).toFixed(3);
+      setProp(el, "scale", done ? "" : (0.78 + 0.22 * e).toFixed(3));
+      setProp(el, "rotate", done ? "" : `${(-14 * (1 - e)).toFixed(2)}deg`);
+      break;
+  }
+  el.classList.toggle("is-done", done);
+  it.p = p;
+  it.off = it.mode === "pop" ? 0 : ty;
+}
+
+function collect(existing: Map<HTMLElement, Item>): Item[] {
+  const out: Item[] = [];
+  const seenEls = new Set<HTMLElement>();
+  const put = (node: Element | null | undefined, mode: Mode, start: number, end: number, ax = 0, ay = 0) => {
+    if (!(node instanceof HTMLElement) || seenEls.has(node)) return;
+    seenEls.add(node);
+    const prev = existing.get(node);
+    if (prev) {
+      Object.assign(prev, { mode, start, end, ax, ay });
+      out.push(prev);
+    } else {
+      out.push({ el: node, mode, start, end, ax, ay, p: -1, off: 0 });
+    }
+  };
+  const all = (sel: string, root: ParentNode = document) => Array.from(root.querySelectorAll<HTMLElement>(sel));
+
+  // section headings: ink wipe
+  all("main h2").forEach((h) => {
+    h.classList.add("sb-h2");
+    put(h, "var", 0.94, 0.58, 0, 22);
+  });
+
+  // notebook (handwriting) and the highlighter on the pricing card
+  all("[data-seen]").forEach((el) => {
+    if (el.querySelector(".sb-write")) put(el, "seen", 0.92, 0.34, -64, 0);
+    else put(el, "seen", 0.97, 0.6);
+  });
+
+  // "With Shop Brain" check list, ticked in one by one
+  const problem = document.querySelector(".sb-write")?.closest("section");
+  if (problem) all("ul > li", problem).forEach((el, i) => put(el, "fade", 0.97 - i * 0.04, 0.62, -24, 10));
+
+  // feature cards: rise with a depth lag, the right column trails the left
+  all(".sb-spot").forEach((el, i) => put(el, "card", 0.99 - (i % 2) * 0.05, 0.5, 0, 44 + (i % 2) * 30));
+
+  // pricing ticket: two halves slide together
+  const ticket = document.querySelector<HTMLElement>("#pricing .grid");
+  if (ticket) {
+    put(ticket.children[0], "fade", 0.92, 0.52, -60, 0);
+    put(ticket.children[1], "fade", 0.92, 0.52, 60, 0);
+  }
+  all("#pricing li").forEach((el, i) => put(el, "fade", 0.97 - i * 0.035, 0.64, -20, 0));
+
+  // QR code spins and scales in
+  put(document.querySelector("#get-started figure"), "pop", 0.95, 0.5);
+
+  return out;
+}
+
+const gridsOf = () =>
+  Array.from(new Set(Array.from(document.querySelectorAll<HTMLElement>(".sb-spot")).map((e) => e.parentElement).filter(Boolean) as HTMLElement[]));
+
+// ---------------------------------------------------------------------------
 // Hooks and components
 // ---------------------------------------------------------------------------
 
@@ -151,10 +350,37 @@ export function useInView<T extends HTMLElement>(threshold = 0.2) {
   return { ref, seen };
 }
 
+// Scroll-scrubbed reveal (used by the "how it works" steps). The number badge and
+// the text slide in one after another as the element travels up the screen, and
+// they slide back out if you scroll up again.
 export function Reveal({ children, delay = 0, className = "", as: Tag = "div" }: { children: React.ReactNode; delay?: number; className?: string; as?: React.ElementType }) {
-  const { ref, seen } = useInView<HTMLElement>(0.25);
+  const ref = useRef<HTMLElement | null>(null);
+
+  useIso(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (prefersReducedMotion()) {
+      el.style.setProperty("--p", "1");
+      el.classList.add("is-done");
+      return;
+    }
+    let last = -1;
+    const start = 0.94 - Math.min(delay, 600) / 4000; // later steps start a touch later
+    return subscribe((f) => {
+      const r = el.getBoundingClientRect();
+      const p = progress(r.top + (f.y - f.sy), f, start, 0.6);
+      if (last >= 0 && Math.abs(p - last) < 0.0004) return;
+      return () => {
+        last = p;
+        const e = ease(p);
+        el.style.setProperty("--p", e.toFixed(4));
+        el.classList.toggle("is-done", e >= 0.999);
+      };
+    });
+  }, [delay]);
+
   return (
-    <Tag ref={ref} className={`sb-reveal ${seen ? "sb-in" : ""} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
+    <Tag ref={ref} className={`sb-rv ${className}`}>
       {children}
     </Tag>
   );
@@ -209,7 +435,8 @@ export function SplitHeading({ text, step = 80, delay = 80 }: { text: string; st
 }
 
 // Desktop: 3D tilt toward the cursor with a light glare.
-// Phones and tablets (no hover): the phone leans gently with your scroll position instead.
+// Phones and tablets (no hover): the phone leans gently with your scroll position.
+// Both: as the hero scrolls away, the phone tips back and recedes in depth.
 export function Tilt({ children, className = "", max = 8 }: { children: React.ReactNode; className?: string; max?: number }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const glare = useRef<HTMLDivElement | null>(null);
@@ -217,32 +444,46 @@ export function Tilt({ children, className = "", max = 8 }: { children: React.Re
   useEffect(() => {
     const el = ref.current;
     if (!el || prefersReducedMotion()) return;
-
-    if (!isFine()) {
-      let raf = 0;
-      const update = () => {
-        raf = 0;
-        const r = el.getBoundingClientRect();
-        const c = (r.top + r.height / 2) / window.innerHeight - 0.5;
-        el.style.transform = `perspective(900px) rotateX(${clamp(-c * 12, -7, 7).toFixed(2)}deg) rotateY(${clamp(c * 10, -6, 6).toFixed(2)}deg)`;
-      };
-      const onScroll = () => {
-        if (!raf) raf = requestAnimationFrame(update);
-      };
-      update();
-      window.addEventListener("scroll", onScroll, { passive: true });
-      return () => {
-        window.removeEventListener("scroll", onScroll);
-        cancelAnimationFrame(raf);
-      };
-    }
+    const fine = isFine();
+    const hero = el.closest<HTMLElement>("#hero");
 
     let raf = 0, tx = 0, ty = 0, cx = 0, cy = 0, hover = false;
+    let exit = 0, leanX = 0, leanY = 0;
+
+    const apply = () => {
+      const rx = cy + leanX + exit * 16;
+      const ry = cx + leanY - exit * 11;
+      const rz = exit * -2.5;
+      const z = exit * -150;
+      el.style.transform = `perspective(900px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) rotateZ(${rz.toFixed(2)}deg) translate3d(0,0,${z.toFixed(1)}px)`;
+    };
+
+    const unsub = subscribe((f) => {
+      const hh = hero ? hero.offsetHeight : f.vh;
+      const t = clamp(f.sy / (hh * 0.85), 0, 1);
+      const e = t * t * (3 - 2 * t);
+      let lx = 0, ly = 0;
+      if (!fine) {
+        const r = el.getBoundingClientRect();
+        const c = (r.top + r.height / 2) / f.vh - 0.5;
+        lx = clamp(-c * 12, -7, 7);
+        ly = clamp(c * 10, -6, 6);
+      }
+      return () => {
+        exit = e;
+        leanX = lx;
+        leanY = ly;
+        apply();
+      };
+    });
+
+    if (!fine) return unsub;
+
     const loop = () => {
       raf = 0;
       cx += (tx - cx) * 0.1;
       cy += (ty - cy) * 0.1;
-      el.style.transform = `perspective(900px) rotateX(${cy.toFixed(2)}deg) rotateY(${cx.toFixed(2)}deg)`;
+      apply();
       if (glare.current) glare.current.style.opacity = hover ? "1" : "0";
       if (hover || Math.abs(tx - cx) > 0.02 || Math.abs(ty - cy) > 0.02) raf = requestAnimationFrame(loop);
     };
@@ -268,6 +509,7 @@ export function Tilt({ children, className = "", max = 8 }: { children: React.Re
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerleave", leave);
     return () => {
+      unsub();
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerleave", leave);
       cancelAnimationFrame(raf);
@@ -289,7 +531,8 @@ export function Tilt({ children, className = "", max = 8 }: { children: React.Re
   );
 }
 
-// Timeline line draws with scroll, and each step number lights up when the line reaches it.
+// Timeline line draws with smoothed scroll, a comet dot rides the tip and stretches
+// with scroll speed, and each step number lights up when the line reaches it.
 export function ScrollLine() {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -301,30 +544,29 @@ export function ScrollLine() {
     const items = Array.from(host.children).filter((c) => c.tagName === "LI") as HTMLElement[];
     const reduce = prefersReducedMotion();
     host.classList.add("sb-tl");
-    let raf = 0;
-    const update = () => {
-      raf = 0;
+
+    const unsub = subscribe((f) => {
       const r = host.getBoundingClientRect();
-      const p = reduce ? 1 : clamp((window.innerHeight * 0.65 - r.top) / r.height, 0, 1);
-      fill.style.transform = `scaleY(${p})`;
-      dot.style.top = `${p * 100}%`;
-      dot.style.opacity = !reduce && p > 0 && p < 1 ? "1" : "0";
+      const top = r.top + (f.y - f.sy);
+      const p = reduce ? 1 : clamp((f.vh * 0.65 - top) / r.height, 0, 1);
+      const h = el.clientHeight;
+      const stretch = reduce ? 0 : clamp(Math.abs(f.vel) * 0.05, 0, 1.8);
       const line = p * r.height;
-      items.forEach((li) => {
-        const on = reduce || li.offsetTop + 20 <= line;
-        if (on !== (li.dataset.on === "1")) li.dataset.on = on ? "1" : "0";
-      });
-    };
-    const onScroll = () => {
-      if (!raf) raf = requestAnimationFrame(update);
-    };
-    update();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+      const ons = items.map((li) => reduce || li.offsetTop + 20 <= line);
+      return () => {
+        fill.style.transform = `scaleY(${p})`;
+        dot.style.setProperty("translate", `0 ${(p * h).toFixed(1)}px`);
+        dot.style.setProperty("scale", `1 ${(1 + stretch).toFixed(3)}`);
+        dot.style.opacity = !reduce && p > 0 && p < 1 ? "1" : "0";
+        items.forEach((li, i) => {
+          const v = ons[i] ? "1" : "0";
+          if (li.dataset.on !== v) li.dataset.on = v;
+        });
+      };
+    });
+
     return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      cancelAnimationFrame(raf);
+      unsub();
       host.classList.remove("sb-tl");
     };
   }, []);
@@ -337,78 +579,127 @@ export function ScrollLine() {
 }
 
 // Page-wide behaviours, wired by class / selector so Home.tsx needs nothing extra:
-//   [data-seen]  gets .is-seen when scrolled into view (.sb-write, .sb-mark)
-//   main h2      ink-wipe reveal
+//   scroll-scrubbed targets (see collect above): headings, notebook, highlighter,
+//     check lists, feature cards, pricing ticket, QR code
+//   #hero        headline and phone recede as you scroll away, parallax ruled paper,
+//                floating badge, red margin line draws in
+//   card grids   a very slight skew that follows scroll velocity
 //   .sb-spot     cursor glow on cards
 //   .sb-shine    magnetic pull toward the cursor
-//   #hero        parallax ruled paper + floating badge, red margin line draws in
 //   header       drops in on load
 //   looping animations pause while off-screen (battery on phones)
 export function useMotion() {
-  useEffect(() => {
+  useIso(() => {
     const reduce = prefersReducedMotion();
     const fine = isFine();
     const cleanups: (() => void)[] = [];
 
-    // reveal-on-scroll
-    const seen = Array.from(document.querySelectorAll<HTMLElement>("[data-seen]"));
-    document.querySelectorAll<HTMLElement>("main h2").forEach((h) => {
-      h.classList.add("sb-h2");
-      seen.push(h);
-    });
-    if (reduce || typeof IntersectionObserver === "undefined") {
-      seen.forEach((e) => e.classList.add("is-seen"));
-    } else {
-      const io = new IntersectionObserver(
-        (es) =>
-          es.forEach((e) => {
-            if (e.isIntersecting) {
-              e.target.classList.add("is-seen");
-              io.unobserve(e.target);
-            }
-          }),
-        { threshold: 0.35 }
-      );
-      seen.forEach((e) => io.observe(e));
-      cleanups.push(() => io.disconnect());
+    let items = collect(new Map());
+    let grids = gridsOf();
 
-      // pause endless loops that are off-screen
-      const loops = Array.from(document.querySelectorAll<HTMLElement>(".sb-float,.sb-ring,.sb-shine"));
-      const pause = new IntersectionObserver((es) => es.forEach((e) => (e.target as HTMLElement).style.setProperty("--ps", e.isIntersecting ? "running" : "paused")));
-      loops.forEach((e) => pause.observe(e));
-      cleanups.push(() => pause.disconnect());
+    // ---- scroll-scrubbed targets
+    const itemsTick: Tick = (f) => {
+      const todo: [Item, number][] = [];
+      for (const it of items) {
+        if (!it.el.isConnected) continue;
+        const r = it.el.getBoundingClientRect();
+        if (!r.width && !r.height) continue;
+        const top = r.top - it.off + (f.y - f.sy);
+        const p = progress(top, f, it.start, it.end);
+        if (it.p < 0 || Math.abs(p - it.p) > 0.0004) todo.push([it, p]);
+      }
+      if (!todo.length) return;
+      return () => todo.forEach(([it, p]) => paint(it, p));
+    };
+
+    // ---- hero exit + velocity skew
+    const hero = document.getElementById("hero");
+    const cols = hero?.querySelector<HTMLElement>(".container")?.children;
+    const left = (cols?.[0] as HTMLElement | undefined) ?? null;
+    const right = (cols?.[1] as HTMLElement | undefined) ?? null;
+    const badge = hero?.querySelector<HTMLElement>(".sb-float") ?? null;
+    const skewMax = fine ? 1.3 : 0.8;
+    let heroSettled = false;
+
+    const miscTick: Tick = (f) => {
+      const hh = hero ? hero.offsetHeight : 1;
+      const hp = clamp(f.sy / (hh * 0.9), 0, 1);
+      const away = f.sy > f.vh * 1.3;
+      const sk = clamp(-f.vel * 0.04, -skewMax, skewMax);
+      return () => {
+        if (hero && !(away && heroSettled)) {
+          const e = hp * hp;
+          hero.style.backgroundPositionY = `${(-f.sy * 0.22).toFixed(1)}px`;
+          if (left) {
+            setProp(left, "translate", hp ? `0 ${(-hp * 72).toFixed(1)}px` : "");
+            left.style.opacity = hp ? (1 - e * 0.95).toFixed(3) : "";
+            left.style.filter = hp > 0.03 ? `blur(${(e * 6).toFixed(1)}px)` : "";
+          }
+          if (right) {
+            setProp(right, "translate", hp ? `0 ${(-hp * 34).toFixed(1)}px` : "");
+            right.style.opacity = hp ? (1 - e * 0.75).toFixed(3) : "";
+          }
+          if (badge) setProp(badge, "translate", `0 ${(-f.sy * 0.08).toFixed(1)}px`);
+          heroSettled = away;
+        }
+        const t = Math.abs(sk) < 0.03 ? "" : `skewY(${sk.toFixed(2)}deg)`;
+        grids.forEach((g) => (g.style.transform = t));
+      };
+    };
+
+    if (reduce) {
+      items.forEach((it) => paint(it, 1));
+    } else {
+      cleanups.push(subscribe(itemsTick));
+      cleanups.push(subscribe(miscTick));
     }
 
-    // entrance: header drops in, red margin line draws down
+    // Language switches, tab switches and the FAQ re-render parts of the page:
+    // find the new elements and give them their state.
+    let pending = 0;
+    const rescan = () => {
+      pending = 0;
+      items = collect(new Map(items.map((i) => [i.el, i])));
+      grids = gridsOf();
+      if (reduce) items.forEach((it) => it.p !== 1 && paint(it, 1));
+      else wake();
+    };
+    const mo = new MutationObserver(() => {
+      if (!pending) pending = requestAnimationFrame(rescan);
+    });
+    document.querySelectorAll("main > section:not(#hero)").forEach((s) => mo.observe(s, { childList: true, subtree: true }));
+    cleanups.push(() => {
+      mo.disconnect();
+      cancelAnimationFrame(pending);
+    });
+
     if (!reduce) {
+      // layout can shift after fonts and images arrive, and when accordions open
+      const nudge = () => wake();
+      if (typeof ResizeObserver !== "undefined") {
+        const ro = new ResizeObserver(nudge);
+        ro.observe(document.body);
+        cleanups.push(() => ro.disconnect());
+      }
+      document.fonts?.ready.then(nudge);
+      window.addEventListener("load", nudge);
+      cleanups.push(() => window.removeEventListener("load", nudge));
+
+      // pause endless loops that are off-screen
+      if (typeof IntersectionObserver !== "undefined") {
+        const loops = Array.from(document.querySelectorAll<HTMLElement>(".sb-float,.sb-ring,.sb-shine"));
+        const pause = new IntersectionObserver((es) => es.forEach((e) => (e.target as HTMLElement).style.setProperty("--ps", e.isIntersecting ? "running" : "paused")));
+        loops.forEach((e) => pause.observe(e));
+        cleanups.push(() => pause.disconnect());
+      }
+
+      // entrance: header drops in, red margin line draws down
       document.querySelector("header")?.animate([{ transform: "translateY(-100%)" }, { transform: "none" }], { duration: 900, easing: EASE });
       const margin = document.querySelector<HTMLElement>("#hero > div[aria-hidden]");
       if (margin) {
         margin.style.transformOrigin = "top";
         margin.animate([{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], { duration: 1700, delay: 250, easing: EASE, fill: "backwards" });
       }
-    }
-
-    // hero parallax
-    if (!reduce) {
-      const hero = document.getElementById("hero");
-      const badge = hero?.querySelector<HTMLElement>(".sb-float") ?? null;
-      let pr = 0;
-      const par = () => {
-        pr = 0;
-        const y = window.scrollY;
-        if (y > window.innerHeight * 1.3) return;
-        if (hero) hero.style.backgroundPositionY = `${(-y * 0.22).toFixed(1)}px`;
-        if (badge) badge.style.translate = `0 ${(-y * 0.08).toFixed(1)}px`;
-      };
-      const onS = () => {
-        if (!pr) pr = requestAnimationFrame(par);
-      };
-      window.addEventListener("scroll", onS, { passive: true });
-      cleanups.push(() => {
-        window.removeEventListener("scroll", onS);
-        cancelAnimationFrame(pr);
-      });
     }
 
     // pointer: card glow + magnetic buttons
