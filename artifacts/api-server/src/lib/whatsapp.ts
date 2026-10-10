@@ -1,6 +1,8 @@
 import {
   templateName,
   templateLanguageCode,
+  findTemplate,
+  TEMPLATE_MAX_PARAMS,
   type TemplateKind,
   type TemplateLang,
 } from "./templateSettings";
@@ -114,10 +116,10 @@ function cleanTemplateParam(value: unknown): string {
 }
 
 /**
- * Meta error 132001 = "template does not exist in this language". It is the
- * error you get when the language code we send ("rw") is not the code the
- * template is registered under ("rw_RW"), or the other way round. Nothing is
- * sent when this happens, so it is safe to retry once with the other code.
+ * Meta error 132001 = "template does not exist in this language". It means the
+ * language code we sent is not the one the template is registered under.
+ * Nothing is sent when this happens, so it is safe to retry once with the
+ * sibling code. Safety net only: templateSettings.ts should already be right.
  */
 const ALTERNATE_LANGUAGE_CODE: Record<string, string> = {
   rw: "rw_RW",
@@ -126,8 +128,17 @@ const ALTERNATE_LANGUAGE_CODE: Record<string, string> = {
   en_US: "en",
 };
 
-/** Remembers which language code actually worked, so later sends skip the failed try. */
+/** Remembers which language code actually worked for a template (by name). */
 const workingLanguageCode = new Map<string, string>();
+
+/** Remembers how many variables Meta said a template takes (by name). */
+const learnedMaxParams = new Map<string, number>();
+
+/** Reads N out of "...does not match the expected number of params (N)". */
+function expectedParamCount(body: string): number | null {
+  const m = body.match(/expected number of params \((\d+)\)/);
+  return m ? parseInt(m[1] as string, 10) : null;
+}
 
 interface TemplateAttempt {
   ok: boolean;
@@ -209,18 +220,17 @@ async function postTemplate(
  * Required for messaging customers outside the 24h customer service window
  * (i.e. anyone who hasn't messaged the bot recently, or ever).
  *
- * `params` are inserted in order into the {{1}}, {{2}}, {{3}}... placeholders
- * in the template body, as configured in WhatsApp Manager. The number of
- * params MUST equal the number of placeholders in that template, or Meta
- * rejects it with error 132000.
+ * For any template listed in templateSettings.ts, THAT FILE decides the
+ * language code and the maximum number of variables, whatever the caller
+ * passes in. (Callers that still pass their own language code, like the
+ * receipt and Monday messages, are corrected here, e.g. "receipt" is
+ * registered as English even though its text is Kinyarwanda.)
+ * Variables beyond the configured count are dropped from the END of the list.
  *
- * Quick-reply buttons (I've paid / My balance / How to pay / Stop) are part of
- * the approved template itself and need nothing extra here.
- *
- * `languageCode` should match the language the template is registered under
- * in WhatsApp Manager. If Meta answers 132001 (wrong language code), this
- * retries once with the sibling code (rw <-> rw_RW, en <-> en_US) and
- * remembers whichever one worked.
+ * Fallbacks, each logged so you can fix the settings file:
+ *   132001 (wrong language code)  -> retry once with the sibling code
+ *   132000 (too many variables)   -> read Meta's expected count, trim, retry once
+ * Neither can send twice: Meta sends nothing when it answers with those errors.
  *
  * Returns the WhatsApp message id (wamid). The sent / delivered / read
  * status callbacks that arrive on the webhook carry this same id, so store it
@@ -232,31 +242,65 @@ export async function sendWhatsAppTemplateMessage(
   languageCode: string,
   params: string[],
 ): Promise<string> {
-  const cacheKey = `${templateName}|${languageCode}`;
-  const firstCode = workingLanguageCode.get(cacheKey) ?? languageCode;
+  const known = findTemplate(templateName);
 
-  let attempt = await postTemplate(to, templateName, firstCode, params);
-  let usedCode = firstCode;
+  let code =
+    workingLanguageCode.get(templateName) ??
+    (known ? templateLanguageCode(known.kind, known.lang) : languageCode);
 
-  if (!attempt.ok && attempt.metaCode === 132001) {
-    const alt = ALTERNATE_LANGUAGE_CODE[firstCode];
-    if (alt) {
+  let vars = params;
+  const configuredMax = known ? TEMPLATE_MAX_PARAMS[known.kind][known.lang] : null;
+  const max = learnedMaxParams.get(templateName) ?? configuredMax;
+  if (max !== null && max !== undefined && vars.length > max) {
+    vars = vars.slice(0, max);
+  }
+
+  let attempt = await postTemplate(to, templateName, code, vars);
+  let triedLanguage = false;
+  let triedTrim = false;
+
+  while (!attempt.ok) {
+    if (attempt.metaCode === 132001 && !triedLanguage && ALTERNATE_LANGUAGE_CODE[code]) {
+      triedLanguage = true;
+      const alt = ALTERNATE_LANGUAGE_CODE[code] as string;
       console.warn(
-        `[template] "${templateName}" has no "${firstCode}" version (132001). Retrying with "${alt}".`,
+        `[template] "${templateName}" has no "${code}" version (132001). Retrying with "${alt}".`,
       );
-      const retry = await postTemplate(to, templateName, alt, params);
+      const retry = await postTemplate(to, templateName, alt, vars);
       // If the retry also says 132001, the first error is the more useful one to report.
-      if (retry.ok || retry.metaCode !== 132001) {
+      if (!retry.ok && retry.metaCode === 132001) break;
+      code = alt;
+      attempt = retry;
+      if (retry.ok) {
+        workingLanguageCode.set(templateName, alt);
+        console.warn(
+          `[template] "${templateName}" worked with language code "${alt}". Put that code in templateSettings.ts.`,
+        );
+      }
+      continue;
+    }
+
+    if (attempt.metaCode === 132000 && !triedTrim) {
+      triedTrim = true;
+      const expected = expectedParamCount(attempt.body);
+      if (expected !== null && expected > 0 && expected < vars.length) {
+        console.warn(
+          `[template] "${templateName}" takes ${expected} variables, not ${vars.length} (132000). Dropping the last ${vars.length - expected} and retrying.`,
+        );
+        vars = vars.slice(0, expected);
+        const retry = await postTemplate(to, templateName, code, vars);
         attempt = retry;
-        usedCode = alt;
         if (retry.ok) {
-          workingLanguageCode.set(cacheKey, alt);
+          learnedMaxParams.set(templateName, expected);
           console.warn(
-            `[template] "${templateName}" worked with language code "${alt}". Set that code in templateSettings.ts so it is right from the first try.`,
+            `[template] "${templateName}" worked with ${expected} variables. Set that number in TEMPLATE_MAX_PARAMS in templateSettings.ts.`,
           );
         }
+        continue;
       }
     }
+
+    break;
   }
 
   if (!attempt.ok) {
@@ -264,10 +308,10 @@ export async function sendWhatsAppTemplateMessage(
     // error code in this line (132000, 132001, 132018, 131042, 131047...)
     // tells you exactly what is wrong.
     console.error(
-      `[template] "${templateName}" (${usedCode}) to ${to} failed, ${attempt.status}, ${params.length} params: ${attempt.body}`,
+      `[template] "${templateName}" (${code}) to ${to} failed, ${attempt.status}, ${vars.length} params: ${attempt.body}`,
     );
     throw new Error(
-      `WhatsApp template "${templateName}" (${usedCode}) failed, ${attempt.status}: ${attempt.body}`,
+      `WhatsApp template "${templateName}" (${code}) failed, ${attempt.status}: ${attempt.body}`,
     );
   }
 
