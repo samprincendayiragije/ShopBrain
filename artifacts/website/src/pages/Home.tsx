@@ -16,6 +16,11 @@ const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // digits only, no + or leading
 // ⚠️ CHECK THIS NUMBER (the old file linked and displayed two different ones).
 const SUPPORT_NUMBER = "250799627713";
 
+// Master switches for the heavy animations. Set one to false to turn it off.
+const ENABLE_INTRO = true; // opening phone animation
+const ENABLE_HERO_3D = true; // pinned 3D phone hero (false = your classic hero)
+const ENABLE_NOTEBOOK_3D = false; // notebook vs Shop Brain scroll scene
+
 const INSTAGRAM_URL = "https://www.instagram.com/shopbrain_kigali";
 const CONTACT_EMAIL = "Ndayiragijesamuelprince@gmail.com"; // tip: a hello@yourdomain address looks more trustworthy
 const CONTACT_ADDRESS = "Kigese, Ruyenzi, Southern 0000, Rwanda";
@@ -1164,7 +1169,7 @@ function FeatureExplorer({ t }: { t: Copy }) {
 
 export default function Home() {
   const [showSticky, setShowSticky] = useState(false);
-  const [introDone, setIntroDone] = useState(false); // the hero badge counts up once the intro has opened
+  const [introDone, setIntroDone] = useState(!ENABLE_INTRO); // the hero badge counts up once the intro has opened
   const barRef = useRef<HTMLDivElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [lang, setLang] = useState<Lang>(() => {
@@ -1331,7 +1336,7 @@ export default function Home() {
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
-      <Intro lang={lang} onDone={() => setIntroDone(true)} />
+      {ENABLE_INTRO && <Intro lang={lang} onDone={() => setIntroDone(true)} />}
       <style>{CSS}</style>
 
       {/* Header */}
@@ -1382,7 +1387,11 @@ export default function Home() {
 
       <main className="flex-1">
         {/* Hero: pinned 3D phone. Falls back to the classic hero on weak devices. */}
-        <HeroScene lang={lang} msgs={t.chat.msgs} intro={heroIntro} badge={introDone ? heroBadge : null} outro={heroOutro} fallback={classicHero} />
+        {ENABLE_HERO_3D ? (
+          <HeroScene lang={lang} msgs={t.chat.msgs} intro={heroIntro} badge={introDone ? heroBadge : null} outro={heroOutro} fallback={classicHero} />
+        ) : (
+          classicHero
+        )}
 
         {/* Problem: notebook vs Shop Brain */}
         <section className="py-20 md:py-28 px-4 md:px-6">
@@ -1424,7 +1433,7 @@ export default function Home() {
         </section>
 
         {/* Notebook vs Shop Brain: pinned scroll scene */}
-        <PhoneScene lang={lang} msgs={t.chat.msgs} notebook={t.problem.notebook} note={t.problem.notebookNote} />
+        {ENABLE_NOTEBOOK_3D && <PhoneScene lang={lang} msgs={t.chat.msgs} notebook={t.problem.notebook} note={t.problem.notebookNote} />}
 
         {/* How it works: a real sequence, so numbered and revealed in order */}
         <section id="how-it-works" className="py-20 md:py-28 px-4 md:px-6 bg-muted/50 border-y border-border">
