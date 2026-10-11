@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CSS, Reveal, CountUp, PhoneChat, Tilt, ScrollLine, SplitHeading, useMotion } from "./motion";
+import PhoneScene from "./PhoneScene";
 import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -1392,7 +1393,7 @@ export default function Home() {
             </ol>
           </div>
         </section>
-
+        <PhoneScene lang={lang} msgs={t.chat.msgs} /> 
         {/* Features: tabs + cards that open to explain each one */}
         <section id="features" className="py-20 md:py-28 px-4 md:px-6">
           <div className="container mx-auto max-w-6xl">

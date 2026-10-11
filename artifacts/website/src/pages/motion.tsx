@@ -84,7 +84,7 @@ export function wake() {
   }
 }
 
-function subscribe(t: Tick) {
+export function subscribe(t: Tick) {
   if (!ticks.size) {
     sy = lastY = window.scrollY;
     vel = 0;
@@ -836,6 +836,8 @@ export function PhoneChat({ msgs }: { msgs: { from: string; text: string }[] }) 
     prevShown.current = shown;
   }, [shown, typing, msgs]);
 
+  
+  
   return (
     <div ref={root} className="mx-auto w-full max-w-[290px] rounded-[2.5rem] border-[10px] border-[#0b1020] bg-[#0b1020] shadow-2xl rotate-1">
       <div className="rounded-[1.8rem] overflow-hidden bg-[#0b141a]">
