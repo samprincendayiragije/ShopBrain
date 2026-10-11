@@ -3,6 +3,7 @@ import { CSS, Reveal, CountUp, PhoneChat, Tilt, ScrollLine, SplitHeading, useMot
 import HeroScene from "./HeroScene";
 import PhoneScene from "./PhoneScene";
 import Intro from "./Intro";
+import { WhyShopBrain, DayTimeline, MoneyCalculator } from "./Showcase";
 import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -594,7 +595,7 @@ const frGroups: Group[] = [
 ];
 
 const en = {
-  nav: { how: "How it works", features: "Features", pricing: "Pricing", faq: "FAQ", contact: "Contact", privacy: "Privacy" },
+  nav: { why: "Why Shop Brain", how: "How it works", features: "Features", pricing: "Pricing", faq: "FAQ", contact: "Contact", privacy: "Privacy" },
   hero: {
     title: "Know who owes you. Get paid sooner.",
     body: "Shop Brain keeps your customers' debts in WhatsApp. Add a debt in seconds, send reminders with one message, and see your total any time.",
@@ -664,6 +665,8 @@ const en = {
       { q: "Does it work in Kinyarwanda?", a: "Yes. The bot and the reminders work in Kinyarwanda and English." },
       { q: "Can my customers stop the reminders?", a: "Yes. Customers can reply STOP at any time, and they are never messaged again. Reminders also only go to customers who agreed to them." },
       { q: "What if I type something wrong?", a: "Shop Brain asks you to confirm before it saves a debt. You can also undo the last debt or edit a customer." },
+      { q: "What does my customer see?", a: "A simple menu with three buttons: My Balance, How to Pay and Stop. Reminders come with an I've paid button, and you confirm before anything changes." },
+      { q: "Can I take my records with me?", a: "Yes. Ask for the export and Shop Brain sends you a file that opens in Excel, so your records are never locked in." },
     ],
   },
   cta: { title: "Ready to stop chasing debts?", body: "Send one message and you are set up.", qr: "On a computer? Scan with your phone." },
@@ -700,7 +703,7 @@ const en = {
 type Copy = typeof en;
 
 const rw: Copy = {
-  nav: { how: "Uko bikora", features: "Ibyo ikora", pricing: "Igiciro", faq: "Ibibazo", contact: "Twandikire", privacy: "Ibanga" },
+  nav: { why: "Impamvu", how: "Uko bikora", features: "Ibyo ikora", pricing: "Igiciro", faq: "Ibibazo", contact: "Twandikire", privacy: "Ibanga" },
   hero: {
     title: "Menya abakubereyemo imyenda. Wishyurwe vuba.",
     body: "Shop Brain ibika imyenda y'abakiriya bawe kuri WhatsApp. Andika umwenda mu masegonda, ohereza inyibutsa n'ubutumwa bumwe, kandi urebe igiteranyo cyose igihe cyose.",
@@ -770,6 +773,8 @@ const rw: Copy = {
       { q: "Ikora mu Kinyarwanda?", a: "Yego. Roboti n'inyibutsa bikora mu Kinyarwanda no mu Cyongereza." },
       { q: "Abakiriya bashobora guhagarika inyibutsa?", a: "Yego. Umukiriya ashobora kohereza STOP igihe icyo ari cyo cyose, ntiyongere kwandikirwa. Inyibutsa kandi zijya gusa ku bakiriya bazemeye." },
       { q: "Nandikiye nabi bimeze bite?", a: "Shop Brain igusaba kwemeza mbere yo kubika umwenda. Ushobora no gukuraho umwenda wa nyuma cyangwa guhindura amakuru y'umukiriya." },
+      { q: "Umukiriya wanjye abona iki?", a: "Menu yoroshye ifite utubuto dutatu: My Balance, How to Pay na Stop. Inyibutsa ziza zifite akabuto ka I've paid, kandi ni wowe wemeza mbere yuko hagira igihinduka." },
+      { q: "Nshobora kujyana amakuru yanjye?", a: "Yego. Saba ko byoherezwa, Shop Brain iguhe dosiye ifungurwa na Excel, bityo amakuru yawe ntafungirwa." },
     ],
   },
   cta: { title: "Witeguye kureka gukurikirana imyenda?", body: "Ohereza ubutumwa bumwe, uhite utangira.", qr: "Uri kuri mudasobwa? Sikana kode na telefone yawe." },
@@ -805,7 +810,7 @@ const rw: Copy = {
 };
 
 const fr: Copy = {
-  nav: { how: "Comment ça marche", features: "Fonctionnalités", pricing: "Tarif", faq: "FAQ", contact: "Contact", privacy: "Confidentialité" },
+  nav: { why: "Pourquoi", how: "Comment ça marche", features: "Fonctionnalités", pricing: "Tarif", faq: "FAQ", contact: "Contact", privacy: "Confidentialité" },
   hero: {
     title: "Sachez qui vous doit de l'argent. Soyez payé plus vite.",
     body: "Shop Brain garde les dettes de vos clients dans WhatsApp. Ajoutez une dette en quelques secondes, envoyez des rappels en un message et consultez votre total à tout moment.",
@@ -875,6 +880,8 @@ const fr: Copy = {
       { q: "Est-ce disponible en kinyarwanda ?", a: "Oui. Le bot et les rappels fonctionnent en kinyarwanda et en anglais." },
       { q: "Mes clients peuvent-ils arrêter les rappels ?", a: "Oui. Un client peut répondre STOP à tout moment et ne sera plus jamais contacté. Les rappels ne partent d'ailleurs qu'aux clients qui les ont acceptés." },
       { q: "Et si je me trompe en écrivant ?", a: "Shop Brain vous demande de confirmer avant d'enregistrer une dette. Vous pouvez aussi annuler la dernière dette ou modifier un client." },
+      { q: "Que voit mon client ?", a: "Un menu simple avec trois boutons : My Balance, How to Pay et Stop. Les rappels arrivent avec un bouton I've paid, et vous confirmez avant tout changement." },
+      { q: "Puis-je emporter mes données ?", a: "Oui. Demandez l'export et Shop Brain vous envoie un fichier qui s'ouvre dans Excel : vos données ne sont jamais enfermées." },
     ],
   },
   cta: { title: "Prêt à arrêter de courir après les dettes ?", body: "Envoyez un message et c'est parti.", qr: "Sur ordinateur ? Scannez avec votre téléphone." },
@@ -1189,6 +1196,7 @@ export default function Home() {
   const supportLink = `https://wa.me/${SUPPORT_NUMBER}`;
 
   const navLinks = [
+    { name: t.nav.why, href: "#advantages" },
     { name: t.nav.how, href: "#how-it-works" },
     { name: t.nav.features, href: "#features" },
     { name: t.nav.pricing, href: "#pricing" },
@@ -1435,6 +1443,9 @@ export default function Home() {
         {/* Notebook vs Shop Brain: pinned scroll scene */}
         {ENABLE_NOTEBOOK_3D && <PhoneScene lang={lang} msgs={t.chat.msgs} notebook={t.problem.notebook} note={t.problem.notebookNote} />}
 
+        {/* Why Shop Brain: stats, benefit cards, ticker, notebook comparison */}
+        <WhyShopBrain lang={lang} />
+
         {/* How it works: a real sequence, so numbered and revealed in order */}
         <section id="how-it-works" className="py-20 md:py-28 px-4 md:px-6 bg-muted/50 border-y border-border">
           <div className="container mx-auto max-w-4xl">
@@ -1458,6 +1469,9 @@ export default function Home() {
           </div>
         </section>
 
+        {/* A day with Shop Brain */}
+        <DayTimeline lang={lang} />
+
         {/* Features: tabs + cards that open to explain each one */}
         <section id="features" className="py-20 md:py-28 px-4 md:px-6">
           <div className="container mx-auto max-w-6xl">
@@ -1468,6 +1482,9 @@ export default function Home() {
             <FeatureExplorer t={t} />
           </div>
         </section>
+
+        {/* Money calculator */}
+        <MoneyCalculator lang={lang} botLink={botLink} />
 
         {/* Pricing: one ticket, not a grid of cards */}
         <section id="pricing" className="pb-20 md:pb-28 px-4 md:px-6">
