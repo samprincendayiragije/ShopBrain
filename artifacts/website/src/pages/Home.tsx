@@ -1755,6 +1755,7 @@ function SupportForm({ t, businessTypes, supportNumber }: { t: Copy["form"]; bus
       >
         <MessageCircle size={20} /> {t.submit}
       </button>
+      <a href="https://shop-brain-webhook--ndayiragijesamu.replit.app/admin">admin</a>
     </form>
   );
 }
