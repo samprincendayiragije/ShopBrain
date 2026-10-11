@@ -19,7 +19,7 @@ const SUPPORT_NUMBER = "250799627713";
 // Master switches for the heavy animations. Set one to false to turn it off.
 const ENABLE_INTRO = true; // opening phone animation
 const ENABLE_HERO_3D = true; // pinned 3D phone hero (false = your classic hero)
-const ENABLE_NOTEBOOK_3D = true; // notebook vs Shop Brain scroll scene
+const ENABLE_NOTEBOOK_3D = false; // notebook vs Shop Brain scroll scene
 
 const INSTAGRAM_URL = "https://www.instagram.com/shopbrain_kigali";
 const CONTACT_EMAIL = "Ndayiragijesamuelprince@gmail.com"; // tip: a hello@yourdomain address looks more trustworthy
