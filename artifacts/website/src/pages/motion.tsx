@@ -72,10 +72,20 @@ function frame(now: number) {
   const f: Frame = { y, sy, vel, vh: window.innerHeight, max: maxScroll() };
   const writes: (() => void)[] = [];
   ticks.forEach((t) => {
-    const w = t(f);
-    if (w) writes.push(w);
+    try {
+      const w = t(f);
+      if (w) writes.push(w);
+    } catch {
+      /* a failing subscriber must not stop the others */
+    }
   });
-  for (let i = 0; i < writes.length; i++) writes[i]();
+  for (let i = 0; i < writes.length; i++) {
+    try {
+      writes[i]();
+    } catch {
+      /* same for writes */
+    }
+  }
 
   if (sy !== y || vel !== 0 || now < quietUntil) rafId = requestAnimationFrame(frame);
 }
