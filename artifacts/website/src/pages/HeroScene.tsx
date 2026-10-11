@@ -1,299 +1,248 @@
-import React, { useEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
-import { subscribe } from "./motion";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { MessageCircle } from "lucide-react";
 
-// The hero IS the 3D scene. Chapter 0 is the usual Shop Brain introduction
-// (headline, body, buttons). Scrolling turns the phone and swaps the text through
-// three more chapters. Pure CSS 3D: no libraries, no images, no video.
-//
-// Weak devices, Data Saver, 2G and reduced-motion visitors get `fallback`
-// (your current hero, unchanged). If a phone turns out to be slow while
-// scrolling, the 3D turning freezes but the chapters keep working, so the page
-// layout never jumps.
+// Opening animation (pure CSS, no assets):
+//   0.0s  a phone rolls in from the left and settles
+//   1.4s  the screen lights up on a home screen
+//   1.9s  the chat icon is tapped, the app opens
+//   2.6s  the Shop Brain chat appears, two messages pop in
+//   3.9s  "Grow with ShopBrain" is written, letter by letter
+//   5.9s  the screen closes like an iris and the page opens
+// Page animations underneath are held until the iris starts, so visitors see
+// the hero play as the page opens. Skipped for reduced-motion visitors.
 
+const INK = "#1B2559";
 const GREEN = "#0F7A3F";
+const SUN = "#FFC933";
 const DISPLAY = { fontFamily: "'Bricolage Grotesque', system-ui, sans-serif" } as const;
 
-type Lang = "rw" | "en" | "fr";
-type Msg = { from: string; text: string };
+const PLAY_MS = 5900; // when the iris starts closing
+const EXIT_MS = 900; // iris duration
+const REMEMBER = false; // true = play once per browser session, false = every visit
+const KEY = "sb-intro-seen";
 
-const CAPS: Record<Lang, { t: string; d: string }[]> = {
-  en: [
-    { t: "One message, one debt", d: "Name, item, amount. Shop Brain confirms before it saves." },
-    { t: "Reminders go out for you", d: "Only to customers who agreed, and never after STOP." },
-    { t: "Paid. Receipt sent.", d: "Your balance updates and the customer gets proof." },
-  ],
-  rw: [
-    { t: "Ubutumwa bumwe, umwenda umwe", d: "Izina, igicuruzwa, amafaranga. Shop Brain irabyemeza mbere yo kubika." },
-    { t: "Inyibutsa zijya ku bwawe", d: "Ku bemeye gusa, kandi nta na rimwe nyuma ya STOP." },
-    { t: "Yishyuye. Inyemezabwishyu yoherejwe.", d: "Konti yawe ivugururwa, umukiriya agahabwa gihamya." },
-  ],
-  fr: [
-    { t: "Un message, une dette", d: "Nom, article, montant. Shop Brain confirme avant d'enregistrer." },
-    { t: "Les rappels partent seuls", d: "Seulement aux clients qui ont accepté, jamais après STOP." },
-    { t: "Payé. Reçu envoyé.", d: "Votre solde se met à jour et le client a sa preuve." },
-  ],
-};
+const SKIP: Record<string, string> = { en: "Skip", rw: "Simbuka", fr: "Passer" };
 
-// chat bubbles visible per chapter (chapter 0 = introduction)
-const SHOWN = [1, 3, 4, 5];
-
-const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
-const sm = (t: number) => t * t * (3 - 2 * t);
-
-function curve(keys: [number, number][], p: number) {
-  if (p <= keys[0][0]) return keys[0][1];
-  for (let i = 1; i < keys.length; i++) {
-    const [p1, v1] = keys[i];
-    if (p <= p1) {
-      const [p0, v0] = keys[i - 1];
-      return v0 + (v1 - v0) * sm((p - p0) / (p1 - p0));
+function shouldPlay() {
+  if (typeof window === "undefined") return false;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
+  if (REMEMBER) {
+    try {
+      if (sessionStorage.getItem(KEY)) return false;
+    } catch {
+      /* ignore */
     }
   }
-  return keys[keys.length - 1][1];
+  return true;
 }
 
-// full 360° turn between chapter 1 and chapter 2 (352 = -8, 372 = 12, 360 = 0)
-const ROT_Y: [number, number][] = [[0, -18], [0.18, 12], [0.4, -8], [0.62, 352], [0.86, 372], [1, 360]];
-const ROT_X: [number, number][] = [[0, 6], [0.4, -4], [0.62, 8], [1, 0]];
-const ROT_Z: [number, number][] = [[0, 1.5], [0.5, -2], [1, 0]];
-const SCALE: [number, number][] = [[0, 0.96], [0.12, 1], [0.88, 1], [1, 0.96]];
+const CSS = `
+html.sb-intro .sb-rise, html.sb-intro .sb-word, html.sb-intro .sb-pop{animation-play-state:paused !important}
 
-function isWeakDevice() {
-  if (typeof window === "undefined") return true;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
-  const n = navigator as any;
-  const c = n.connection;
-  if (c?.saveData) return true;
-  if (c?.effectiveType && /(^|-)2g$/.test(c.effectiveType)) return true;
-  if (typeof n.deviceMemory === "number" && n.deviceMemory <= 2) return true;
-  if (typeof n.hardwareConcurrency === "number" && n.hardwareConcurrency <= 2) return true;
-  return false;
+.sbi-root{background:radial-gradient(120% 90% at 50% 40%, #243066 0%, ${INK} 45%, #0F1530 100%)}
+.sbi-exit{animation:sbi-iris ${EXIT_MS}ms cubic-bezier(.7,0,.2,1) forwards;pointer-events:none}
+@keyframes sbi-iris{from{clip-path:circle(150% at 50% 45%)}to{clip-path:circle(0% at 50% 45%)}}
+
+@keyframes sbi-roll{
+  0%{transform:translateX(-120vw) rotate(-560deg)}
+  62%{transform:translateX(0) rotate(14deg)}
+  80%{transform:translateX(0) rotate(-6deg)}
+  100%{transform:translateX(0) rotate(0)}
 }
+.sbi-roll{animation:sbi-roll 1.4s cubic-bezier(.2,.7,.3,1) both}
 
-const SCENE_CSS = `
-.sb3d-msg{opacity:0;transform:translateY(.8em) scale(.92);transition:opacity .45s ease,transform .6s cubic-bezier(.34,1.56,.64,1)}
-.sb3d-msg[data-on="1"]{opacity:1;transform:none}
-.sb3d-cap{opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .7s cubic-bezier(.16,1,.3,1);pointer-events:none}
-.sb3d-cap[data-on="1"]{opacity:1;transform:none;pointer-events:auto}
-.sb3d-dot{height:4px;width:22px;border-radius:2px;background:rgba(127,127,127,.35);transition:background .3s,width .4s cubic-bezier(.16,1,.3,1)}
-.sb3d-dot[data-on="1"]{background:${GREEN};width:44px}
-@keyframes sb3d-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
-.sb3d-hint{opacity:0;transition:opacity .4s ease;pointer-events:none}
-.sb3d-hint[data-on="1"]{opacity:.55}
-.sb3d-hint svg{animation:sb3d-bob 1.6s ease-in-out infinite}
+@keyframes sbi-fade{to{opacity:1}}
+@keyframes sbi-scale{from{transform:translateX(-50%) scale(0)}to{transform:translateX(-50%) scale(1)}}
+.sbi-shadow{position:absolute;left:50%;bottom:-1.4em;width:80%;height:1.4em;border-radius:50%;background:rgba(0,0,0,.45);filter:blur(10px);transform:translateX(-50%) scale(0);animation:sbi-scale .5s ease-out 1.1s forwards}
+.sbi-glow{position:absolute;left:50%;top:50%;width:150%;height:110%;transform:translate(-50%,-50%);opacity:0;pointer-events:none;background:radial-gradient(circle, rgba(15,122,63,.5), transparent 62%);animation:sbi-fade .8s ease 1.4s forwards}
+
+.sbi-screen{position:relative;width:100%;height:100%;overflow:hidden;border-radius:1.7em;background:#05070d}
+
+.sbi-home{position:absolute;inset:0;z-index:1;opacity:0;background:linear-gradient(160deg,#27366d,#101735);animation:sbi-fade .4s ease 1.4s forwards}
+@keyframes sbi-press{0%,100%{transform:scale(1)}50%{transform:scale(.88)}}
+.sbi-press{animation:sbi-press .3s ease 1.85s}
+@keyframes sbi-tap{0%{opacity:.9;transform:scale(.6)}100%{opacity:0;transform:scale(1.7)}}
+.sbi-tap{position:absolute;inset:-.4em;border-radius:1.2em;border:.2em solid rgba(255,255,255,.85);opacity:0;animation:sbi-tap .6s ease-out 1.9s}
+
+.sbi-chat{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;background:#0b141a;opacity:0;animation:sbi-fade .01s linear 2.6s forwards}
+@keyframes sbi-pop{from{opacity:0;transform:translateY(.8em) scale(.9)}to{opacity:1;transform:none}}
+.sbi-m1{opacity:0;animation:sbi-pop .5s cubic-bezier(.34,1.56,.64,1) 3s forwards}
+.sbi-m2{opacity:0;animation:sbi-pop .5s cubic-bezier(.34,1.56,.64,1) 3.4s forwards}
+
+@keyframes sbi-wa{
+  0%{clip-path:circle(0% at 37.5% 90%);opacity:1}
+  40%{clip-path:circle(150% at 37.5% 90%);opacity:1}
+  70%{clip-path:circle(150% at 37.5% 90%);opacity:1}
+  100%{clip-path:circle(150% at 37.5% 90%);opacity:0}
+}
+.sbi-wa{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.8em;background:linear-gradient(160deg,#12924d,${GREEN});animation:sbi-wa 1.1s ease 2.15s both}
+
+@keyframes sbi-ch{from{opacity:0;transform:translateY(.5em);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+.sbi-ch{display:inline-block;opacity:0;animation:sbi-ch .4s cubic-bezier(.16,1,.3,1) forwards}
+
+.sbi-skip{opacity:0;animation:sbi-fade .5s ease 1s forwards}
 `;
 
-export default function HeroScene({
-  lang,
-  msgs,
-  intro,
-  badge,
-  outro,
-  fallback,
-}: {
-  lang: Lang;
-  msgs: Msg[];
-  intro: React.ReactNode; // the usual headline, body, buttons and note
-  badge?: React.ReactNode; // floating "recovered" card
-  outro?: React.ReactNode; // e.g. a WhatsApp button shown in the last chapter
-  fallback: React.ReactNode; // your current hero section
-}) {
-  const [mode] = useState<"3d" | "off">(() => (isWeakDevice() ? "off" : "3d"));
-  const sec = useRef<HTMLElement | null>(null);
-  const phone = useRef<HTMLDivElement | null>(null);
-  const glow = useRef<HTMLDivElement | null>(null);
+export default function Intro({ lang, onDone }: { lang: string; onDone: () => void }) {
+  const [phase, setPhase] = useState<"play" | "exit" | "gone">(() => (shouldPlay() ? "play" : "gone"));
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
+
+  // hold the page's own entrance animations and the scroll until the intro ends
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (phase === "play") {
+      root.classList.add("sb-intro");
+      root.style.overflow = "hidden";
+    } else if (phase === "exit") {
+      root.classList.remove("sb-intro");
+    } else {
+      root.classList.remove("sb-intro");
+      root.style.overflow = "";
+    }
+  }, [phase]);
+
+  useEffect(
+    () => () => {
+      document.documentElement.classList.remove("sb-intro");
+      document.documentElement.style.overflow = "";
+    },
+    []
+  );
 
   useEffect(() => {
-    if (mode !== "3d") return;
-    const root = sec.current;
-    const ph = phone.current;
-    if (!root || !ph) return;
+    if (phase === "gone") {
+      doneRef.current();
+      return;
+    }
+    if (phase !== "play") return;
+    const t = window.setTimeout(() => setPhase("exit"), PLAY_MS);
+    return () => window.clearTimeout(t);
+  }, [phase]);
 
-    const msgEls = Array.from(root.querySelectorAll<HTMLElement>("[data-msg]"));
-    const capEls = Array.from(root.querySelectorAll<HTMLElement>("[data-cap]"));
-    const dotEls = Array.from(root.querySelectorAll<HTMLElement>("[data-dot]"));
-    const hint = root.querySelector<HTMLElement>("[data-hint]");
-
-    let last = -1;
-    let ch = -1;
-    let prevT = 0;
-    let samples = 0;
-    let sum = 0;
-    let slow = false;
-    let frozen = false;
-
-    return subscribe((f) => {
-      // slow-frame check: if scrolling averages under ~25fps, stop the 3D turning
-      const now = performance.now();
-      if (prevT) {
-        const d = now - prevT;
-        if (d < 100) {
-          sum += d;
-          samples++;
-        }
+  useEffect(() => {
+    if (phase !== "exit") return;
+    doneRef.current(); // the hero starts playing as the iris opens
+    if (REMEMBER) {
+      try {
+        sessionStorage.setItem(KEY, "1");
+      } catch {
+        /* ignore */
       }
-      prevT = now;
-      if (samples >= 45) {
-        if (sum / samples > 40) slow = true;
-        samples = 0;
-        sum = 0;
-      }
+    }
+    const t = window.setTimeout(() => setPhase("gone"), EXIT_MS);
+    return () => window.clearTimeout(t);
+  }, [phase]);
 
-      const r = root.getBoundingClientRect();
-      const top = r.top + (f.y - f.sy);
-      const p = clamp(-top / Math.max(1, r.height - f.vh), 0, 1);
-      const nextCh = Math.min(3, Math.floor(p * 4));
-      if (Math.abs(p - last) < 0.0003 && nextCh === ch && (!slow || frozen)) return;
+  if (phase === "gone") return null;
 
-      return () => {
-        if (slow && !frozen) {
-          frozen = true;
-          ph.style.transform = "none";
-          ph.style.willChange = "auto";
-        }
-        last = p;
-        if (!frozen) {
-          ph.style.transform = `rotateX(${curve(ROT_X, p).toFixed(2)}deg) rotateY(${curve(ROT_Y, p).toFixed(2)}deg) rotateZ(${curve(ROT_Z, p).toFixed(2)}deg) scale(${curve(SCALE, p).toFixed(3)})`;
-          if (glow.current) glow.current.style.transform = `translate(-50%,-50%) scale(${(0.8 + 0.5 * Math.sin(p * Math.PI)).toFixed(3)})`;
-        }
-        if (nextCh !== ch) {
-          ch = nextCh;
-          const n = SHOWN[ch];
-          msgEls.forEach((el, i) => (el.dataset.on = i < n ? "1" : "0"));
-          capEls.forEach((el, i) => (el.dataset.on = i === ch ? "1" : "0"));
-          dotEls.forEach((el, i) => (el.dataset.on = i === ch ? "1" : "0"));
-          if (hint) hint.dataset.on = ch === 0 ? "1" : "0";
-        }
-      };
-    });
-  }, [mode]);
+  let idx = 0;
+  const words = ["Grow", "with", "ShopBrain"];
+  const title = words.map((w, wi) => (
+    <React.Fragment key={wi}>
+      <span className="inline-block whitespace-nowrap" style={wi === 2 ? { color: SUN } : undefined}>
+        {w.split("").map((c) => {
+          const i = idx++;
+          return (
+            <span key={i} className="sbi-ch" style={{ animationDelay: `${3900 + i * 60}ms` }}>
+              {c}
+            </span>
+          );
+        })}
+      </span>
+      {wi < 2 ? " " : null}
+    </React.Fragment>
+  ));
 
-  if (mode === "off") return <>{fallback}</>;
-
-  const caps = CAPS[lang];
-  const LAYERS = [-0.4, -0.2, 0, 0.2, 0.4];
+  const dock = [0, 1, 2, 3];
 
   return (
-    <section
-      ref={sec}
-      id="hero"
-      data-pinned
-      className="relative h-[380dvh] bg-[#EEF1FA] dark:bg-[#0F1530] [--rule:#D3DBF0] dark:[--rule:#222B58]"
-      style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, var(--rule) 35px, var(--rule) 36px)" }}
+    <div
+      className={`sbi-root fixed inset-0 z-[100] overflow-hidden flex flex-col items-center justify-center ${phase === "exit" ? "sbi-exit" : ""}`}
+      style={{ ["--w" as any]: "min(46vw, 25dvh, 220px)" }}
     >
-      <style>{SCENE_CSS}</style>
-      <div aria-hidden className="absolute inset-y-0 left-3 md:left-14 w-px bg-red-400/40" />
+      <style>{CSS}</style>
 
-      <div className="sticky top-0 h-[100dvh] overflow-hidden [--w:min(56vw,30dvh)] md:[--w:min(300px,40dvh)]">
-        <div className="mx-auto max-w-6xl h-full px-4 md:px-6 pt-20 md:pt-16 grid grid-rows-[auto_minmax(0,1fr)] md:grid-rows-1 md:grid-cols-[1.15fr_0.85fr] gap-3 md:gap-14 items-start md:items-center">
-          {/* text: introduction first, then one caption per chapter */}
-          <div className="md:pl-10">
-            <div className="grid">
-              <div data-cap data-on="1" className="sb3d-cap" style={{ gridArea: "1 / 1" }}>
-                {intro}
-              </div>
-              {caps.map((c, i) => (
-                <div key={i} data-cap data-on="0" className="sb3d-cap" style={{ gridArea: "1 / 1" }}>
-                  <p className="text-sm font-bold tracking-widest mb-2" style={{ color: GREEN }}>
-                    0{i + 1} / 0{caps.length}
-                  </p>
-                  <p role="heading" aria-level={2} className="text-3xl md:text-5xl font-extrabold leading-tight tracking-tight mb-3" style={DISPLAY}>
-                    {c.t}
-                  </p>
-                  <p className="text-base md:text-xl text-foreground/75 leading-relaxed max-w-md">{c.d}</p>
-                  {i === caps.length - 1 && outro}
+      <button
+        onClick={() => setPhase("exit")}
+        className="sbi-skip absolute top-4 right-4 z-10 px-4 py-2 rounded-full text-sm font-semibold text-white/80 border border-white/25 hover:bg-white/10 transition-colors"
+      >
+        {SKIP[lang] ?? SKIP.en}
+      </button>
+
+      <div className="relative" style={{ width: "var(--w)", height: "calc(var(--w) * 2)" }}>
+        <div className="sbi-glow" />
+        <div className="sbi-roll w-full h-full">
+          <div
+            className="relative w-full h-full"
+            style={{ fontSize: "calc(var(--w) / 19)", borderRadius: "2.2em", background: "#0b1020", padding: "0.55em", boxShadow: "0 2em 4em rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.1)" }}
+          >
+            <div className="sbi-screen">
+              {/* home screen */}
+              <div className="sbi-home">
+                <div className="absolute left-0 right-0 text-center text-white/80 font-semibold" style={{ top: "1.4em", fontSize: "0.9em" }}>
+                  9:41
                 </div>
-              ))}
-            </div>
-            <div className="hidden md:flex gap-2 mt-8" aria-hidden>
-              {[0, 1, 2, 3].map((i) => (
-                <span key={i} data-dot data-on={i === 0 ? "1" : "0"} className="sb3d-dot" />
-              ))}
-            </div>
-          </div>
-
-          {/* phone: top-aligned on mobile (bottom gets cropped), centred on desktop */}
-          <div className="h-full">
-            <div className="sb-rise relative h-full flex items-start md:items-center justify-center" style={{ animationDelay: "350ms" }}>
-              <div className="relative" style={{ perspective: "1100px", width: "var(--w)", height: "calc(var(--w) * 2)" }} aria-hidden>
-                <div
-                  ref={glow}
-                  className="absolute left-1/2 top-1/2 rounded-full pointer-events-none"
-                  style={{
-                    width: "calc(var(--w) * 2.2)",
-                    height: "calc(var(--w) * 2.2)",
-                    transform: "translate(-50%,-50%)",
-                    background: "radial-gradient(circle, rgba(15,122,63,.28), transparent 62%)",
-                  }}
-                />
-                <div
-                  ref={phone}
-                  className="relative w-full h-full"
-                  style={{
-                    fontSize: "calc(var(--w) / 19)",
-                    transformStyle: "preserve-3d",
-                    willChange: "transform",
-                    transform: "rotateX(6deg) rotateY(-18deg) rotateZ(1.5deg) scale(.96)",
-                  }}
-                >
-                  {/* body thickness: stacked rounded slabs */}
-                  {LAYERS.map((z) => (
-                    <div key={z} className="absolute inset-0" style={{ transform: `translateZ(${z}em)`, borderRadius: "2.2em", background: "#0b1020", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.08)" }} />
+                <div className="absolute left-0 right-0 grid grid-cols-4" style={{ top: "4em", padding: "0 0.9em", gap: "1.1em 0.4em" }}>
+                  {Array.from({ length: 12 }).map((_, i) => (
+                    <div key={i} className="mx-auto" style={{ width: "2.8em", height: "2.8em", borderRadius: "0.8em", background: ["#7c8cc8", "#c89a7c", "#7cc8a3", "#c87c9b"][i % 4], opacity: 0.45 }} />
                   ))}
+                </div>
+                <div className="absolute left-0 right-0 flex justify-around" style={{ bottom: "1.2em" }}>
+                  {dock.map((i) =>
+                    i === 1 ? (
+                      <div key={i} className="relative sbi-press" style={{ width: "3.2em", height: "3.2em" }}>
+                        <div className="w-full h-full flex items-center justify-center text-white" style={{ borderRadius: "0.9em", background: `linear-gradient(160deg,#12924d,${GREEN})` }}>
+                          <MessageCircle size="1.9em" strokeWidth={2.4} />
+                        </div>
+                        <span className="sbi-tap" />
+                      </div>
+                    ) : (
+                      <div key={i} style={{ width: "3.2em", height: "3.2em", borderRadius: "0.9em", background: "rgba(255,255,255,.28)" }} />
+                    )
+                  )}
+                </div>
+              </div>
 
-                  {/* back */}
-                  <div
-                    className="absolute inset-0 flex items-center justify-center"
-                    style={{ transform: "rotateY(180deg) translateZ(0.5em)", backfaceVisibility: "hidden", borderRadius: "2.2em", background: `linear-gradient(160deg, ${GREEN}, #0b3d22)` }}
-                  >
-                    <span className="font-extrabold text-white/90" style={{ ...DISPLAY, fontSize: "2.4em" }}>
-                      SB
-                    </span>
-                    <span className="absolute rounded-full bg-black/40" style={{ top: "1.2em", left: "1.2em", width: "3.4em", height: "3.4em" }} />
+              {/* chat */}
+              <div className="sbi-chat text-white">
+                <div className="flex items-center bg-[#1f2c34]" style={{ gap: "0.7em", padding: "1.6em 1em 0.8em" }}>
+                  <div className="rounded-full flex items-center justify-center font-bold" style={{ width: "2.4em", height: "2.4em", fontSize: "0.9em", background: GREEN }}>
+                    SB
                   </div>
-
-                  {/* front */}
-                  <div className="absolute inset-0" style={{ transform: "translateZ(0.5em)", backfaceVisibility: "hidden", borderRadius: "2.2em", background: "#0b1020", padding: "0.55em" }}>
-                    <div className="relative w-full h-full overflow-hidden flex flex-col bg-[#0b141a] text-white" style={{ borderRadius: "1.7em" }}>
-                      <div className="flex items-center bg-[#1f2c34]" style={{ gap: "0.7em", padding: "1.6em 1em 0.8em" }}>
-                        <div className="rounded-full flex items-center justify-center font-bold" style={{ width: "2.4em", height: "2.4em", fontSize: "0.9em", background: GREEN }}>
-                          SB
-                        </div>
-                        <div className="leading-tight">
-                          <div className="font-semibold" style={{ fontSize: "0.95em" }}>Shop Brain</div>
-                          <div className="text-white/60" style={{ fontSize: "0.7em" }}>online</div>
-                        </div>
-                      </div>
-                      <div className="flex-1 flex flex-col justify-start" style={{ gap: "0.5em", padding: "0.9em 0.8em" }}>
-                        {msgs.map((m, i) => (
-                          <div
-                            key={i}
-                            data-msg
-                            data-on={i < SHOWN[0] ? "1" : "0"}
-                            className={`sb3d-msg leading-snug ${m.from === "me" ? "self-end bg-[#005c4b]" : "self-start bg-[#202c33]"}`}
-                            style={{ maxWidth: "85%", padding: "0.5em 0.75em", fontSize: "0.92em", borderRadius: "0.8em", transformOrigin: m.from === "me" ? "bottom right" : "bottom left" }}
-                          >
-                            {m.text}
-                            {m.from === "me" && <span className="ml-2 text-sky-300" style={{ fontSize: "0.75em" }}>✓✓</span>}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style={{ top: "0.6em", width: "5em", height: "1.1em" }} />
-                      <div className="absolute inset-0 pointer-events-none" style={{ background: "linear-gradient(115deg, rgba(255,255,255,.08), transparent 35%)" }} />
-                    </div>
+                  <div className="leading-tight">
+                    <div className="font-semibold" style={{ fontSize: "0.95em" }}>Shop Brain</div>
+                    <div className="text-white/60" style={{ fontSize: "0.7em" }}>online</div>
+                  </div>
+                </div>
+                <div className="flex-1 flex flex-col" style={{ gap: "0.5em", padding: "0.9em 0.8em" }}>
+                  <div className="sbi-m1 self-end bg-[#005c4b]" style={{ padding: "0.5em 0.75em", fontSize: "0.95em", borderRadius: "0.8em", transformOrigin: "bottom right" }}>
+                    Hi 👋 <span className="ml-1 text-sky-300" style={{ fontSize: "0.75em" }}>✓✓</span>
+                  </div>
+                  <div className="sbi-m2 self-start bg-[#202c33]" style={{ maxWidth: "85%", padding: "0.5em 0.75em", fontSize: "0.92em", borderRadius: "0.8em", transformOrigin: "bottom left" }}>
+                    Welcome to Shop Brain ✅
                   </div>
                 </div>
               </div>
-              {badge && <div className="absolute z-10 left-0 bottom-[14%] md:bottom-[12%]">{badge}</div>}
+
+              {/* app opening splash, grows out of the tapped icon */}
+              <div className="sbi-wa text-white">
+                <div className="rounded-full flex items-center justify-center" style={{ width: "6em", height: "6em", border: "0.25em solid rgba(255,255,255,.9)" }}>
+                  <MessageCircle size="3.2em" strokeWidth={2.2} />
+                </div>
+                <span className="font-semibold" style={{ fontSize: "1em" }}>Shop Brain</span>
+              </div>
+
+              <div className="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style={{ top: "0.6em", width: "5em", height: "1.1em", zIndex: 4 }} />
             </div>
           </div>
         </div>
-
-        <div data-hint data-on="1" className="sb3d-hint absolute bottom-3 left-1/2 -translate-x-1/2 text-foreground" aria-hidden>
-          <ChevronDown size={26} />
-        </div>
+        <div className="sbi-shadow" />
       </div>
-    </section>
+
+      <p className="mt-8 md:mt-10 px-4 text-center text-3xl md:text-5xl font-extrabold tracking-tight text-white" style={DISPLAY}>
+        {title}
+      </p>
+    </div>
   );
 }
