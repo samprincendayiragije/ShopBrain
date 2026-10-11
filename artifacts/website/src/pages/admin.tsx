@@ -3,8 +3,9 @@ import { Link } from "wouter";
 import {
   LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock, Pencil, Trash2, Ban,
   PlayCircle, X, UserPlus, Users, Check, Search, Download, ChevronDown, ChevronLeft, ChevronRight, MoreHorizontal, Copy, Activity,
-  LayoutGrid, List, Eye, EyeOff, Command, Zap, Bell, Inbox, TrendingUp, Calendar,
+  LayoutGrid, List, Eye, EyeOff, Command, Zap, Bell, Inbox, TrendingUp, Calendar, Send,
 } from "lucide-react";
+import { EXTRAS_CSS, extrasPointerMove, burst, RefreshBar, FunnelPanel, InactivePanel, RenewalQueue, NotesBox, HealthPill } from "./admin-extras";
 
 // =============================================================================
 // Shop Brain admin dashboard
@@ -18,8 +19,10 @@ import {
 // Everything below is built on those endpoints: search, filters, sorting,
 // pagination, bulk actions, CSV export, charts, an owner drawer, an attention
 // list, renewal messages, undo, a command palette (Ctrl/Cmd+K), live refresh,
-// an activity log and idle sign-out. All animation is CSS (transform/opacity),
-// with no libraries and no blur filters, and it switches off for reduced motion.
+// an activity log and idle sign-out. Extras (admin-extras.tsx): activation
+// funnel, inactive-shop nudges, renewal queue, private notes, health pill,
+// tilt/confetti/progress animations. All animation is CSS or WAAPI
+// (transform/opacity), and it switches off for reduced motion.
 // =============================================================================
 
 const ADMIN_API_BASE = import.meta.env.VITE_ADMIN_API_URL as string | undefined;
@@ -752,7 +755,7 @@ function Kpi({ i, label: text, value, suffix, hint, icon, color, on, onClick }: 
   const Tag = onClick ? "button" : "div";
   return (
     <Tag
-      className={`adm-card adm-spot adm-kpi adm-in ${on ? "is-on" : ""}`}
+      className={`adm-card adm-spot adm-kpi adm-tilt adm-in ${on ? "is-on" : ""}`}
       style={{ ["--i" as string]: i, ["--c" as string]: color } as React.CSSProperties}
       onClick={onClick}
       type={onClick ? "button" : undefined}
@@ -906,6 +909,9 @@ const OwnerRow = React.memo(function OwnerRow({ o, i, selected, busy, flash, max
       </td>
       <td>
         <StatusBadge bucket={o.bucket} />
+        <div>
+          <HealthPill o={o} />
+        </div>
       </td>
       <td>
         <div className="adm-until">
@@ -1368,8 +1374,12 @@ function OwnerDrawer({
               </div>
             </div>
 
+            <div style={{ ["--i" as string]: 4 } as React.CSSProperties}>
+              <NotesBox phone={owner.phone} />
+            </div>
+
             {customers && customers.length > 0 && (
-              <div style={{ marginTop: 20, ["--i" as string]: 4 } as React.CSSProperties}>
+              <div style={{ marginTop: 20, ["--i" as string]: 5 } as React.CSSProperties}>
                 <p className="adm-sec">Top debtors</p>
                 <div className="adm-bars">
                   {[...customers]
@@ -1638,6 +1648,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   const [drawer, setDrawer] = useState<{ phone: string; tab: "overview" | "customers" } | null>(null);
   const [showActivity, setShowActivity] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>(loadLog);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -1778,6 +1789,10 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     () => enriched.filter((o) => o.isActive && o.daysLeft !== null && o.daysLeft <= 7 && o.daysLeft >= -14).sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0)).slice(0, 6),
     [enriched]
   );
+  const renewalList = useMemo(
+    () => enriched.filter((o) => o.isActive && o.daysLeft !== null && o.daysLeft <= 7 && o.daysLeft >= -30).sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0)),
+    [enriched]
+  );
 
   const visible = useMemo(() => {
     let list = enriched;
@@ -1825,6 +1840,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         try {
           await call(`/admin/owners/${enc(o.phone)}/extend`, { method: "POST", body: { days } }, "Failed to update owner.");
           push({ kind: "success", title: `+${days} days for ${label(o)}`, desc: "Access extended." });
+          burst(window.innerWidth / 2, 120);
           log(`Extended ${label(o)} by ${days} days`);
           markFlash([o.phone]);
           await fetchOwners(true);
@@ -1963,7 +1979,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: key === "name" || key === "expiry" ? 1 : -1 }));
 
   // ---- keyboard shortcuts, auto refresh, idle sign-out
-  const overlayOpen = !!(showAddModal || editingOwner || removing || drawer || showActivity || palette);
+  const overlayOpen = !!(showAddModal || editingOwner || removing || drawer || showActivity || palette || queueOpen);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -2015,6 +2031,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   }, [onLogout]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
+    extrasPointerMove(e);
     const el = (e.target as Element).closest?.(".adm-spot") as HTMLElement | null;
     if (!el) return;
     const r = el.getBoundingClientRect();
@@ -2037,6 +2054,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     () => [
       { id: "add", label: "Add owner", hint: "N", icon: <UserPlus size={16} />, run: () => setShowAddModal(true) },
       { id: "refresh", label: "Refresh data", hint: "R", icon: <RefreshCw size={16} />, run: () => void fetchOwners(true) },
+      { id: "queue", label: "Open renewal queue", icon: <Send size={16} />, run: () => setQueueOpen(true) },
       { id: "csv", label: "Export all shops to CSV", icon: <Download size={16} />, run: () => exportOwners(enriched, "shopbrain-owners") },
       { id: "f-all", label: "Show all shops", icon: <Users size={16} />, run: () => setStatusFilter("all") },
       { id: "f-exp", label: "Show expiring soon", icon: <Clock size={16} />, run: () => setStatusFilter("expiring") },
@@ -2059,8 +2077,9 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
 
   return (
     <div className="adm-root" onPointerMove={onPointerMove}>
-      <style>{ADM_CSS}</style>
+      <style>{ADM_CSS + EXTRAS_CSS}</style>
       <div className="adm-aurora" aria-hidden />
+      <RefreshBar active={loading || refreshing} />
       <div className="adm-wrap">
         {/* header */}
         <div className="adm-head adm-in">
@@ -2077,6 +2096,9 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             </button>
             <button onClick={() => setShowAddModal(true)} className="adm-btn pri" data-testid="button-add-owner">
               <UserPlus size={14} /> Add Owner
+            </button>
+            <button onClick={() => setQueueOpen(true)} className="adm-btn" title="Step through renewal reminders">
+              <Send size={14} /> Renewals {renewalList.length > 0 && <b>{renewalList.length}</b>}
             </button>
             <button onClick={() => setPrefs((p) => ({ ...p, auto: !p.auto }))} className={`adm-btn ${prefs.auto ? "ok" : ""}`} aria-pressed={prefs.auto} title="Refresh every 30 seconds">
               <Zap size={14} /> Live
@@ -2168,7 +2190,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
 
         {/* needs attention */}
         {owners.length > 0 && (
-          <div className="adm-card adm-attn adm-in" style={{ ["--i" as string]: 9 } as React.CSSProperties}>
+          <div className={`adm-card adm-attn adm-in ${attention.length > 0 ? "adm-glowborder" : ""}`} style={{ ["--i" as string]: 9 } as React.CSSProperties}>
             <h3>
               <Bell size={15} /> Needs attention <small style={{ color: "var(--mutfg)", fontWeight: 500 }}>expiring within 7 days, or ended in the last 14</small>
             </h3>
@@ -2199,6 +2221,14 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* activation funnel + inactive shops */}
+        {owners.length > 0 && (
+          <div className="adm-duo">
+            <FunnelPanel owners={enriched} />
+            <InactivePanel owners={enriched} waLink={waLink} />
           </div>
         )}
 
@@ -2396,6 +2426,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       {editingOwner && <EditOwnerModal owner={editingOwner} others={owners} saving={!!busy[editingOwner.phone]} onCancel={() => setEditingOwner(null)} onSave={(u) => saveEdit(editingOwner.phone, u)} />}
       {showAddModal && <AddOwnerModal owners={owners} saving={creating} onCancel={() => setShowAddModal(false)} onSave={createOwner} />}
       {removing && <ConfirmRemoveModal owner={removing} busy={!!busy[removing.phone]} onCancel={() => setRemoving(null)} onConfirm={() => removeOwner(removing)} />}
+      {queueOpen && <RenewalQueue owners={renewalList} getMessage={(o) => renewalMessage(o as EOwner)} link={waLink} onClose={() => setQueueOpen(false)} />}
       {showActivity && (
         <Modal onClose={() => setShowActivity(false)} width={480}>
           <div className="adm-mh">
@@ -2492,7 +2523,7 @@ export default function Admin() {
   if (!password) {
     return (
       <div className="adm-root adm-login">
-        <style>{ADM_CSS}</style>
+        <style>{ADM_CSS + EXTRAS_CSS}</style>
         <div className="adm-aurora" aria-hidden />
         <div style={{ width: "100%", maxWidth: 392, position: "relative", zIndex: 1 }}>
           <Link href="/" className="adm-back">
