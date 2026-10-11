@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CSS, Reveal, CountUp, PhoneChat, Tilt, ScrollLine, SplitHeading, useMotion } from "./motion";
 import HeroScene from "./HeroScene";
+import PhoneScene from "./PhoneScene";
+import Intro from "./Intro";
 import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -1162,6 +1164,7 @@ function FeatureExplorer({ t }: { t: Copy }) {
 
 export default function Home() {
   const [showSticky, setShowSticky] = useState(false);
+  const [introDone, setIntroDone] = useState(false); // the hero badge counts up once the intro has opened
   const barRef = useRef<HTMLDivElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [lang, setLang] = useState<Lang>(() => {
@@ -1328,6 +1331,7 @@ export default function Home() {
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
+      <Intro lang={lang} onDone={() => setIntroDone(true)} />
       <style>{CSS}</style>
 
       {/* Header */}
@@ -1378,7 +1382,7 @@ export default function Home() {
 
       <main className="flex-1">
         {/* Hero: pinned 3D phone. Falls back to the classic hero on weak devices. */}
-        <HeroScene lang={lang} msgs={t.chat.msgs} intro={heroIntro} badge={heroBadge} outro={heroOutro} fallback={classicHero} />
+        <HeroScene lang={lang} msgs={t.chat.msgs} intro={heroIntro} badge={introDone ? heroBadge : null} outro={heroOutro} fallback={classicHero} />
 
         {/* Problem: notebook vs Shop Brain */}
         <section className="py-20 md:py-28 px-4 md:px-6">
@@ -1418,6 +1422,9 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {/* Notebook vs Shop Brain: pinned scroll scene */}
+        <PhoneScene lang={lang} msgs={t.chat.msgs} notebook={t.problem.notebook} note={t.problem.notebookNote} />
 
         {/* How it works: a real sequence, so numbered and revealed in order */}
         <section id="how-it-works" className="py-20 md:py-28 px-4 md:px-6 bg-muted/50 border-y border-border">
