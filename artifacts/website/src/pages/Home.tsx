@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CSS, Reveal, CountUp, PhoneChat, Tilt, ScrollLine, SplitHeading, useMotion } from "./motion";
-import PhoneScene from "./PhoneScene";
+import HeroScene from "./HeroScene";
 import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -1234,6 +1234,98 @@ export default function Home() {
   const ctaClass =
     "sb-shine inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full font-semibold text-white text-lg shadow-lg shadow-black/10 hover:brightness-110 active:scale-[0.98] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
 
+  // ----- Hero pieces (used by the pinned 3D hero) -----
+  const heroIntro = (
+    <div className="space-y-4 md:space-y-7">
+      <h1 key={lang} className="text-[1.9rem] sm:text-5xl lg:text-6xl font-extrabold leading-[1.05] tracking-tight max-w-2xl" style={DISPLAY}>
+        <SplitHeading text={t.hero.title} />
+      </h1>
+      <p className="sb-rise text-base md:text-xl text-foreground/75 leading-relaxed max-w-xl" style={{ animationDelay: "450ms" }}>
+        {t.hero.body}
+      </p>
+      <div className="sb-rise flex flex-wrap items-center gap-3 md:gap-4 pt-1 md:pt-2" style={{ animationDelay: "600ms" }}>
+        <a href={`${botLink}?text=Hi`} target="_blank" rel="noopener noreferrer" className={`${ctaClass} sb-ring`} style={{ background: GREEN }} data-testid="link-hero-whatsapp">
+          <MessageCircle size={20} /> {t.hero.cta}
+        </a>
+        <a href="#how-it-works" onClick={(e) => scrollToSection(e, "#how-it-works")} className="px-5 py-3.5 rounded-full font-semibold border-2 border-foreground/20 hover:border-foreground/50 transition-colors">
+          {t.hero.more}
+        </a>
+      </div>
+      <p className="sb-rise text-sm text-foreground/60" style={{ animationDelay: "700ms" }}>
+        {t.hero.note}
+      </p>
+    </div>
+  );
+
+  const heroBadge = (
+    <div className="sb-float rounded-2xl border border-border bg-card px-3 py-2 md:px-4 md:py-3 shadow-xl flex items-center gap-3">
+      <span className="text-2xl" aria-hidden>
+        🎉
+      </span>
+      <div className="leading-tight">
+        <div className="text-xs text-muted-foreground">{t.hero.badge}</div>
+        <div className="text-lg font-extrabold" style={DISPLAY}>
+          <CountUp to={48500} /> RWF
+        </div>
+      </div>
+    </div>
+  );
+
+  const heroOutro = (
+    <a href={botLink} target="_blank" rel="noopener noreferrer" className={`${ctaClass} mt-6`} style={{ background: GREEN }}>
+      <MessageCircle size={20} /> {t.hero.cta}
+    </a>
+  );
+
+  // Your original hero. Shown on weak devices, Data Saver, 2G and reduced motion.
+  const classicHero = (
+    <section
+      id="hero"
+      className="relative overflow-hidden pt-28 pb-20 md:pt-36 md:pb-28 px-4 md:px-6 bg-[#EEF1FA] dark:bg-[#0F1530] [--rule:#D3DBF0] dark:[--rule:#222B58]"
+      style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, var(--rule) 35px, var(--rule) 36px)" }}
+    >
+      <div aria-hidden className="absolute inset-y-0 left-3 md:left-14 w-px bg-red-400/40" />
+      <div className="container mx-auto max-w-6xl grid lg:grid-cols-[1.15fr_0.85fr] gap-14 items-center relative">
+        <div className="space-y-7 md:pl-10">
+          <h1 key={lang} className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.05] tracking-tight max-w-2xl" style={DISPLAY}>
+            <SplitHeading text={t.hero.title} />
+          </h1>
+          <p className="sb-rise text-lg md:text-xl text-foreground/75 leading-relaxed max-w-xl" style={{ animationDelay: "450ms" }}>
+            {t.hero.body}
+          </p>
+          <div className="sb-rise flex flex-wrap items-center gap-4 pt-2" style={{ animationDelay: "600ms" }}>
+            <a href={`${botLink}?text=Hi`} target="_blank" rel="noopener noreferrer" className={`${ctaClass} sb-ring`} style={{ background: GREEN }} data-testid="link-hero-whatsapp">
+              <MessageCircle size={20} /> {t.hero.cta}
+            </a>
+            <a href="#how-it-works" onClick={(e) => scrollToSection(e, "#how-it-works")} className="px-5 py-3.5 rounded-full font-semibold border-2 border-foreground/20 hover:border-foreground/50 transition-colors">
+              {t.hero.more}
+            </a>
+          </div>
+          <p className="sb-rise text-sm text-foreground/60" style={{ animationDelay: "700ms" }}>
+            {t.hero.note}
+          </p>
+        </div>
+
+        <div className="relative">
+          <Tilt>
+            <PhoneChat msgs={t.chat.msgs} />
+          </Tilt>
+          <div className="sb-float absolute -bottom-5 left-0 sm:-left-6 rounded-2xl border border-border bg-card px-4 py-3 shadow-xl flex items-center gap-3">
+            <span className="text-2xl" aria-hidden>
+              🎉
+            </span>
+            <div className="leading-tight">
+              <div className="text-xs text-muted-foreground">{t.hero.badge}</div>
+              <div className="text-lg font-extrabold" style={DISPLAY}>
+                <CountUp to={48500} /> RWF
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
       <style>{CSS}</style>
@@ -1285,52 +1377,8 @@ export default function Home() {
       )}
 
       <main className="flex-1">
-        {/* Hero: ledger paper, with the product playing next to the headline */}
-        <section
-          id="hero"
-          className="relative overflow-hidden pt-28 pb-20 md:pt-36 md:pb-28 px-4 md:px-6 bg-[#EEF1FA] dark:bg-[#0F1530] [--rule:#D3DBF0] dark:[--rule:#222B58]"
-          style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, var(--rule) 35px, var(--rule) 36px)" }}
-        >
-          <div aria-hidden className="absolute inset-y-0 left-3 md:left-14 w-px bg-red-400/40" />
-          <div className="container mx-auto max-w-6xl grid lg:grid-cols-[1.15fr_0.85fr] gap-14 items-center relative">
-            <div className="space-y-7 md:pl-10">
-              <h1 key={lang} className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.05] tracking-tight max-w-2xl" style={DISPLAY}>
-                <SplitHeading text={t.hero.title} />
-              </h1>
-              <p className="sb-rise text-lg md:text-xl text-foreground/75 leading-relaxed max-w-xl" style={{ animationDelay: "450ms" }}>
-                {t.hero.body}
-              </p>
-              <div className="sb-rise flex flex-wrap items-center gap-4 pt-2" style={{ animationDelay: "600ms" }}>
-                <a href={`${botLink}?text=Hi`} target="_blank" rel="noopener noreferrer" className={`${ctaClass} sb-ring`} style={{ background: GREEN }} data-testid="link-hero-whatsapp">
-                  <MessageCircle size={20} /> {t.hero.cta}
-                </a>
-                <a href="#how-it-works" onClick={(e) => scrollToSection(e, "#how-it-works")} className="px-5 py-3.5 rounded-full font-semibold border-2 border-foreground/20 hover:border-foreground/50 transition-colors">
-                  {t.hero.more}
-                </a>
-              </div>
-              <p className="sb-rise text-sm text-foreground/60" style={{ animationDelay: "700ms" }}>
-                {t.hero.note}
-              </p>
-            </div>
-
-            <div className="relative">
-              <Tilt>
-                <PhoneChat msgs={t.chat.msgs} />
-              </Tilt>
-              <div className="sb-float absolute -bottom-5 left-0 sm:-left-6 rounded-2xl border border-border bg-card px-4 py-3 shadow-xl flex items-center gap-3">
-                <span className="text-2xl" aria-hidden>
-                  🎉
-                </span>
-                <div className="leading-tight">
-                  <div className="text-xs text-muted-foreground">{t.hero.badge}</div>
-                  <div className="text-lg font-extrabold" style={DISPLAY}>
-                    <CountUp to={48500} /> RWF
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        {/* Hero: pinned 3D phone. Falls back to the classic hero on weak devices. */}
+        <HeroScene lang={lang} msgs={t.chat.msgs} intro={heroIntro} badge={heroBadge} outro={heroOutro} fallback={classicHero} />
 
         {/* Problem: notebook vs Shop Brain */}
         <section className="py-20 md:py-28 px-4 md:px-6">
@@ -1393,7 +1441,7 @@ export default function Home() {
             </ol>
           </div>
         </section>
-        <PhoneScene lang={lang} msgs={t.chat.msgs} /> 
+
         {/* Features: tabs + cards that open to explain each one */}
         <section id="features" className="py-20 md:py-28 px-4 md:px-6">
           <div className="container mx-auto max-w-6xl">

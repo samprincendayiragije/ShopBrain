@@ -619,6 +619,7 @@ export function useMotion() {
     const right = (cols?.[1] as HTMLElement | undefined) ?? null;
     const badge = hero?.querySelector<HTMLElement>(".sb-float") ?? null;
     const skewMax = fine ? 1.3 : 0.8;
+    const pinned = !!hero?.hasAttribute("data-pinned");
     let heroSettled = false;
 
     const miscTick: Tick = (f) => {
@@ -627,7 +628,7 @@ export function useMotion() {
       const away = f.sy > f.vh * 1.3;
       const sk = clamp(-f.vel * 0.04, -skewMax, skewMax);
       return () => {
-        if (hero && !(away && heroSettled)) {
+        if (hero && !pinned && !(away && heroSettled)) {
           const e = hp * hp;
           hero.style.backgroundPositionY = `${(-f.sy * 0.22).toFixed(1)}px`;
           if (left) {
