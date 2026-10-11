@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, createContext, useContext } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import {
   LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock, Pencil, Trash2, Ban,
   PlayCircle, X, UserPlus, Users, Check, Search, Download, ChevronDown, ChevronLeft, ChevronRight, MoreHorizontal, Copy, Activity,
-  LayoutGrid, List, Eye, EyeOff, Command, Zap, Bell, Inbox, TrendingUp, Calendar, Send,
+  LayoutGrid, List, Eye, EyeOff, Command, Zap, Bell, Inbox, TrendingUp, Calendar, Send, Sun, Moon,
 } from "lucide-react";
 import { EXTRAS_CSS, extrasPointerMove, burst, RefreshBar, FunnelPanel, InactivePanel, RenewalQueue, NotesBox, HealthPill } from "./admin-extras";
 
@@ -16,23 +17,30 @@ import { EXTRAS_CSS, extrasPointerMove, burst, RefreshBar, FunnelPanel, Inactive
 //   POST   /admin/owners/:phone/extend      POST  .../activate | .../deactivate
 //   GET    /admin/owners/:phone/customers   PATCH /admin/customers/:id
 //
-// Everything below is built on those endpoints: search, filters, sorting,
-// pagination, bulk actions, CSV export, charts, an owner drawer, an attention
-// list, renewal messages, undo, a command palette (Ctrl/Cmd+K), live refresh,
-// an activity log and idle sign-out. Extras (admin-extras.tsx): activation
-// funnel, inactive-shop nudges, renewal queue, private notes, health pill,
-// tilt/confetti/progress animations. All animation is CSS or WAAPI
-// (transform/opacity), and it switches off for reduced motion.
+// What changed in this version
+//   - Self-contained light and dark palettes with a theme toggle (saved in the browser).
+//     The old version read your site's theme tokens, which is why some colours and
+//     dividers looked wrong.
+//   - Popup menus are rendered in a portal on <body>, so they open right under the
+//     button that was clicked (a transformed or hovered parent used to push them away).
+//   - Layers fixed: modals now open above the owner drawer, the command palette above both.
+//   - Buttons share one size scale (38px normal, 32px small) and one look, links included.
+//   - 3D scroll animation: cards, panels and KPIs roll in like a drum as you scroll.
+//   - Mobile first: below 1240px the owner list switches to cards, so there is no
+//     sideways scrolling anywhere. All grids, drawers, toolbars and toasts reflow.
 // =============================================================================
 
 const ADMIN_API_BASE = import.meta.env.VITE_ADMIN_API_URL as string | undefined;
 const SESSION_KEY = "shopbrain_admin_password";
-const PREFS_KEY = "shopbrain_admin_prefs";
+const PREFS_KEY = "shopbrain_admin_prefs_v2";
+const THEME_KEY = "shopbrain_admin_theme";
 const LOG_KEY = "shopbrain_admin_activity";
 const IDLE_MS = 30 * 60 * 1000;
 const DAY = 86400000;
 const WEEK = 7 * DAY;
+const TABLE_MIN_WIDTH = "(min-width: 1240px)";
 
+type Theme = "light" | "dark";
 type OwnerStatus = "no_trial" | "active" | "expiring" | "expired";
 type Bucket = OwnerStatus | "deactivated";
 
@@ -151,15 +159,15 @@ function errMsg(e: unknown, fallback = "Something went wrong.") {
 
 const BUCKETS: { key: Bucket; label: string; color: string }[] = [
   { key: "active", label: "Active", color: "var(--ok)" },
-  { key: "expiring", label: "Expiring soon", color: "#f59e0b" },
+  { key: "expiring", label: "Expiring soon", color: "var(--amber)" },
   { key: "expired", label: "Expired", color: "var(--bad)" },
   { key: "deactivated", label: "Deactivated", color: "var(--off)" },
-  { key: "no_trial", label: "No trial set", color: "#a78bfa" },
+  { key: "no_trial", label: "No trial set", color: "var(--viol)" },
 ];
 
 function loadPrefs(): Prefs {
-  const narrow = typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
-  const base: Prefs = { density: "comfy", view: narrow ? "cards" : "table", pageSize: 10, auto: false };
+  // cards are the default now: they work on every screen and show the 3D scroll effect
+  const base: Prefs = { density: "comfy", view: "cards", pageSize: 10, auto: false };
   try {
     return { ...base, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
   } catch {
@@ -173,6 +181,23 @@ function loadLog(): ActivityItem[] {
     return [];
   }
 }
+function loadTheme(): Theme {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    if (t === "light" || t === "dark") return t;
+  } catch {
+    /* private mode */
+  }
+  if (typeof document !== "undefined" && document.documentElement.classList.contains("dark")) return "dark";
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+// ---------------------------------------------------------------------------
+// Theme context
+// ---------------------------------------------------------------------------
+
+const ThemeCtx = createContext<{ theme: Theme; toggle: () => void }>({ theme: "light", toggle: () => {} });
+const useTheme = () => useContext(ThemeCtx);
 
 // ---------------------------------------------------------------------------
 // Small hooks
@@ -200,6 +225,18 @@ function useCountUp(target: number, ms = 900) {
     return () => cancelAnimationFrame(raf);
   }, [target, ms]);
   return Math.round(v);
+}
+
+function useMedia(query: string) {
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const h = () => setM(mq.matches);
+    h();
+    mq.addEventListener?.("change", h);
+    return () => mq.removeEventListener?.("change", h);
+  }, [query]);
+  return m;
 }
 
 // Escape closes only the top-most layer (palette over drawer over page).
@@ -233,35 +270,112 @@ function useScrollLock() {
   }, []);
 }
 
+// 3D scroll "drum" effect. Every element marked data-roll is tilted and pushed back
+// while it is near the top or bottom of the screen and sits flat in the middle, so
+// cards appear to roll past as you scroll. It writes straight to the DOM (no React
+// re-renders), runs once per animation frame, and is skipped for reduced motion.
+function useRoll(dep: string) {
+  useEffect(() => {
+    if (prefersReduced()) return;
+    let raf = 0;
+    const run = () => {
+      raf = 0;
+      const els = document.querySelectorAll<HTMLElement>("[data-roll]");
+      const vh = window.innerHeight;
+      const maxTilt = window.innerWidth < 760 ? 20 : 30;
+      const reads: [HTMLElement, number][] = [];
+      els.forEach((el) => {
+        const r = el.getBoundingClientRect();
+        reads.push([el, (r.top + r.height / 2 - vh / 2) / (vh * 0.62)]);
+      });
+      reads.forEach(([el, d]) => {
+        const e = Math.min(1, Math.max(0, Math.abs(d) - 0.38) / 0.62);
+        if (e < 0.015) {
+          if (el.style.transform) {
+            el.style.transform = "";
+            el.style.opacity = "";
+          }
+          return;
+        }
+        const s = d < 0 ? -1 : 1;
+        el.style.transform = `perspective(1100px) rotateX(${(-s * e * maxTilt).toFixed(2)}deg) translateZ(${(-e * 70).toFixed(1)}px) scale(${(1 - e * 0.05).toFixed(3)})`;
+        el.style.opacity = String(1 - e * e * 0.55);
+      });
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(run);
+    };
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    const t = setTimeout(schedule, 60);
+    const t2 = setTimeout(schedule, 700);
+    schedule();
+    return () => {
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      clearTimeout(t);
+      clearTimeout(t2);
+      if (raf) cancelAnimationFrame(raf);
+      document.querySelectorAll<HTMLElement>("[data-roll]").forEach((el) => {
+        el.style.transform = "";
+        el.style.opacity = "";
+      });
+    };
+  }, [dep]);
+}
+
+function Roll({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`adm-roll ${className}`} data-roll>
+      {children}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Styles (self-contained; colours come from your theme tokens)
+// Styles (self-contained: light and dark palettes live here, nothing is read from your site theme)
 // ---------------------------------------------------------------------------
 
 const ADM_CSS = `
-.adm-root{--bg:hsl(var(--background,0 0% 100%));--fg:hsl(var(--foreground,222 47% 11%));--card:hsl(var(--card,0 0% 100%));--bd:hsl(var(--border,214 32% 91%));--mut:hsl(var(--muted,210 40% 96%));--mutfg:hsl(var(--muted-foreground,215 16% 40%));--pri:hsl(var(--primary,150 70% 28%));--prifg:hsl(var(--primary-foreground,0 0% 100%));
-  --ok:#059669;--warn:#b45309;--bad:#dc2626;--off:#64748b;--viol:#7c3aed;
+.adm-root,.adm-pt{
+  --bg:#eaeff6;--fg:#0f172a;--card:#ffffff;--bd:#d0d8e4;--mut:#f0f3f8;--mutfg:#516074;
+  --pri:#047857;--prifg:#ffffff;
+  --ok:#047857;--warn:#b45309;--amber:#d97706;--bad:#dc2626;--off:#64748b;--viol:#7c3aed;
+  --shadow:0 1px 2px rgba(15,23,42,.06),0 8px 22px -14px rgba(15,23,42,.22);
   --ease:cubic-bezier(.16,1,.3,1);--spring:cubic-bezier(.34,1.56,.64,1);
-  position:relative;min-height:100vh;min-height:100dvh;background:var(--bg);color:var(--fg);font-size:14px;line-height:1.45}
-.dark .adm-root{--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--off:#94a3b8;--viol:#a78bfa}
-.adm-root *,.adm-root *::before,.adm-root *::after{box-sizing:border-box}
-.adm-root button{font:inherit;color:inherit;cursor:pointer}
-.adm-root button:disabled{cursor:not-allowed}
-.adm-root :focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+  color-scheme:light}
+.adm-root[data-theme="dark"],.adm-pt[data-theme="dark"]{
+  --bg:#0a0f1d;--fg:#e8edf7;--card:#131a2c;--bd:#2b3752;--mut:#1a2338;--mutfg:#9fadc7;
+  --pri:#34d399;--prifg:#052e1f;
+  --ok:#34d399;--warn:#fbbf24;--amber:#fbbf24;--bad:#f87171;--off:#94a3b8;--viol:#a78bfa;
+  --shadow:0 1px 2px rgba(0,0,0,.45),0 12px 28px -16px rgba(0,0,0,.8);
+  color-scheme:dark}
+.adm-pt{display:contents;color:var(--fg);font-size:14px;line-height:1.45}
+.adm-root{position:relative;min-height:100vh;min-height:100dvh;background:var(--bg);color:var(--fg);font-size:14px;line-height:1.45;overflow-x:clip;transition:background-color .35s,color .35s}
+.adm-root *,.adm-root *::before,.adm-root *::after,.adm-pt *,.adm-pt *::before,.adm-pt *::after{box-sizing:border-box}
+.adm-root button,.adm-pt button{font:inherit;color:inherit;cursor:pointer}
+.adm-root button:disabled,.adm-pt button:disabled{cursor:not-allowed}
+.adm-root :focus-visible,.adm-pt :focus-visible{outline:2px solid var(--pri);outline-offset:2px}
 
 .adm-aurora{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
 .adm-aurora::before,.adm-aurora::after{content:"";position:absolute;width:60vmax;height:60vmax;border-radius:50%;animation:adm-drift 30s ease-in-out infinite alternate}
-.adm-aurora::before{top:-26vmax;right:-16vmax;background:radial-gradient(circle,color-mix(in srgb,var(--pri) 20%,transparent),transparent 62%)}
-.adm-aurora::after{bottom:-32vmax;left:-22vmax;background:radial-gradient(circle,rgba(255,201,51,.12),transparent 62%);animation-duration:38s;animation-direction:alternate-reverse}
+.adm-aurora::before{top:-26vmax;right:-16vmax;background:radial-gradient(circle,color-mix(in srgb,var(--pri) 16%,transparent),transparent 62%)}
+.adm-aurora::after{bottom:-32vmax;left:-22vmax;background:radial-gradient(circle,rgba(255,201,51,.10),transparent 62%);animation-duration:38s;animation-direction:alternate-reverse}
 @keyframes adm-drift{to{transform:translate3d(-7vmax,5vmax,0) scale(1.12)}}
 @media (max-width:760px){.adm-aurora{display:none}}
 
-.adm-wrap{position:relative;z-index:1;max-width:1280px;margin:0 auto;padding:28px 20px 120px}
+.adm-wrap{position:relative;z-index:1;max-width:1280px;margin:0 auto;padding:28px 20px 120px;min-width:0}
 @keyframes adm-in{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 .adm-in{animation:adm-in .65s var(--ease) both;animation-delay:calc(var(--i,0) * 55ms)}
 
+/* 3D scroll wrappers */
+.adm-roll{min-width:0;transform-origin:50% 50%;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.adm-kpis>.adm-roll>*,.adm-grid2>.adm-roll>*,.adm-cards>.adm-roll>*,.adm-duo>.adm-roll>*{height:100%}
+.adm-roll>.adm-kpi{width:100%;display:block}
+
 /* header */
 .adm-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px}
-.adm-title{margin:0;font-size:28px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(100deg,var(--fg) 30%,var(--pri));-webkit-background-clip:text;background-clip:text;color:transparent}
+.adm-title{margin:0;font-size:28px;font-weight:800;letter-spacing:-.02em;color:var(--fg);background:linear-gradient(100deg,var(--fg) 35%,var(--pri));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .adm-sub{margin:4px 0 0;color:var(--mutfg);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .adm-live{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--mutfg)}
 .adm-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);position:relative}
@@ -270,258 +384,273 @@ const ADM_CSS = `
 @keyframes adm-pulse{from{transform:scale(1);opacity:.55}to{transform:scale(3);opacity:0}}
 .adm-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
-.adm-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 13px;border:1px solid var(--bd);border-radius:10px;background:var(--card);font-size:13px;font-weight:600;white-space:nowrap;transition:transform .2s var(--spring),background .2s,border-color .2s,box-shadow .2s}
-.adm-btn:hover:not(:disabled){background:var(--mut);transform:translateY(-1px)}
+/* buttons: one size scale (38 / 32) and one look, for <button> and <a> alike */
+.adm-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 14px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font-size:13px;font-weight:600;line-height:1;white-space:nowrap;text-decoration:none;transition:transform .2s var(--spring),background .2s,border-color .2s,box-shadow .2s}
+.adm-btn:hover:not(:disabled){background:var(--mut);border-color:color-mix(in srgb,var(--fg) 22%,var(--bd));transform:translateY(-1px)}
 .adm-btn:active:not(:disabled){transform:scale(.97)}
 .adm-btn:disabled{opacity:.55}
 .adm-btn.pri{background:var(--pri);border-color:var(--pri);color:var(--prifg)}
-.adm-btn.pri:hover:not(:disabled){background:var(--pri);filter:brightness(1.1);box-shadow:0 8px 22px -8px var(--pri)}
-.adm-btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--bd))}
-.adm-btn.danger:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 10%,transparent)}
-.adm-btn.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,var(--bd))}
-.adm-btn.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--bd))}
-.adm-btn.sm{height:30px;padding:0 10px;font-size:12px;border-radius:8px}
-.adm-btn.icon{width:30px;padding:0}
+.adm-btn.pri:hover:not(:disabled){background:var(--pri);border-color:var(--pri);filter:brightness(1.1);box-shadow:0 8px 22px -8px var(--pri)}
+.adm-btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,var(--bd))}
+.adm-btn.danger:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 10%,var(--card))}
+.adm-btn.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--bd))}
+.adm-btn.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--bd))}
+.adm-btn.sm{height:32px;padding:0 11px;font-size:12px;border-radius:9px}
+.adm-btn.icon{width:32px;padding:0}
+.adm-btn.sq{width:38px;padding:0}
 .adm-btn.ghost{background:transparent;border-color:transparent}
+.adm-btn b{font-variant-numeric:tabular-nums}
 .adm-kbd{font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:3px 5px;border:1px solid var(--bd);border-radius:5px;color:var(--mutfg);background:var(--mut)}
+@media (hover:none){.adm-kbd{display:none}}
 .adm-spin{animation:adm-spin .8s linear infinite}
 @keyframes adm-spin{to{transform:rotate(360deg)}}
 .adm-ringsvg{width:16px;height:16px;transform:rotate(-90deg)}
 .adm-ringsvg circle{fill:none;stroke-width:3}
 .adm-ringsvg .bg{stroke:var(--bd)}.adm-ringsvg .fg{stroke:var(--pri);stroke-dasharray:44;animation:adm-ring linear infinite}
 @keyframes adm-ring{from{stroke-dashoffset:44}to{stroke-dashoffset:0}}
+.adm-themebtn svg{transition:transform .5s var(--spring)}
+.adm-themebtn:hover svg{transform:rotate(25deg) scale(1.12)}
 
 /* cards + spotlight */
-.adm-card{position:relative;background:var(--card);border:1px solid var(--bd);border-radius:16px}
-.adm-spot::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .4s;background:radial-gradient(360px circle at var(--mx,50%) var(--my,50%),color-mix(in srgb,var(--pri) 14%,transparent),transparent 60%)}
+.adm-card{position:relative;background:var(--card);border:1px solid var(--bd);border-radius:16px;box-shadow:var(--shadow)}
+.adm-spot::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .4s;background:radial-gradient(360px circle at var(--mx,50%) var(--my,50%),color-mix(in srgb,var(--pri) 12%,transparent),transparent 60%)}
 .adm-spot:hover::after{opacity:1}
 
-.adm-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
-.adm-kpi{padding:16px 16px 14px;text-align:left;overflow:hidden;transition:transform .35s var(--spring),border-color .25s,box-shadow .25s}
-.adm-kpi:hover{transform:translateY(-3px);box-shadow:0 14px 30px -18px rgba(0,0,0,.35)}
-.adm-kpi.is-on{border-color:var(--pri);box-shadow:0 0 0 1px var(--pri)}
-.adm-kpi .top{display:flex;align-items:center;justify-content:space-between;color:var(--mutfg);font-size:12px;font-weight:600}
-.adm-kpi .ico{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:color-mix(in srgb,var(--c,var(--pri)) 14%,transparent);color:var(--c,var(--pri));transition:transform .4s var(--spring)}
+.adm-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:12px;margin-bottom:14px}
+.adm-kpi{padding:16px 16px 14px;text-align:left;overflow:hidden;color:var(--fg);transition:transform .35s var(--spring),border-color .25s,box-shadow .25s}
+.adm-kpi:hover{transform:translateY(-3px)}
+.adm-kpi.is-on{border-color:var(--pri);box-shadow:0 0 0 1px var(--pri),var(--shadow)}
+.adm-kpi .top{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--mutfg);font-size:12px;font-weight:600}
+.adm-kpi .ico{width:28px;height:28px;flex:none;border-radius:9px;display:grid;place-items:center;background:color-mix(in srgb,var(--c,var(--pri)) 15%,transparent);color:var(--c,var(--pri));transition:transform .4s var(--spring)}
 .adm-kpi:hover .ico{transform:rotate(-8deg) scale(1.12)}
-.adm-kpi .val{margin-top:10px;font-size:26px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.adm-kpi .val{margin-top:10px;font-size:26px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .adm-kpi .val small{font-size:13px;font-weight:600;color:var(--mutfg);margin-left:4px}
 .adm-kpi .hint{margin-top:2px;font-size:11.5px;color:var(--mutfg)}
 
 .adm-grid2{display:grid;grid-template-columns:1.1fr 1.4fr 1fr;gap:12px;margin-bottom:22px}
-@media (max-width:1100px){.adm-grid2{grid-template-columns:1fr 1fr}}
-@media (max-width:760px){.adm-grid2{grid-template-columns:1fr}}
-.adm-panel{padding:16px 18px;overflow:hidden}
+.adm-duo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:22px}
+@media (max-width:1100px){.adm-grid2{grid-template-columns:1fr 1fr}.adm-grid2>.adm-roll:first-child{grid-column:1/-1}}
+@media (max-width:760px){.adm-grid2{grid-template-columns:1fr}.adm-grid2>.adm-roll:first-child{grid-column:auto}}
+.adm-panel{padding:16px 18px;overflow:hidden;min-width:0}
 .adm-panel h3{margin:0 0 12px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
-.adm-panel h3 svg{color:var(--pri)}
+.adm-panel h3 svg{color:var(--pri);flex:none}
 .adm-donutwrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .adm-donut{width:132px;height:132px;flex:none}
 .adm-seg{fill:none;stroke-linecap:butt;cursor:pointer;transform-origin:60px 60px;animation:adm-seg 1.1s var(--ease) both;animation-delay:calc(var(--i,0) * 90ms);transition:stroke-width .25s}
 @keyframes adm-seg{from{stroke-dasharray:0 var(--C)}}
 .adm-donut text{text-anchor:middle;fill:var(--fg);font-weight:800}
 .adm-legend{display:grid;gap:5px;flex:1;min-width:130px}
-.adm-legend button{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:3px 6px;border-radius:7px;text-align:left;font-size:12.5px;transition:background .2s}
+.adm-legend button{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:4px 6px;border-radius:7px;text-align:left;font-size:12.5px;color:var(--fg);transition:background .2s}
 .adm-legend button:hover,.adm-legend button.on{background:var(--mut)}
 .adm-legend i{width:9px;height:9px;border-radius:3px;flex:none}
 .adm-legend b{margin-left:auto;font-variant-numeric:tabular-nums}
 .adm-bars{display:grid;gap:9px}
-.adm-brow{display:grid;grid-template-columns:minmax(70px,120px) 1fr auto;align-items:center;gap:10px;border:0;background:transparent;padding:2px 0;text-align:left;font-size:12.5px}
+.adm-brow{display:grid;grid-template-columns:minmax(70px,120px) 1fr auto;align-items:center;gap:10px;width:100%;border:0;background:transparent;padding:2px 0;text-align:left;font-size:12.5px;color:var(--fg)}
 .adm-brow span.n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .adm-brow:hover span.n{color:var(--pri)}
-.adm-btrack{height:9px;border-radius:5px;background:var(--mut);overflow:hidden}
+.adm-btrack{height:9px;border-radius:5px;background:var(--mut);box-shadow:inset 0 0 0 1px var(--bd);overflow:hidden}
 .adm-btrack i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--pri),color-mix(in srgb,var(--pri) 55%,#facc15));transform-origin:0 50%;animation:adm-growx .9s var(--ease) both;animation-delay:calc(var(--i,0) * 70ms + 200ms)}
 @keyframes adm-growx{from{transform:scaleX(0)}}
-.adm-brow b{font-variant-numeric:tabular-nums;font-size:12px}
+.adm-brow b{font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
 .adm-sign{display:flex;align-items:flex-end;gap:7px;height:96px}
 .adm-sign div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%}
 .adm-sign i{display:block;width:100%;min-height:3px;border-radius:5px 5px 2px 2px;background:linear-gradient(0deg,var(--pri),color-mix(in srgb,var(--pri) 50%,#a7f3d0));transform-origin:50% 100%;animation:adm-growy .8s var(--ease) both;animation-delay:calc(var(--i,0) * 60ms + 250ms)}
 @keyframes adm-growy{from{transform:scaleY(0)}}
-.adm-sign small{font-size:10px;color:var(--mutfg)}
 .adm-sign span{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums}
 .adm-trend{font-size:12px;color:var(--mutfg);margin:8px 0 0}
 .adm-trend b{color:var(--ok)}
 
 /* attention */
 .adm-attn{margin-bottom:22px;padding:16px 18px}
-.adm-attn h3{margin:0 0 12px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.adm-attn h3{margin:0 0 12px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .adm-attn h3 svg{color:var(--warn);animation:adm-ring-bell 3s ease-in-out infinite;transform-origin:50% 0}
 @keyframes adm-ring-bell{0%,88%,100%{transform:rotate(0)}91%{transform:rotate(14deg)}94%{transform:rotate(-12deg)}97%{transform:rotate(8deg)}}
-.adm-attnlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px}
+.adm-attnlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr));gap:10px}
 .adm-attnitem{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--mut);transition:transform .3s var(--spring),border-color .2s}
-.adm-attnitem:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--warn) 50%,var(--bd))}
+.adm-attnitem:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--warn) 55%,var(--bd))}
 .adm-attnitem .who{min-width:0;flex:1}
 .adm-attnitem .who b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .adm-attnitem .who span{font-size:11.5px}
 .adm-allclear{display:flex;align-items:center;gap:10px;color:var(--mutfg)}
-.adm-allclear svg{color:var(--ok)}
+.adm-allclear svg{color:var(--ok);flex:none}
 .adm-allclear path{stroke-dasharray:30;animation:adm-draw .9s .3s var(--ease) both}
 @keyframes adm-draw{from{stroke-dashoffset:30}to{stroke-dashoffset:0}}
 
 /* toolbar */
 .adm-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
-.adm-search{position:relative;flex:1;min-width:220px;max-width:380px}
+.adm-search{position:relative;flex:1 1 240px;min-width:0;max-width:380px}
 .adm-search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mutfg);pointer-events:none}
-.adm-search input{width:100%;height:38px;padding:0 64px 0 36px;border:1px solid var(--bd);border-radius:11px;background:var(--card);color:var(--fg);font:inherit;transition:border-color .2s,box-shadow .25s}
-.adm-search input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 16%,transparent)}
+.adm-search input{width:100%;height:38px;padding:0 64px 0 36px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;transition:border-color .2s,box-shadow .25s}
+.adm-search input::placeholder{color:var(--mutfg)}
+.adm-search input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 18%,transparent)}
 .adm-search .r{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:4px;align-items:center}
 .adm-chips{display:flex;gap:6px;flex-wrap:wrap}
-.adm-chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--bd);border-radius:999px;background:var(--card);font-size:12.5px;font-weight:600;transition:all .25s var(--ease)}
-.adm-chip:hover{border-color:color-mix(in srgb,var(--pri) 50%,var(--bd))}
+.adm-chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--bd);border-radius:999px;background:var(--card);color:var(--fg);font-size:12.5px;font-weight:600;transition:all .25s var(--ease)}
+.adm-chip:hover{border-color:color-mix(in srgb,var(--pri) 55%,var(--bd))}
 .adm-chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
-.adm-chip em{font-style:normal;font-size:11px;opacity:.65;font-variant-numeric:tabular-nums}
-.adm-select{height:36px;padding:0 28px 0 11px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;font-size:13px;font-weight:600}
+.adm-chip em{font-style:normal;font-size:11px;opacity:.7;font-variant-numeric:tabular-nums}
+.adm-select{height:38px;padding:0 28px 0 11px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;font-size:13px;font-weight:600;max-width:100%}
 .adm-segbtn{display:inline-flex;padding:3px;border:1px solid var(--bd);border-radius:11px;background:var(--card);gap:2px}
-.adm-segbtn button{display:grid;place-items:center;width:30px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--mutfg);transition:all .25s var(--ease)}
+.adm-segbtn button{display:grid;place-items:center;width:32px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--mutfg);transition:all .25s var(--ease)}
 .adm-segbtn button.on{background:var(--fg);color:var(--bg)}
 .adm-meta{margin:0 0 10px;color:var(--mutfg);font-size:12.5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .adm-meta b{color:var(--fg);font-variant-numeric:tabular-nums}
 .adm-link{border:0;background:transparent;color:var(--pri);font-weight:600;padding:0;text-decoration:underline;text-underline-offset:3px}
 
-/* table */
+/* table (wide screens only; smaller screens use cards) */
 .adm-tablewrap{overflow-x:auto;border-radius:16px}
 .adm-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
-.adm-table th{position:relative;text-align:left;padding:11px 14px;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mutfg);background:color-mix(in srgb,var(--mut) 70%,transparent);border-bottom:1px solid var(--bd);white-space:nowrap;user-select:none}
+.adm-table th{position:relative;text-align:left;padding:11px 12px;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mutfg);background:var(--mut);border-bottom:1px solid var(--bd);white-space:nowrap;user-select:none}
 .adm-table th.s{cursor:pointer}.adm-table th.s:hover{color:var(--fg)}
 .adm-table th svg{vertical-align:-2px;margin-left:3px;transition:transform .3s var(--spring)}
 .adm-table th svg.up{transform:rotate(180deg)}
-.adm-table td{padding:13px 14px;border-bottom:1px solid var(--bd);vertical-align:middle}
-.adm-table.compact td{padding:7px 14px}
+.adm-table td{padding:12px;border-bottom:1px solid var(--bd);vertical-align:middle}
+.adm-table.compact td{padding:7px 12px}
 .adm-table tr:last-child td{border-bottom:0}
 .adm-tr{animation:adm-rowin .5s var(--ease) both;animation-delay:calc(var(--i,0) * 28ms);transition:background .2s}
 @keyframes adm-rowin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.adm-tr:hover{background:color-mix(in srgb,var(--mut) 55%,transparent)}
-.adm-tr.sel{background:color-mix(in srgb,var(--pri) 8%,transparent)}
+.adm-tr:hover{background:var(--mut)}
+.adm-tr.sel{background:color-mix(in srgb,var(--pri) 9%,var(--card))}
 .adm-tr.flash td{animation:adm-flash 1.6s ease-out}
-@keyframes adm-flash{0%{background:color-mix(in srgb,var(--pri) 28%,transparent)}100%{background:transparent}}
+@keyframes adm-flash{0%{background:color-mix(in srgb,var(--pri) 30%,transparent)}100%{background:transparent}}
 .adm-tr.busy{opacity:.55;pointer-events:none}
 .adm-check{width:16px;height:16px;accent-color:var(--pri);cursor:pointer}
-.adm-shop{display:flex;align-items:center;gap:11px;min-width:190px}
-.adm-avatar{width:36px;height:36px;border-radius:11px;flex:none;display:grid;place-items:center;font-size:12.5px;font-weight:800;color:#fff;background:linear-gradient(145deg,hsl(var(--h) 70% 48%),hsl(calc(var(--h) + 40) 70% 38%));transition:transform .35s var(--spring)}
+.adm-shop{display:flex;align-items:center;gap:11px;min-width:0}
+.adm-table .adm-shop{min-width:170px}
+.adm-avatar{width:36px;height:36px;border-radius:11px;flex:none;display:grid;place-items:center;font-size:12.5px;font-weight:800;color:#fff;background:linear-gradient(145deg,hsl(var(--h) 70% 44%),hsl(calc(var(--h) + 40) 70% 34%));transition:transform .35s var(--spring)}
+.adm-avatar.adm-mini{width:26px;height:26px;border-radius:8px;font-size:10px}
 .adm-tr:hover .adm-avatar,.adm-ocard:hover .adm-avatar{transform:rotate(-6deg) scale(1.08)}
 .adm-shop .t{min-width:0}
-.adm-namebtn{border:0;background:transparent;padding:0;font-weight:700;font-size:13.5px;text-align:left;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.adm-namebtn{border:0;background:transparent;padding:0;font-weight:700;font-size:13.5px;text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;color:var(--fg)}
+.adm-table .adm-namebtn{max-width:190px}
 .adm-namebtn:hover{color:var(--pri);text-decoration:underline;text-underline-offset:3px}
 .adm-shop small{display:block;color:var(--mutfg);font-size:11.5px}
-.adm-phone{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums;color:var(--mutfg)}
+.adm-phone{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums;color:var(--mutfg);max-width:100%}
 .adm-copy{border:0;background:transparent;padding:3px;border-radius:6px;color:var(--mutfg);opacity:0;transition:opacity .2s,color .2s}
-.adm-tr:hover .adm-copy,.adm-copy:focus-visible,.adm-copy.done,.adm-ocard .adm-copy{opacity:1}
+.adm-tr:hover .adm-copy,.adm-copy:focus-visible,.adm-copy.done,.adm-ocard .adm-copy,.adm-dh .adm-copy{opacity:1}
 .adm-copy.done{color:var(--ok)}
 .adm-badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap}
-.adm-badge.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,transparent)}
-.adm-badge.warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 16%,transparent)}
-.adm-badge.bad{color:var(--bad);background:color-mix(in srgb,var(--bad) 13%,transparent)}
-.adm-badge.off{color:var(--off);background:color-mix(in srgb,var(--off) 16%,transparent)}
-.adm-badge.mut{color:var(--viol);background:color-mix(in srgb,var(--viol) 13%,transparent)}
+.adm-badge.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 15%,transparent)}
+.adm-badge.warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 17%,transparent)}
+.adm-badge.bad{color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,transparent)}
+.adm-badge.off{color:var(--off);background:color-mix(in srgb,var(--off) 17%,transparent)}
+.adm-badge.mut{color:var(--viol);background:color-mix(in srgb,var(--viol) 14%,transparent)}
 .adm-until{display:grid;gap:5px;min-width:112px}
 .adm-until small{color:var(--mutfg);font-size:11.5px}
-.adm-meter{height:5px;border-radius:3px;background:var(--mut);overflow:hidden}
+.adm-meter{height:5px;border-radius:3px;background:var(--mut);box-shadow:inset 0 0 0 1px var(--bd);overflow:hidden}
 .adm-meter i{display:block;height:100%;border-radius:3px;background:var(--c,var(--ok));transform-origin:0 50%;animation:adm-growx .9s var(--ease) both;animation-delay:.2s}
 .adm-num{font-variant-numeric:tabular-nums;font-weight:700}
 .adm-out{display:grid;gap:5px;min-width:100px}
 .adm-actions{display:flex;align-items:center;gap:6px;justify-content:flex-end}
 .adm-split{display:inline-flex}
-.adm-split .adm-btn:first-child{border-radius:8px 0 0 8px}
-.adm-split .adm-btn:last-child{border-radius:0 8px 8px 0;border-left-color:color-mix(in srgb,var(--prifg) 30%,transparent);padding:0 6px}
-.adm-linkbtn{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--pri);font-weight:700;padding:4px 6px;border-radius:7px}
-.adm-linkbtn:hover:not(:disabled){background:color-mix(in srgb,var(--pri) 10%,transparent)}
+.adm-split .adm-btn:first-child{border-radius:9px 0 0 9px}
+.adm-split .adm-btn:last-child{border-radius:0 9px 9px 0;border-left-color:color-mix(in srgb,var(--prifg) 30%,transparent);padding:0 7px}
+.adm-linkbtn{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--pri);font-weight:700;padding:4px 6px;border-radius:7px;text-decoration:none}
+.adm-linkbtn:hover:not(:disabled){background:color-mix(in srgb,var(--pri) 11%,transparent)}
 .adm-linkbtn:disabled{color:var(--mutfg)}
-.adm-lang{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:5px;background:var(--mut);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mutfg)}
+.adm-lang{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:5px;background:var(--mut);border:1px solid var(--bd);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mutfg)}
 
 /* cards view */
-.adm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.adm-ocard{padding:16px;display:grid;gap:12px;animation:adm-rowin .55s var(--ease) both;animation-delay:calc(var(--i,0) * 40ms);transition:transform .35s var(--spring),border-color .2s,box-shadow .3s}
-.adm-ocard:hover{transform:translateY(-3px);box-shadow:0 16px 34px -20px rgba(0,0,0,.4)}
-.adm-ocard.sel{border-color:var(--pri)}
-.adm-ocard .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.adm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));gap:14px}
+.adm-ocard{padding:16px;display:grid;gap:12px;min-width:0;animation:adm-rowin .55s var(--ease) both;animation-delay:calc(var(--i,0) * 40ms);transition:transform .35s var(--spring),border-color .2s,box-shadow .3s}
+.adm-ocard:hover{transform:translateY(-3px)}
+.adm-ocard.sel{border-color:var(--pri);box-shadow:0 0 0 1px var(--pri),var(--shadow)}
+.adm-ocard.adm-flashcard{border-color:var(--pri);box-shadow:0 0 0 3px color-mix(in srgb,var(--pri) 35%,transparent),var(--shadow)}
+.adm-ocard .row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;flex-wrap:wrap}
+.adm-ocard .row .adm-shop{flex:1 1 180px}
 .adm-ocard .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 0;border-top:1px dashed var(--bd);border-bottom:1px dashed var(--bd)}
 .adm-ocard .stats small{display:block;color:var(--mutfg);font-size:11px}
+.adm-ocard .adm-actions{flex-wrap:wrap;justify-content:flex-start}
+.adm-ocard .info{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:var(--mutfg);font-size:11.5px}
 
 /* pager */
-.adm-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 4px 0;color:var(--mutfg);font-size:12.5px}
+.adm-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px 4px 0;color:var(--mutfg);font-size:12.5px}
 .adm-pages{display:flex;gap:4px;align-items:center}
-.adm-pages button{min-width:32px;height:32px;padding:0 8px;border:1px solid var(--bd);border-radius:9px;background:var(--card);font-weight:600;transition:all .2s var(--ease)}
+.adm-pages button{min-width:34px;height:34px;padding:0 8px;border:1px solid var(--bd);border-radius:9px;background:var(--card);color:var(--fg);font-weight:600;transition:all .2s var(--ease)}
 .adm-pages button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .adm-pages button:disabled{opacity:.4}
 
 /* bulk bar */
-.adm-bulk{position:fixed;left:50%;bottom:22px;z-index:40;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);padding:10px 12px;border-radius:16px;background:var(--fg);color:var(--bg);box-shadow:0 24px 60px -16px rgba(0,0,0,.55);animation:adm-bulkin .5s var(--spring) both}
+.adm-bulk{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 24px);padding:10px 12px 12px;border-radius:16px;background:var(--fg);color:var(--bg);box-shadow:0 24px 60px -16px rgba(0,0,0,.55);animation:adm-bulkin .5s var(--spring) both}
 @keyframes adm-bulkin{from{opacity:0;transform:translate(-50%,30px) scale(.94)}to{opacity:1;transform:translate(-50%,0)}}
-.adm-bulk .adm-btn{background:transparent;color:var(--bg);border-color:color-mix(in srgb,var(--bg) 30%,transparent)}
-.adm-bulk .adm-btn:hover:not(:disabled){background:color-mix(in srgb,var(--bg) 16%,transparent)}
+.adm-bulk .adm-btn{background:transparent;color:var(--bg);border-color:color-mix(in srgb,var(--bg) 32%,transparent)}
+.adm-bulk .adm-btn:hover:not(:disabled){background:color-mix(in srgb,var(--bg) 18%,transparent);border-color:color-mix(in srgb,var(--bg) 45%,transparent)}
 .adm-bulk b{font-variant-numeric:tabular-nums;padding:0 8px}
 .adm-bulkprog{position:absolute;left:12px;right:12px;bottom:0;height:3px;border-radius:2px;overflow:hidden;background:color-mix(in srgb,var(--bg) 25%,transparent)}
 .adm-bulkprog i{display:block;height:100%;background:var(--bg);transition:width .3s var(--ease)}
 
-/* menu */
-.adm-menu{position:fixed;z-index:80;min-width:196px;padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);box-shadow:0 22px 50px -14px rgba(0,0,0,.45);animation:adm-pop .22s var(--spring) both;transform-origin:top right}
+/* menu (rendered in a portal on <body>, so it always opens at the button) */
+.adm-menu{position:fixed;z-index:120;width:208px;max-width:calc(100vw - 16px);padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg);box-shadow:0 22px 50px -14px rgba(0,0,0,.5);animation:adm-pop .22s var(--spring) both;transform-origin:top right}
 @keyframes adm-pop{from{opacity:0;transform:scale(.92) translateY(-4px)}to{opacity:1;transform:none}}
-.adm-menu button{display:flex;align-items:center;gap:9px;width:100%;height:36px;padding:0 10px;border:0;border-radius:8px;background:transparent;font-size:13px;font-weight:600;text-align:left}
+.adm-menu button{display:flex;align-items:center;gap:9px;width:100%;height:36px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--fg);font-size:13px;font-weight:600;text-align:left}
 .adm-menu button:hover:not(:disabled){background:var(--mut)}
 .adm-menu button.danger{color:var(--bad)}
 .adm-menu button:disabled{opacity:.45}
 .adm-menu hr{border:0;border-top:1px solid var(--bd);margin:5px 4px}
 
-/* overlays */
-.adm-overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(8,12,28,.5);animation:adm-fade .25s ease both}
+/* overlays: toasts 130 > menu 120 > palette 90 > modals 70 > drawer 51 > page */
+.adm-overlay{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(8,12,28,.55);animation:adm-fade .25s ease both}
 @keyframes adm-fade{from{opacity:0}to{opacity:1}}
-.adm-modal{width:100%;max-height:calc(100dvh - 32px);overflow:auto;padding:22px;border:1px solid var(--bd);border-radius:20px;background:var(--card);box-shadow:0 40px 90px -24px rgba(0,0,0,.6);animation:adm-modal .45s var(--spring) both}
+.adm-modal{width:100%;max-height:calc(100dvh - 32px);overflow:auto;padding:22px;border:1px solid var(--bd);border-radius:20px;background:var(--card);color:var(--fg);box-shadow:0 40px 90px -24px rgba(0,0,0,.6);animation:adm-modal .45s var(--spring) both}
 @keyframes adm-modal{from{opacity:0;transform:translateY(24px) scale(.94)}to{opacity:1;transform:none}}
-.adm-mh{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-.adm-mh h2{margin:0;font-size:18px;font-weight:800}
+.adm-mh{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}
+.adm-mh h2{margin:0;font-size:18px;font-weight:800;min-width:0;overflow-wrap:anywhere}
 .adm-field{display:grid;gap:6px;margin-bottom:14px}
 .adm-field label{font-size:12.5px;font-weight:700}
 .adm-field label small{font-weight:500;color:var(--mutfg)}
 .adm-field .help{font-size:11.5px;color:var(--mutfg)}
 .adm-field .err{font-size:11.5px;color:var(--bad)}
 .adm-input{width:100%;height:40px;padding:0 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--fg);font:inherit;transition:border-color .2s,box-shadow .25s}
-.adm-input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 16%,transparent)}
+.adm-input::placeholder{color:var(--mutfg)}
+.adm-input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 18%,transparent)}
 .adm-input.bad{border-color:var(--bad)}
 .adm-input.sm{height:34px;font-size:13px}
 .adm-mf{display:flex;gap:10px;margin-top:18px}
-.adm-mf .adm-btn{flex:1;height:40px}
+.adm-mf .adm-btn{flex:1;height:42px}
 .adm-shake{animation:adm-shake .45s}
 @keyframes adm-shake{20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
-.adm-quick{display:flex;gap:6px;flex-wrap:wrap}
-.adm-warnbox{display:flex;gap:10px;padding:10px 12px;border-radius:10px;font-size:12.5px;background:color-mix(in srgb,var(--warn) 13%,transparent);color:var(--warn);margin-bottom:12px}
-.adm-dangerbox{padding:12px;border-radius:12px;background:color-mix(in srgb,var(--bad) 10%,transparent);color:var(--fg);font-size:12.5px;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--bad) 35%,transparent)}
+.adm-quick{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.adm-warnbox{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;font-size:12.5px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);margin-bottom:12px}
+.adm-dangerbox{padding:12px;border-radius:12px;background:color-mix(in srgb,var(--bad) 10%,transparent);color:var(--fg);font-size:12.5px;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--bad) 38%,transparent)}
 
 /* drawer */
-.adm-drawerov{position:fixed;inset:0;z-index:60;background:rgba(8,12,28,.45);animation:adm-fade .25s both}
-.adm-drawer{position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);z-index:61;display:flex;flex-direction:column;background:var(--card);border-left:1px solid var(--bd);box-shadow:-30px 0 80px -30px rgba(0,0,0,.55);animation:adm-slide .5s var(--ease) both}
+.adm-drawerov{position:fixed;inset:0;z-index:50;background:rgba(8,12,28,.5);animation:adm-fade .25s both}
+.adm-drawer{position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);z-index:51;display:flex;flex-direction:column;background:var(--card);color:var(--fg);border-left:1px solid var(--bd);box-shadow:-30px 0 80px -30px rgba(0,0,0,.55);animation:adm-slide .5s var(--ease) both}
 @keyframes adm-slide{from{transform:translateX(100%)}to{transform:none}}
-.adm-dh{display:flex;align-items:center;gap:14px;padding:18px 20px;border-bottom:1px solid var(--bd)}
+.adm-dh{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--bd)}
 .adm-dh .t{flex:1;min-width:0}
 .adm-dh h2{margin:0;font-size:17px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .adm-dh .avatar{width:46px;height:46px;font-size:15px}
-.adm-tabs{display:flex;gap:4px;padding:10px 20px 0;border-bottom:1px solid var(--bd);position:relative}
+.adm-tabs{display:flex;gap:4px;padding:10px 18px 0;border-bottom:1px solid var(--bd);position:relative;overflow:hidden}
 .adm-tabs button{position:relative;border:0;background:transparent;padding:9px 12px 12px;font-weight:700;font-size:13px;color:var(--mutfg)}
 .adm-tabs button.on{color:var(--fg)}
 .adm-tabs button.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:var(--pri);animation:adm-growx .35s var(--ease)}
-.adm-db{flex:1;overflow:auto;padding:18px 20px 28px}
+.adm-db{flex:1;overflow:auto;overflow-x:hidden;padding:18px 18px 28px;min-width:0}
 .adm-db > *{animation:adm-in .5s var(--ease) both;animation-delay:calc(var(--i,0) * 50ms)}
-.adm-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
-.adm-stat{padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--mut)}
+.adm-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,110px),1fr));gap:10px;margin-bottom:16px}
+.adm-stat{padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--mut);min-width:0}
 .adm-stat small{display:block;color:var(--mutfg);font-size:11px;font-weight:600}
-.adm-stat b{font-size:17px;font-variant-numeric:tabular-nums}
-.adm-timeline{padding:14px;border:1px solid var(--bd);border-radius:14px;margin-bottom:16px}
-.adm-track{position:relative;height:8px;border-radius:5px;background:var(--mut);margin:14px 0 10px}
+.adm-stat b{font-size:16px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.adm-timeline{padding:14px;border:1px solid var(--bd);border-radius:14px;margin-bottom:16px;background:var(--card)}
+.adm-track{position:relative;height:8px;border-radius:5px;background:var(--mut);box-shadow:inset 0 0 0 1px var(--bd);margin:14px 0 10px}
 .adm-track i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--c,var(--ok));transform-origin:0 50%;animation:adm-growx 1.1s var(--ease) .15s both}
 .adm-track u{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--card);border:3px solid var(--c,var(--ok));animation:adm-in .6s var(--spring) .9s both}
-.adm-tl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mutfg)}
+.adm-tl{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--mutfg)}
 .adm-sec{margin:0 0 8px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mutfg)}
 .adm-cust{display:grid;gap:8px}
-.adm-crow{padding:11px 12px;border:1px solid var(--bd);border-radius:12px;animation:adm-rowin .45s var(--ease) both;animation-delay:calc(var(--i,0) * 30ms);transition:border-color .2s,transform .25s var(--spring)}
-.adm-crow:hover{border-color:color-mix(in srgb,var(--pri) 45%,var(--bd));transform:translateX(2px)}
-.adm-crow .l{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.adm-crow{padding:11px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--card);animation:adm-rowin .45s var(--ease) both;animation-delay:calc(var(--i,0) * 30ms);transition:border-color .2s,transform .25s var(--spring)}
+.adm-crow:hover{border-color:color-mix(in srgb,var(--pri) 50%,var(--bd));transform:translateX(2px)}
+.adm-crow .l{display:flex;align-items:center;justify-content:space-between;gap:10px 12px;flex-wrap:wrap}
 .adm-crow p{margin:0}.adm-crow .m{color:var(--mutfg);font-size:11.5px}
 .adm-nonum{color:var(--warn)}
 
 /* toasts */
-.adm-toasts{position:fixed;right:16px;bottom:16px;z-index:100;display:grid;gap:10px;width:min(380px,calc(100vw - 32px))}
-.adm-toast{position:relative;display:flex;align-items:flex-start;gap:10px;padding:12px 12px 14px;border:1px solid var(--bd);border-radius:14px;background:var(--card);box-shadow:0 20px 44px -16px rgba(0,0,0,.5);overflow:hidden;animation:adm-toast .5s var(--spring) both}
+.adm-toasts{position:fixed;right:16px;bottom:16px;z-index:130;display:grid;gap:10px;width:min(380px,calc(100vw - 32px))}
+.adm-toast{position:relative;display:flex;align-items:flex-start;gap:10px;padding:12px 12px 14px;border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--fg);box-shadow:0 20px 44px -16px rgba(0,0,0,.5);overflow:hidden;animation:adm-toast .5s var(--spring) both}
 @keyframes adm-toast{from{opacity:0;transform:translateX(40px) scale(.95)}to{opacity:1;transform:none}}
-.adm-toast .ic{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:#fff}
-.adm-t-success .ic{background:var(--ok)}.adm-t-error .ic{background:var(--bad)}.adm-t-info .ic{background:var(--pri)}
-.adm-toast b{display:block;font-size:13px}.adm-toast p{margin:2px 0 0;font-size:12px;color:var(--mutfg)}
+.adm-toast .ic{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:var(--prifg)}
+.adm-t-success .ic{background:var(--ok)}.adm-t-error .ic{background:#dc2626;color:#fff}.adm-t-info .ic{background:var(--pri)}
+.adm-toast b{display:block;font-size:13px;overflow-wrap:anywhere}.adm-toast p{margin:2px 0 0;font-size:12px;color:var(--mutfg);overflow-wrap:anywhere}
 .adm-toast .g{flex:1;min-width:0}
 .adm-toastbar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--c,var(--pri));transform-origin:0 50%;animation:adm-bar linear forwards}
 .adm-toast:hover .adm-toastbar{animation-play-state:paused}
@@ -529,15 +658,15 @@ const ADM_CSS = `
 @keyframes adm-bar{to{transform:scaleX(0)}}
 
 /* palette */
-.adm-palov{align-items:flex-start;padding-top:12vh}
-.adm-pal{width:min(600px,100%);overflow:hidden;border:1px solid var(--bd);border-radius:18px;background:var(--card);box-shadow:0 40px 90px -24px rgba(0,0,0,.65);animation:adm-modal .35s var(--spring) both}
+.adm-overlay.adm-palov{align-items:flex-start;padding-top:12vh;z-index:90}
+.adm-pal{width:min(600px,100%);overflow:hidden;border:1px solid var(--bd);border-radius:18px;background:var(--card);color:var(--fg);box-shadow:0 40px 90px -24px rgba(0,0,0,.65);animation:adm-modal .35s var(--spring) both}
 .adm-pal input{width:100%;height:54px;padding:0 18px;border:0;border-bottom:1px solid var(--bd);background:transparent;color:var(--fg);font:inherit;font-size:15px}
+.adm-pal input::placeholder{color:var(--mutfg)}
 .adm-pal input:focus{outline:0}
-.adm-pal ul{list-style:none;margin:0;padding:6px;max-height:340px;overflow:auto}
-.adm-pal li button{display:flex;align-items:center;gap:11px;width:100%;height:42px;padding:0 12px;border:0;border-radius:10px;background:transparent;text-align:left;font-weight:600}
+.adm-pal ul{list-style:none;margin:0;padding:6px;max-height:min(340px,55dvh);overflow:auto}
+.adm-pal li button{display:flex;align-items:center;gap:11px;width:100%;height:42px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:var(--fg);text-align:left;font-weight:600}
 .adm-pal li button.on{background:var(--mut)}
 .adm-pal li small{margin-left:auto;color:var(--mutfg);font-weight:500}
-.adm-pal .grp{padding:8px 12px 4px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mutfg)}
 .adm-pal .empty{padding:26px;text-align:center;color:var(--mutfg)}
 
 /* activity */
@@ -546,6 +675,7 @@ const ADM_CSS = `
 .adm-log i{flex:none;width:9px;height:9px;margin-top:5px;border-radius:50%;background:var(--ok)}
 .adm-log i.bad{background:var(--bad)}
 .adm-log small{display:block;color:var(--mutfg);font-size:11.5px}
+.adm-log span{min-width:0;overflow-wrap:anywhere}
 
 /* skeleton + empty */
 .adm-skel{border-radius:10px;background:linear-gradient(100deg,var(--mut) 30%,color-mix(in srgb,var(--bd) 70%,var(--mut)) 50%,var(--mut) 70%);background-size:220% 100%;animation:adm-shimmer 1.4s linear infinite}
@@ -553,26 +683,64 @@ const ADM_CSS = `
 .adm-empty{display:grid;place-items:center;gap:10px;padding:56px 16px;text-align:center;color:var(--mutfg)}
 .adm-empty svg{color:var(--pri);animation:adm-float 4s ease-in-out infinite}
 @keyframes adm-float{50%{transform:translateY(-8px)}}
-.adm-err{margin-bottom:14px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--bad) 11%,transparent);color:var(--bad);font-size:13px;display:flex;align-items:center;gap:10px;animation:adm-in .4s var(--ease)}
+.adm-err{margin-bottom:14px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--bad) 12%,var(--card));border:1px solid color-mix(in srgb,var(--bad) 35%,transparent);color:var(--bad);font-size:13px;display:flex;align-items:center;gap:10px;animation:adm-in .4s var(--ease)}
 
 /* login */
 .adm-login{position:relative;min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:var(--bg);color:var(--fg);overflow:hidden}
+.adm-logintheme{position:fixed;top:14px;right:14px;z-index:5}
 .adm-lcard{position:relative;z-index:1;width:100%;max-width:392px;padding:32px;border:1px solid var(--bd);border-radius:24px;background:var(--card);box-shadow:0 40px 90px -30px rgba(0,0,0,.5);animation:adm-modal .7s var(--spring) both}
 .adm-lock{position:relative;width:54px;height:54px;margin-bottom:20px;border-radius:16px;display:grid;place-items:center;background:color-mix(in srgb,var(--pri) 14%,transparent);color:var(--pri)}
 .adm-lock::after{content:"";position:absolute;inset:0;border-radius:16px;border:2px solid var(--pri);animation:adm-pulse 2.4s ease-out infinite}
 .adm-lcard h1{margin:0 0 4px;font-size:22px;font-weight:800}
 .adm-lcard .adm-pw{position:relative}
+.adm-lcard .adm-pw .adm-input{padding-right:44px}
 .adm-lcard .adm-pw button{position:absolute;right:6px;top:5px;width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--mutfg)}
-.adm-notice{margin-bottom:14px;padding:10px 12px;border-radius:10px;font-size:12.5px;background:color-mix(in srgb,var(--warn) 13%,transparent);color:var(--warn)}
+.adm-notice{margin-bottom:14px;padding:10px 12px;border-radius:10px;font-size:12.5px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
 .adm-back{display:inline-flex;align-items:center;gap:8px;margin-bottom:18px;color:var(--mutfg);font-size:13px;text-decoration:none;transition:color .2s,transform .25s var(--spring)}
 .adm-back:hover{color:var(--pri);transform:translateX(-3px)}
 
-@media (max-width:760px){.adm-wrap{padding:18px 12px 120px}.adm-title{font-size:23px}.adm-tools .hide-sm{display:none}}
+/* tablet and phone */
+@media (max-width:900px){.adm-duo{grid-template-columns:1fr}}
+@media (max-width:760px){
+  .adm-wrap{padding:16px 12px 130px}
+  .adm-title{font-size:23px}
+  .adm-head{align-items:stretch}
+  .adm-tools{width:100%}
+  .adm-tools .adm-btn:not(.sq){flex:1 1 calc(50% - 8px)}
+  .adm-tools .hide-sm{display:none}
+  .adm-search{flex:1 1 100%;max-width:none}
+  .adm-toolbar .adm-select{flex:1 1 140px}
+  .adm-toasts{top:12px;bottom:auto;right:12px;left:12px;width:auto}
+  .adm-bulk{bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  .adm-modal{padding:18px;border-radius:18px}
+  .adm-lcard{padding:24px}
+  .adm-overlay.adm-palov{padding-top:8vh}
+  .adm-pager{justify-content:center}
+  .adm-attn,.adm-panel{padding:14px}
+}
+@media (max-width:480px){
+  .adm-dh{flex-wrap:wrap}
+  .adm-dh .t{flex:1 1 140px}
+  .adm-db{padding:14px 12px 24px}
+  .adm-tabs{padding:8px 12px 0}
+  .adm-mf{flex-direction:column-reverse}
+  .adm-kpi .val{font-size:22px}
+}
 @media (prefers-reduced-motion:reduce){
-  .adm-root *,.adm-root *::before,.adm-root *::after{animation-duration:.01ms !important;animation-delay:0ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+  .adm-root *,.adm-root *::before,.adm-root *::after,.adm-pt *,.adm-pt *::before,.adm-pt *::after{animation-duration:.01ms !important;animation-delay:0ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
   .adm-toastbar{animation-duration:var(--ttl) !important;animation-iteration-count:1 !important}
   .adm-aurora{display:none}
+  .adm-roll{transform:none !important;opacity:1 !important}
 }
+`;
+
+// Applied after EXTRAS_CSS so the extras panels also fit small screens and both themes.
+const FIX_CSS = `
+.adm-duo>.adm-roll{min-width:0}
+.adm-duo>.adm-roll>*{min-width:0;max-width:100%}
+.adm-duo{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:900px){.adm-duo{grid-template-columns:minmax(0,1fr)}}
+.adm-root img,.adm-root svg{max-width:100%}
 `;
 
 // ---------------------------------------------------------------------------
@@ -595,7 +763,7 @@ function StatusBadge({ bucket }: { bucket: Bucket }) {
   );
 }
 
-const bucketColor = (b: Bucket) => (b === "active" ? "var(--ok)" : b === "expiring" ? "#f59e0b" : b === "expired" ? "var(--bad)" : b === "deactivated" ? "var(--off)" : "#a78bfa");
+const bucketColor = (b: Bucket) => (b === "active" ? "var(--ok)" : b === "expiring" ? "var(--amber)" : b === "expired" ? "var(--bad)" : b === "deactivated" ? "var(--off)" : "var(--viol)");
 
 function Avatar({ o, className = "" }: { o: { name: string | null; phone: string }; className?: string }) {
   return (
@@ -607,9 +775,12 @@ function Avatar({ o, className = "" }: { o: { name: string | null; phone: string
 
 type MenuItem = { key: string; label: string; icon?: React.ReactNode; onClick: () => void; danger?: boolean; disabled?: boolean; testid?: string } | "sep";
 
-// A popover menu positioned with `fixed`, so a scrolling table can never clip it.
+// A popover menu. It is rendered through a portal on <body> and positioned with
+// `fixed` coordinates, so no scrolling table, hovered card or 3D-transformed parent
+// can clip it or shift it away from the button.
 function Menu({ trigger, items, aria, className = "adm-btn sm icon", testid }: { trigger: React.ReactNode; items: MenuItem[]; aria: string; className?: string; testid?: string }) {
-  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
+  const { theme } = useTheme();
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const btn = useRef<HTMLButtonElement | null>(null);
   const close = useCallback(() => setPos(null), []);
 
@@ -640,9 +811,11 @@ function Menu({ trigger, items, aria, className = "adm-btn sm icon", testid }: {
   const toggle = () => {
     if (pos) return close();
     const r = btn.current!.getBoundingClientRect();
+    const w = Math.min(208, window.innerWidth - 16);
     const h = items.length * 38 + 16;
     const up = r.bottom + h > window.innerHeight && r.top > h;
-    setPos({ right: Math.max(8, window.innerWidth - r.right), ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }) });
+    const left = clamp(r.right - w, 8, Math.max(8, window.innerWidth - w - 8));
+    setPos({ left, ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }) });
   };
 
   return (
@@ -650,30 +823,34 @@ function Menu({ trigger, items, aria, className = "adm-btn sm icon", testid }: {
       <button ref={btn} type="button" className={className} aria-haspopup="menu" aria-expanded={!!pos} aria-label={aria} onClick={toggle} data-testid={testid}>
         {trigger}
       </button>
-      {pos && (
-        <div className="adm-menu" role="menu" style={pos}>
-          {items.map((it, i) =>
-            it === "sep" ? (
-              <hr key={`s${i}`} />
-            ) : (
-              <button
-                key={it.key}
-                type="button"
-                role="menuitem"
-                className={it.danger ? "danger" : ""}
-                disabled={it.disabled}
-                data-testid={it.testid}
-                onClick={() => {
-                  close();
-                  it.onClick();
-                }}
-              >
-                {it.icon} {it.label}
-              </button>
-            )
-          )}
-        </div>
-      )}
+      {pos &&
+        createPortal(
+          <div className="adm-pt" data-theme={theme}>
+            <div className="adm-menu" role="menu" style={pos}>
+              {items.map((it, i) =>
+                it === "sep" ? (
+                  <hr key={`s${i}`} />
+                ) : (
+                  <button
+                    key={it.key}
+                    type="button"
+                    role="menuitem"
+                    className={it.danger ? "danger" : ""}
+                    disabled={it.disabled}
+                    data-testid={it.testid}
+                    onClick={() => {
+                      close();
+                      it.onClick();
+                    }}
+                  >
+                    {it.icon} {it.label}
+                  </button>
+                )
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </>
   );
 }
@@ -743,6 +920,16 @@ function LastUpdated({ at, refreshing, auto }: { at: number | null; refreshing: 
         </svg>
       )}
     </span>
+  );
+}
+
+function ThemeToggle({ className = "adm-btn sq adm-themebtn" }: { className?: string }) {
+  const { theme, toggle } = useTheme();
+  const next = theme === "dark" ? "light" : "dark";
+  return (
+    <button type="button" className={className} onClick={toggle} aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} data-testid="button-theme-toggle">
+      {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
   );
 }
 
@@ -1002,7 +1189,11 @@ const OwnerCard = React.memo(function OwnerCard({ o, i, selected, busy, flash, m
           )}
         </div>
       </div>
-      <div className="adm-actions" style={{ justifyContent: "flex-start" }}>
+      <div className="info">
+        <span>Joined {fmtDate(o.createdAt)}</span>
+        {o.language && <span className="adm-lang" style={{ margin: 0 }}>{o.language}</span>}
+      </div>
+      <div className="adm-actions">
         <button className="adm-btn sm pri" onClick={() => h.onExtend(o, 30)} disabled={busy}>
           {busy ? <Loader2 size={13} className="adm-spin" /> : "+30 days"}
         </button>
@@ -1398,8 +1589,11 @@ function OwnerDrawer({
                 </div>
                 {noNum > 0 && (
                   <p className="adm-warnbox" style={{ marginTop: 14 }}>
-                    <AlertTriangle size={15} /> {noNum} customer{noNum === 1 ? " has" : "s have"} no phone number, so reminders cannot reach them.
-                    <button className="adm-link" style={{ marginLeft: "auto" }} onClick={() => { setFilter("nonumber"); setTab("customers"); }}>
+                    <AlertTriangle size={15} style={{ flex: "none" }} />
+                    <span>
+                      {noNum} customer{noNum === 1 ? " has" : "s have"} no phone number, so reminders cannot reach them.
+                    </span>
+                    <button className="adm-link" style={{ marginLeft: "auto", flex: "none" }} onClick={() => { setFilter("nonumber"); setTab("customers"); }}>
                       Review
                     </button>
                   </p>
@@ -1415,16 +1609,16 @@ function OwnerDrawer({
               </div>
             )}
             <div className="adm-toolbar" style={{ marginBottom: 10 }}>
-              <div className="adm-search" style={{ maxWidth: "none" }}>
+              <div className="adm-search" style={{ maxWidth: "none", flex: "1 1 100%" }}>
                 <Search size={15} />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search customers" aria-label="Search customers" style={{ paddingRight: 12 }} />
               </div>
-              <select className="adm-select" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort customers">
+              <select className="adm-select" style={{ flex: "1 1 140px" }} value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort customers">
                 <option value="owed">Most owed</option>
                 <option value="newest">Newest</option>
                 <option value="name">Name A–Z</option>
               </select>
-              <button className="adm-btn sm" onClick={exportCustomers} disabled={!customers?.length}>
+              <button className="adm-btn" onClick={exportCustomers} disabled={!customers?.length}>
                 <Download size={13} /> CSV
               </button>
             </div>
@@ -1466,7 +1660,7 @@ function OwnerDrawer({
                       </div>
                     ) : (
                       <div className="l">
-                        <div style={{ minWidth: 0 }}>
+                        <div style={{ minWidth: 0, flex: "1 1 150px" }}>
                           <p style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</p>
                           <p className={`m ${c.phone ? "" : "adm-nonum"}`}>{c.phone ?? "No number"}</p>
                           <p className="m">Registered {formatCustomerTimestamp(c.createdAt)}</p>
@@ -1625,6 +1819,7 @@ function Pager({ page, pages, total, size, setPage, setSize, from, to }: { page:
 }
 
 function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (reason?: string) => void }) {
+  const { theme, toggle: toggleTheme } = useTheme();
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1653,6 +1848,10 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   const [activity, setActivity] = useState<ActivityItem[]>(loadLog);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const toastSeq = useRef(0);
+
+  // The table needs a wide screen. Everywhere else the list is shown as cards, so nothing scrolls sideways.
+  const wide = useMedia(TABLE_MIN_WIDTH);
+  const view: "table" | "cards" = wide ? prefs.view : "cards";
 
   useEffect(() => {
     try {
@@ -1824,6 +2023,9 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     if (page > pages - 1) setPage(pages - 1);
   }, [page, pages]);
   const pageRows = useMemo(() => visible.slice(page * prefs.pageSize, (page + 1) * prefs.pageSize), [visible, page, prefs.pageSize]);
+
+  // 3D scroll effect: re-scan whenever the set of rolling elements can change
+  useRoll(`${owners.length}|${pageRows.length}|${view}|${statusFilter}|${page}|${loading ? 1 : 0}|${attention.length}`);
 
   // drop selections that no longer exist after a refresh
   useEffect(() => {
@@ -2056,6 +2258,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       { id: "refresh", label: "Refresh data", hint: "R", icon: <RefreshCw size={16} />, run: () => void fetchOwners(true) },
       { id: "queue", label: "Open renewal queue", icon: <Send size={16} />, run: () => setQueueOpen(true) },
       { id: "csv", label: "Export all shops to CSV", icon: <Download size={16} />, run: () => exportOwners(enriched, "shopbrain-owners") },
+      { id: "theme", label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme", icon: theme === "dark" ? <Sun size={16} /> : <Moon size={16} />, run: toggleTheme },
       { id: "f-all", label: "Show all shops", icon: <Users size={16} />, run: () => setStatusFilter("all") },
       { id: "f-exp", label: "Show expiring soon", icon: <Clock size={16} />, run: () => setStatusFilter("expiring") },
       { id: "f-expd", label: "Show expired", icon: <XCircle size={16} />, run: () => setStatusFilter("expired") },
@@ -2066,7 +2269,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       { id: "out", label: "Log out", icon: <LockKeyhole size={16} />, run: () => onLogout() },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prefs.view, prefs.auto, enriched, fetchOwners, onLogout]
+    [prefs.view, prefs.auto, enriched, fetchOwners, onLogout, theme, toggleTheme]
   );
 
   const chips: { k: Bucket | "all"; l: string; n: number }[] = [
@@ -2076,8 +2279,8 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   const thisWeek = weeks[7], lastWeek = weeks[6];
 
   return (
-    <div className="adm-root" onPointerMove={onPointerMove}>
-      <style>{ADM_CSS + EXTRAS_CSS}</style>
+    <div className="adm-root" data-theme={theme} onPointerMove={onPointerMove}>
+      <style>{ADM_CSS + EXTRAS_CSS + FIX_CSS}</style>
       <div className="adm-aurora" aria-hidden />
       <RefreshBar active={loading || refreshing} />
       <div className="adm-wrap">
@@ -2091,7 +2294,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             </p>
           </div>
           <div className="adm-tools">
-            <button onClick={() => setPalette(true)} className="adm-btn hide-sm" title="Command palette">
+            <button onClick={() => setPalette(true)} className="adm-btn" title="Command palette">
               <Command size={14} /> Search anything <span className="adm-kbd">⌘K</span>
             </button>
             <button onClick={() => setShowAddModal(true)} className="adm-btn pri" data-testid="button-add-owner">
@@ -2106,19 +2309,20 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             <button onClick={() => fetchOwners(true)} disabled={loading || refreshing} className="adm-btn" data-testid="button-refresh">
               <RefreshCw size={14} className={loading || refreshing ? "adm-spin" : ""} /> Refresh
             </button>
-            <button onClick={() => setShowActivity(true)} className="adm-btn hide-sm" title="Activity log">
-              <Activity size={14} /> {activity.length > 0 && <b>{activity.length}</b>}
+            <button onClick={() => setShowActivity(true)} className="adm-btn" title="Activity log">
+              <Activity size={14} /> Activity {activity.length > 0 && <b>{activity.length}</b>}
             </button>
             <button onClick={() => onLogout()} className="adm-btn" data-testid="button-admin-logout">
               Log out
             </button>
+            <ThemeToggle />
           </div>
         </div>
 
         {error && (
           <div className="adm-err" data-testid="text-dashboard-error">
-            <AlertTriangle size={16} /> {error}
-            <button className="adm-link" style={{ marginLeft: "auto" }} onClick={() => fetchOwners()}>
+            <AlertTriangle size={16} style={{ flex: "none" }} /> <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{error}</span>
+            <button className="adm-link" style={{ marginLeft: "auto", flex: "none" }} onClick={() => fetchOwners()}>
               Retry
             </button>
           </div>
@@ -2130,12 +2334,24 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             [0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="adm-card adm-skel" style={{ height: 108 }} />)
           ) : (
             <>
-              <Kpi i={0} label="Total shops" value={owners.length} icon={<Users size={15} />} hint={`${thisWeek} new this week`} />
-              <Kpi i={1} label="Active" value={counts.active} icon={<CheckCircle2 size={15} />} color="var(--ok)" on={statusFilter === "active"} onClick={() => pickBucket("active")} hint="Click to filter" />
-              <Kpi i={2} label="Expiring soon" value={counts.expiring} icon={<Clock size={15} />} color="#f59e0b" on={statusFilter === "expiring"} onClick={() => pickBucket("expiring")} hint="Needs a renewal" />
-              <Kpi i={3} label="Expired" value={counts.expired} icon={<XCircle size={15} />} color="var(--bad)" on={statusFilter === "expired"} onClick={() => pickBucket("expired")} hint="Access has ended" />
-              <Kpi i={4} label="Customers (all shops)" value={totalCustomers} icon={<TrendingUp size={15} />} hint={owners.length ? `${(totalCustomers / owners.length).toFixed(1)} per shop` : undefined} />
-              <Kpi i={5} label="Total outstanding" value={totalOutstandingAll} suffix="Frw" icon={<Zap size={15} />} color="#a78bfa" hint="Owed to shops" />
+              <Roll>
+                <Kpi i={0} label="Total shops" value={owners.length} icon={<Users size={15} />} hint={`${thisWeek} new this week`} />
+              </Roll>
+              <Roll>
+                <Kpi i={1} label="Active" value={counts.active} icon={<CheckCircle2 size={15} />} color="var(--ok)" on={statusFilter === "active"} onClick={() => pickBucket("active")} hint="Click to filter" />
+              </Roll>
+              <Roll>
+                <Kpi i={2} label="Expiring soon" value={counts.expiring} icon={<Clock size={15} />} color="var(--amber)" on={statusFilter === "expiring"} onClick={() => pickBucket("expiring")} hint="Needs a renewal" />
+              </Roll>
+              <Roll>
+                <Kpi i={3} label="Expired" value={counts.expired} icon={<XCircle size={15} />} color="var(--bad)" on={statusFilter === "expired"} onClick={() => pickBucket("expired")} hint="Access has ended" />
+              </Roll>
+              <Roll>
+                <Kpi i={4} label="Customers (all shops)" value={totalCustomers} icon={<TrendingUp size={15} />} hint={owners.length ? `${(totalCustomers / owners.length).toFixed(1)} per shop` : undefined} />
+              </Roll>
+              <Roll>
+                <Kpi i={5} label="Total outstanding" value={totalOutstandingAll} suffix="Frw" icon={<Zap size={15} />} color="var(--viol)" hint="Owed to shops" />
+              </Roll>
             </>
           )}
         </div>
@@ -2143,92 +2359,104 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         {/* insights */}
         {owners.length > 0 && (
           <div className="adm-grid2">
-            <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 6 } as React.CSSProperties}>
-              <h3>
-                <Activity size={15} /> Shops by status
-              </h3>
-              <Donut counts={counts} total={owners.length} filter={statusFilter} onPick={pickBucket} />
-            </div>
-            <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 7 } as React.CSSProperties}>
-              <h3>
-                <TrendingUp size={15} /> Biggest outstanding balances
-              </h3>
-              {topDebt.length === 0 ? (
-                <p style={{ color: "var(--mutfg)" }}>No outstanding balances.</p>
-              ) : (
-                <div className="adm-bars">
-                  {topDebt.map((o, i) => (
-                    <button key={o.phone} className="adm-brow" onClick={() => setDrawer({ phone: o.phone, tab: "overview" })} style={{ ["--i" as string]: i } as React.CSSProperties}>
-                      <span className="n">{label(o)}</span>
-                      <span className="adm-btrack">
-                        <i style={{ width: `${(o.totalOutstanding / topDebt[0].totalOutstanding) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
-                      </span>
-                      <b>{money(o.totalOutstanding)}</b>
-                    </button>
+            <Roll>
+              <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 6 } as React.CSSProperties}>
+                <h3>
+                  <Activity size={15} /> Shops by status
+                </h3>
+                <Donut counts={counts} total={owners.length} filter={statusFilter} onPick={pickBucket} />
+              </div>
+            </Roll>
+            <Roll>
+              <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 7 } as React.CSSProperties}>
+                <h3>
+                  <TrendingUp size={15} /> Biggest outstanding balances
+                </h3>
+                {topDebt.length === 0 ? (
+                  <p style={{ color: "var(--mutfg)" }}>No outstanding balances.</p>
+                ) : (
+                  <div className="adm-bars">
+                    {topDebt.map((o, i) => (
+                      <button key={o.phone} className="adm-brow" onClick={() => setDrawer({ phone: o.phone, tab: "overview" })} style={{ ["--i" as string]: i } as React.CSSProperties}>
+                        <span className="n">{label(o)}</span>
+                        <span className="adm-btrack">
+                          <i style={{ width: `${(o.totalOutstanding / topDebt[0].totalOutstanding) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+                        </span>
+                        <b>{money(o.totalOutstanding)}</b>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Roll>
+            <Roll>
+              <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 8 } as React.CSSProperties}>
+                <h3>
+                  <UserPlus size={15} /> New shops, last 8 weeks
+                </h3>
+                <div className="adm-sign">
+                  {weeks.map((n, i) => (
+                    <div key={i} title={`${n} new shop${n === 1 ? "" : "s"}`}>
+                      <span>{n || ""}</span>
+                      <i style={{ height: `${Math.max(4, (n / Math.max(1, ...weeks)) * 100)}%`, ["--i" as string]: i, opacity: n ? 1 : 0.25 } as React.CSSProperties} />
+                    </div>
                   ))}
                 </div>
-              )}
-            </div>
-            <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 8 } as React.CSSProperties}>
-              <h3>
-                <UserPlus size={15} /> New shops, last 8 weeks
-              </h3>
-              <div className="adm-sign">
-                {weeks.map((n, i) => (
-                  <div key={i} title={`${n} new shop${n === 1 ? "" : "s"}`}>
-                    <span>{n || ""}</span>
-                    <i style={{ height: `${Math.max(4, (n / Math.max(1, ...weeks)) * 100)}%`, ["--i" as string]: i, opacity: n ? 1 : 0.25 } as React.CSSProperties} />
-                  </div>
-                ))}
+                <p className="adm-trend">
+                  {thisWeek} this week vs {lastWeek} last week {thisWeek > lastWeek && <b>▲</b>}
+                </p>
               </div>
-              <p className="adm-trend">
-                {thisWeek} this week vs {lastWeek} last week {thisWeek > lastWeek && <b>▲</b>}
-              </p>
-            </div>
+            </Roll>
           </div>
         )}
 
         {/* needs attention */}
         {owners.length > 0 && (
-          <div className={`adm-card adm-attn adm-in ${attention.length > 0 ? "adm-glowborder" : ""}`} style={{ ["--i" as string]: 9 } as React.CSSProperties}>
-            <h3>
-              <Bell size={15} /> Needs attention <small style={{ color: "var(--mutfg)", fontWeight: 500 }}>expiring within 7 days, or ended in the last 14</small>
-            </h3>
-            {attention.length === 0 ? (
-              <div className="adm-allclear">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" strokeWidth="2" />
-                  <path d="M7 12.5l3.2 3.2L17 9" />
-                </svg>
-                All clear. Nobody needs a renewal right now.
-              </div>
-            ) : (
-              <div className="adm-attnlist">
-                {attention.map((o) => (
-                  <div key={o.phone} className="adm-attnitem">
-                    <Avatar o={o} />
-                    <div className="who">
-                      <b>{label(o)}</b>
-                      <span style={{ color: (o.daysLeft ?? 0) < 0 ? "var(--bad)" : "var(--warn)" }}>{(o.daysLeft ?? 0) < 0 ? `Ended ${relDays(o.daysLeft)}` : `Ends ${relDays(o.daysLeft)}`}</span>
+          <Roll>
+            <div className={`adm-card adm-attn adm-in ${attention.length > 0 ? "adm-glowborder" : ""}`} style={{ ["--i" as string]: 9 } as React.CSSProperties}>
+              <h3>
+                <Bell size={15} /> Needs attention <small style={{ color: "var(--mutfg)", fontWeight: 500 }}>expiring within 7 days, or ended in the last 14</small>
+              </h3>
+              {attention.length === 0 ? (
+                <div className="adm-allclear">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" strokeWidth="2" />
+                    <path d="M7 12.5l3.2 3.2L17 9" />
+                  </svg>
+                  All clear. Nobody needs a renewal right now.
+                </div>
+              ) : (
+                <div className="adm-attnlist">
+                  {attention.map((o) => (
+                    <div key={o.phone} className="adm-attnitem">
+                      <Avatar o={o} />
+                      <div className="who">
+                        <b>{label(o)}</b>
+                        <span style={{ color: (o.daysLeft ?? 0) < 0 ? "var(--bad)" : "var(--warn)" }}>{(o.daysLeft ?? 0) < 0 ? `Ended ${relDays(o.daysLeft)}` : `Ends ${relDays(o.daysLeft)}`}</span>
+                      </div>
+                      <button className="adm-btn sm pri" disabled={!!busy[o.phone]} onClick={() => extend(o, 30)}>
+                        {busy[o.phone] ? <Loader2 size={13} className="adm-spin" /> : "+30d"}
+                      </button>
+                      <a className="adm-btn sm icon" href={waLink(o.phone, renewalMessage(o))} target="_blank" rel="noopener noreferrer" aria-label={`Remind ${label(o)} on WhatsApp`}>
+                        <MessageCircle size={13} />
+                      </a>
                     </div>
-                    <button className="adm-btn sm pri" disabled={!!busy[o.phone]} onClick={() => extend(o, 30)}>
-                      {busy[o.phone] ? <Loader2 size={13} className="adm-spin" /> : "+30d"}
-                    </button>
-                    <a className="adm-btn sm icon" href={waLink(o.phone, renewalMessage(o))} target="_blank" rel="noopener noreferrer" aria-label={`Remind ${label(o)} on WhatsApp`}>
-                      <MessageCircle size={13} />
-                    </a>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Roll>
         )}
 
         {/* activation funnel + inactive shops */}
         {owners.length > 0 && (
           <div className="adm-duo">
-            <FunnelPanel owners={enriched} />
-            <InactivePanel owners={enriched} waLink={waLink} />
+            <Roll>
+              <FunnelPanel owners={enriched} />
+            </Roll>
+            <Roll>
+              <InactivePanel owners={enriched} waLink={waLink} />
+            </Roll>
           </div>
         )}
 
@@ -2255,16 +2483,18 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             <option value="customers">Most customers</option>
             <option value="outstanding">Highest outstanding</option>
           </select>
-          <div className="adm-segbtn" role="group" aria-label="View">
-            <button className={prefs.view === "table" ? "on" : ""} onClick={() => setPrefs((p) => ({ ...p, view: "table" }))} aria-label="Table view" title="Table view">
-              <List size={15} />
-            </button>
-            <button className={prefs.view === "cards" ? "on" : ""} onClick={() => setPrefs((p) => ({ ...p, view: "cards" }))} aria-label="Card view" title="Card view">
-              <LayoutGrid size={15} />
-            </button>
-          </div>
-          {prefs.view === "table" && (
-            <button className="adm-btn hide-sm" onClick={() => setPrefs((p) => ({ ...p, density: p.density === "comfy" ? "compact" : "comfy" }))} title="Row density">
+          {wide && (
+            <div className="adm-segbtn" role="group" aria-label="View">
+              <button className={prefs.view === "table" ? "on" : ""} onClick={() => setPrefs((p) => ({ ...p, view: "table" }))} aria-label="Table view" title="Table view">
+                <List size={15} />
+              </button>
+              <button className={prefs.view === "cards" ? "on" : ""} onClick={() => setPrefs((p) => ({ ...p, view: "cards" }))} aria-label="Card view" title="Card view">
+                <LayoutGrid size={15} />
+              </button>
+            </div>
+          )}
+          {wide && view === "table" && (
+            <button className="adm-btn" onClick={() => setPrefs((p) => ({ ...p, density: p.density === "comfy" ? "compact" : "comfy" }))} title="Row density">
               {prefs.density === "comfy" ? "Comfortable" : "Compact"}
             </button>
           )}
@@ -2320,7 +2550,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
               Clear filters
             </button>
           </div>
-        ) : prefs.view === "table" ? (
+        ) : view === "table" ? (
           <div className="adm-card" style={{ overflow: "hidden" }}>
             <div className="adm-tablewrap">
               <table className={`adm-table ${prefs.density}`}>
@@ -2362,7 +2592,9 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         ) : (
           <div className="adm-cards">
             {pageRows.map((o, i) => (
-              <OwnerCard key={o.phone} o={o} i={i} selected={selected.has(o.phone)} busy={!!busy[o.phone]} flash={!!flash[o.phone]} maxOut={maxOut} h={handlers} />
+              <Roll key={o.phone}>
+                <OwnerCard o={o} i={i} selected={selected.has(o.phone)} busy={!!busy[o.phone]} flash={!!flash[o.phone]} maxOut={maxOut} h={handlers} />
+              </Roll>
             ))}
           </div>
         )}
@@ -2463,10 +2695,11 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
 }
 
 // ---------------------------------------------------------------------------
-// Login gate (same /admin/verify call as before)
+// Login gate (same /admin/verify call as before) + theme provider
 // ---------------------------------------------------------------------------
 
 export default function Admin() {
+  const [theme, setTheme] = useState<Theme>(loadTheme);
   const [password, setPassword] = useState<string | null>(null);
   const [passwordInput, setPasswordInput] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -2474,6 +2707,19 @@ export default function Admin() {
   const [showPw, setShowPw] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [shake, setShake] = useState(0);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => {
+      const next: Theme = t === "dark" ? "light" : "dark";
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch {
+        /* private mode */
+      }
+      return next;
+    });
+  }, []);
+  const themeValue = useMemo(() => ({ theme, toggle: toggleTheme }), [theme, toggleTheme]);
 
   useEffect(() => {
     const stored = sessionStorage.getItem(SESSION_KEY);
@@ -2522,61 +2768,70 @@ export default function Admin() {
 
   if (!password) {
     return (
-      <div className="adm-root adm-login">
-        <style>{ADM_CSS + EXTRAS_CSS}</style>
-        <div className="adm-aurora" aria-hidden />
-        <div style={{ width: "100%", maxWidth: 392, position: "relative", zIndex: 1 }}>
-          <Link href="/" className="adm-back">
-            <ArrowLeft size={16} /> Back to site
-          </Link>
-          <div className="adm-lcard">
-            <div className="adm-lock">
-              <LockKeyhole size={24} />
-            </div>
-            <h1>Admin Access</h1>
-            <p style={{ margin: "0 0 20px", color: "var(--mutfg)", fontSize: 13.5 }}>Enter the owner password to continue.</p>
-
-            {notice && <div className="adm-notice">{notice}</div>}
-
-            <form onSubmit={handleLogin}>
-              <div className="adm-field">
-                <label htmlFor="password">Password</label>
-                <div className="adm-pw">
-                  <input
-                    key={shake}
-                    className={`adm-input ${shake ? "adm-shake" : ""}`}
-                    type={showPw ? "text" : "password"}
-                    id="password"
-                    required
-                    autoFocus
-                    autoComplete="current-password"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    placeholder="••••••••"
-                    data-testid="input-admin-password"
-                  />
-                  <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? "Hide password" : "Show password"}>
-                    {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
+      <ThemeCtx.Provider value={themeValue}>
+        <div className="adm-root adm-login" data-theme={theme}>
+          <style>{ADM_CSS + EXTRAS_CSS + FIX_CSS}</style>
+          <div className="adm-aurora" aria-hidden />
+          <div className="adm-logintheme">
+            <ThemeToggle />
+          </div>
+          <div style={{ width: "100%", maxWidth: 392, position: "relative", zIndex: 1 }}>
+            <Link href="/" className="adm-back">
+              <ArrowLeft size={16} /> Back to site
+            </Link>
+            <div className="adm-lcard">
+              <div className="adm-lock">
+                <LockKeyhole size={24} />
               </div>
+              <h1>Admin Access</h1>
+              <p style={{ margin: "0 0 20px", color: "var(--mutfg)", fontSize: 13.5 }}>Enter the owner password to continue.</p>
 
-              {loginError && (
-                <p className="err" style={{ margin: "-4px 0 12px", fontSize: 13, color: "var(--bad)" }} data-testid="text-admin-error">
-                  {loginError}
-                </p>
-              )}
+              {notice && <div className="adm-notice">{notice}</div>}
 
-              <button type="submit" disabled={loggingIn} className="adm-btn pri" style={{ width: "100%", height: 42 }} data-testid="button-admin-login">
-                {loggingIn ? <Loader2 size={16} className="adm-spin" /> : null}
-                {loggingIn ? "Checking..." : "Log In"}
-              </button>
-            </form>
+              <form onSubmit={handleLogin}>
+                <div className="adm-field">
+                  <label htmlFor="password">Password</label>
+                  <div className="adm-pw">
+                    <input
+                      key={shake}
+                      className={`adm-input ${shake ? "adm-shake" : ""}`}
+                      type={showPw ? "text" : "password"}
+                      id="password"
+                      required
+                      autoFocus
+                      autoComplete="current-password"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      placeholder="••••••••"
+                      data-testid="input-admin-password"
+                    />
+                    <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? "Hide password" : "Show password"}>
+                      {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {loginError && (
+                  <p className="err" style={{ margin: "-4px 0 12px", fontSize: 13, color: "var(--bad)" }} data-testid="text-admin-error">
+                    {loginError}
+                  </p>
+                )}
+
+                <button type="submit" disabled={loggingIn} className="adm-btn pri" style={{ width: "100%", height: 42 }} data-testid="button-admin-login">
+                  {loggingIn ? <Loader2 size={16} className="adm-spin" /> : null}
+                  {loggingIn ? "Checking..." : "Log In"}
+                </button>
+              </form>
+            </div>
           </div>
         </div>
-      </div>
+      </ThemeCtx.Provider>
     );
   }
 
-  return <OwnersDashboard password={password} onLogout={handleLogout} />;
+  return (
+    <ThemeCtx.Provider value={themeValue}>
+      <OwnersDashboard password={password} onLogout={handleLogout} />
+    </ThemeCtx.Provider>
+  );
 }
