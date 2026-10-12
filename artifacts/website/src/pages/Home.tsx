@@ -5,6 +5,8 @@ import PhoneScene from "./PhoneScene";
 import Intro from "./Intro";
 import { WhyShopBrain, DayTimeline, MoneyCalculator } from "./Showcase";
 import { LiveStats, TrustSection } from "./Trust";
+import { SCROLL3D_CSS, ScrollCube } from "./Scroll3D";
+import PhoneTutorial from "./PhoneTutorial";
 import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus, Lock } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -1400,7 +1402,7 @@ export default function Home() {
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
       {ENABLE_INTRO && <Intro lang={lang} onDone={() => setIntroDone(true)} />}
-      <style>{CSS}</style>
+      <style>{CSS + SCROLL3D_CSS}</style>
 
       {/* Header */}
       <header className="fixed top-0 w-full z-50 bg-background/90 backdrop-blur-md border-b border-border">
@@ -1547,8 +1549,11 @@ export default function Home() {
           </div>
         </section>
 
+        <PhoneTutorial lang={lang} botLink={botLink} />
+        
         {/* A day with Shop Brain */}
         <DayTimeline lang={lang} />
+        <ScrollCube lang={lang} />
 
         {/* Features: tabs + cards that open to explain each one */}
         <section id="features" className="py-20 md:py-28 px-4 md:px-6">
