@@ -4,9 +4,9 @@ import HeroScene from "./HeroScene";
 import PhoneScene from "./PhoneScene";
 import Intro from "./Intro";
 import { WhyShopBrain, DayTimeline, MoneyCalculator } from "./Showcase";
-import { LiveStats, TrustSection } from "./Trust";
-import { SCROLL3D_CSS, ScrollCube } from "./Scroll3D";
-import PhoneTutorial from "./PhoneTutorial";
+import { LiveProof, TrustSection, FactStrip } from "./Trust";
+import { useDrum } from "./drum";
+import { Link } from "wouter";
 import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus, Lock } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -944,6 +944,17 @@ const fr: Copy = {
 
 const copy: Record<Lang, Copy> = { rw, en, fr };
 
+// The Admin buttons (navbar, mobile menu, footer) share one look: an ink-to-green gradient
+// with a slow light sweep, so they are easy to spot without shouting.
+const ADMIN_BTN_CSS = `
+.sb-admin-btn{position:relative;overflow:hidden;background:linear-gradient(135deg,#1B2559,#0F7A3F);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 10px 24px -12px rgba(15,122,63,.9);transition:transform .25s cubic-bezier(.34,1.56,.64,1),box-shadow .25s}
+.sb-admin-btn::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.35) 50%,transparent 65%);transform:translateX(-140%);animation:sb-admin-sheen 5s ease-in-out infinite}
+@keyframes sb-admin-sheen{0%,70%{transform:translateX(-140%)}100%{transform:translateX(140%)}}
+.sb-admin-btn:hover{transform:translateY(-2px) scale(1.03);box-shadow:inset 0 0 0 1px rgba(255,255,255,.3),0 16px 30px -12px rgba(15,122,63,1)}
+.sb-admin-btn:active{transform:scale(.97)}
+@media (prefers-reduced-motion:reduce){.sb-admin-btn::after{animation:none}}
+`;
+
 // ---------------------------------------------------------------------------
 // Small pieces
 // ---------------------------------------------------------------------------
@@ -1086,6 +1097,7 @@ function FeatureExplorer({ t }: { t: Copy }) {
           return (
             <div
               key={id}
+              data-drum
               className={`sb-rise sb-spot rounded-2xl border bg-card overflow-hidden transition-[border-color,box-shadow] duration-300 ${
                 isOpen ? "border-foreground/30 shadow-lg" : "border-border hover:border-foreground/25"
               }`}
@@ -1212,6 +1224,7 @@ export default function Home() {
   const { theme, toggleTheme } = useTheme();
   const t = copy[lang];
   useMotion();
+  useDrum();
 
   useEffect(() => {
     writeStore("shopbrain-lang", lang);
@@ -1402,7 +1415,8 @@ export default function Home() {
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
       {ENABLE_INTRO && <Intro lang={lang} onDone={() => setIntroDone(true)} />}
-      <style>{CSS + SCROLL3D_CSS}</style>
+      <style>{CSS}</style>
+      <style>{ADMIN_BTN_CSS}</style>
 
       {/* Header */}
       <header className="fixed top-0 w-full z-50 bg-background/90 backdrop-blur-md border-b border-border">
@@ -1423,7 +1437,7 @@ export default function Home() {
               href={ADMIN_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md text-sm font-semibold bg-foreground text-background hover:opacity-90 transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              className="sb-admin-btn inline-flex items-center gap-1.5 h-9 px-4 rounded-full text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
               data-testid="link-admin-nav"
             >
               <Lock size={14} /> {t.nav.admin}
@@ -1460,7 +1474,7 @@ export default function Home() {
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setMobileMenuOpen(false)}
-              className="sb-rise mt-4 inline-flex items-center justify-center gap-2 py-3.5 rounded-full font-semibold bg-foreground text-background"
+              className="sb-admin-btn sb-rise mt-4 inline-flex items-center justify-center gap-2 py-3.5 rounded-full font-bold text-white"
               style={{ animationDelay: `${navLinks.length * 50}ms` }}
               data-testid="link-admin-mobile"
             >
@@ -1478,11 +1492,15 @@ export default function Home() {
           classicHero
         )}
 
+        {/* Five verified facts, always visible, then the live numbers from the system */}
+        <FactStrip lang={lang} />
+        <LiveProof lang={lang} />
+
         {/* Problem: notebook vs Shop Brain */}
         <section className="py-20 md:py-28 px-4 md:px-6">
           <div className="container mx-auto max-w-6xl grid md:grid-cols-2 gap-14 items-center">
             <div
-              data-seen className="relative rounded-md bg-[#FBF7E8] dark:bg-[#1B2140] border border-border shadow-md -rotate-1 px-8 py-7 [--rule:#CDD6EE] dark:[--rule:#2C3566]"
+              data-seen data-drum className="relative rounded-md bg-[#FBF7E8] dark:bg-[#1B2140] border border-border shadow-md -rotate-1 px-8 py-7 [--rule:#CDD6EE] dark:[--rule:#2C3566]"
               style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 43px, var(--rule) 43px, var(--rule) 44px)" }}
             >
               {t.problem.notebook.map((line, i) => (
@@ -1520,9 +1538,6 @@ export default function Home() {
         {/* Notebook vs Shop Brain: pinned scroll scene */}
         {ENABLE_NOTEBOOK_3D && <PhoneScene lang={lang} msgs={t.chat.msgs} notebook={t.problem.notebook} note={t.problem.notebookNote} />}
 
-        {/* Real numbers from the live system. Hidden automatically until they are big enough to impress. */}
-        <LiveStats lang={lang} />
-
         {/* Why Shop Brain: stats, benefit cards, ticker, notebook comparison */}
         <WhyShopBrain lang={lang} />
 
@@ -1549,11 +1564,8 @@ export default function Home() {
           </div>
         </section>
 
-        <PhoneTutorial lang={lang} botLink={botLink} />
-        
         {/* A day with Shop Brain */}
         <DayTimeline lang={lang} />
-        <ScrollCube lang={lang} />
 
         {/* Features: tabs + cards that open to explain each one */}
         <section id="features" className="py-20 md:py-28 px-4 md:px-6">
@@ -1575,7 +1587,7 @@ export default function Home() {
             <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-10" style={DISPLAY}>
               {t.pricing.title}
             </h2>
-            <div className="grid md:grid-cols-[1fr_1.1fr] rounded-2xl overflow-hidden border border-border shadow-sm">
+            <div data-drum className="grid md:grid-cols-[1fr_1.1fr] rounded-2xl overflow-hidden border border-border shadow-sm">
               <div className="p-8 md:p-10 flex flex-col justify-center" style={{ background: INK, color: "white" }}>
                 <p className="text-4xl md:text-5xl font-extrabold leading-tight" style={DISPLAY}>
                   <span data-seen className="sb-mark px-1 -mx-1 rounded" style={{ color: INK }}>
@@ -1610,7 +1622,9 @@ export default function Home() {
             <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-8" style={DISPLAY}>
               {t.faq.title}
             </h2>
-            <Faq key={lang} items={t.faq.items} />
+            <div data-drum>
+              <Faq key={lang} items={t.faq.items} />
+            </div>
           </div>
         </section>
 
@@ -1681,7 +1695,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="bg-card p-8 md:p-10 rounded-2xl border border-border shadow-lg">
+            <div data-drum className="bg-card p-8 md:p-10 rounded-2xl border border-border shadow-lg">
               <h3 className="text-xl font-bold mb-1" style={DISPLAY}>
                 {t.form.title}
               </h3>
@@ -1726,7 +1740,7 @@ export default function Home() {
                   href={ADMIN_URL}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 h-10 px-4 rounded-full text-sm font-semibold border border-white/25 hover:bg-white/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                  className="sb-admin-btn inline-flex items-center gap-2 h-10 px-5 rounded-full text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
                   data-testid="link-admin-footer"
                 >
                   <Lock size={14} /> {t.footer.adminLabel}
@@ -1751,9 +1765,9 @@ export default function Home() {
                   </li>
                 ))}
                 <li>
-                  <a href="#trust" onClick={(e) => scrollToSection(e, "#trust")} className="text-white/70 hover:text-white transition-colors">
+                  <Link href="/trust" className="text-white/70 hover:text-white transition-colors">
                     {t.nav.trust}
-                  </a>
+                  </Link>
                 </li>
                 <li>
                   <a href="/privacy" className="text-white/70 hover:text-white transition-colors">
