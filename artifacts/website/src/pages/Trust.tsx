@@ -7,15 +7,19 @@ import { prefersReducedMotion } from "./motion";
 //   <LiveStats />     real numbers from GET /api/public/stats (see admin.ts).
 //   <TrustSection />  six protections that already exist in the bot, nothing invented.
 //
+// FIX IN THIS VERSION: the blank section.
+//   LiveStats renders nothing until its numbers arrive, so its element did not exist when
+//   the old useSeen() ran. The effect only ran once, found no element, and never ran
+//   again, so the section appeared but every line stayed at opacity 0 (a blank band).
+//   useSeen() now returns a callback ref, so it starts watching the moment the element
+//   actually appears.
+//
 // HONESTY RULES (these protect your credibility, do not remove them)
 //   - LiveStats never invents or pads a number. If the API is down, slow, or a
 //     number is still small, that tile is hidden. If fewer than two tiles qualify,
 //     the whole section is not rendered.
 //   - Thresholds are in MIN_SHOW below. Raise or lower them as you grow.
 //   - The API returns totals only: no names, no phone numbers, no shop names.
-//
-// Performance: one small fetch (cached 10 minutes in sessionStorage, 5 minutes
-// on the server), CSS-only reveals, one rAF count-up per tile, only when visible.
 
 const INK = "#1B2559";
 const GREEN = "#0F7A3F";
@@ -158,20 +162,24 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){.tr-r{opacity:1;transform:none;transition:none}.tr-dot{animation:none}.tr-tile::after{transform:none;transition:none}}
 `;
 
-// sets data-in="1" once, when the element is first on screen
-function useSeen<T extends HTMLElement>(threshold = 0.15) {
-  const ref = useRef<T | null>(null);
+// Sets data-in="1" once, when the element is first on screen.
+// Returns a CALLBACK REF (not a useRef), so it also works for sections that mount late,
+// like LiveStats, which renders nothing until its data has loaded.
+function useSeen<T extends HTMLElement>(threshold = 0.1) {
+  const [el, setEl] = useState<T | null>(null);
   useEffect(() => {
-    const el = ref.current;
     if (!el) return;
-    if (prefersReducedMotion() || typeof IntersectionObserver === "undefined") {
+    const show = () => {
       el.dataset.in = "1";
+    };
+    if (prefersReducedMotion() || typeof IntersectionObserver === "undefined") {
+      show();
       return;
     }
     const io = new IntersectionObserver(
       ([e]) => {
         if (e.isIntersecting) {
-          el.dataset.in = "1";
+          show();
           io.disconnect();
         }
       },
@@ -179,8 +187,8 @@ function useSeen<T extends HTMLElement>(threshold = 0.15) {
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [threshold]);
-  return ref;
+  }, [el, threshold]);
+  return setEl;
 }
 
 // counts up once when it first becomes visible
