@@ -4,7 +4,8 @@ import HeroScene from "./HeroScene";
 import PhoneScene from "./PhoneScene";
 import Intro from "./Intro";
 import { WhyShopBrain, DayTimeline, MoneyCalculator } from "./Showcase";
-import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus } from "lucide-react";
+import { LiveStats, TrustSection } from "./Trust";
+import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Check, Sun, Moon, Plus, Minus, Lock } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -14,11 +15,15 @@ import { Menu, X, MessageCircle, Mail, Phone, MapPin, Instagram, ChevronDown, Ch
 const WHATSAPP_BUSINESS_NUMBER = "250788669259"; // digits only, no + or leading zero
 
 // Sam's support line. Shown in contact/footer and used by the request form.
-// ⚠️ CHECK THIS NUMBER (the old file linked and displayed two different ones).
+// ⚠️ CHECK THIS NUMBER. The bot's Help message uses a different one (+250 795 120 043),
+// and the privacy page shows that one too. Pick one support number and use it everywhere.
 const SUPPORT_NUMBER = "250799627713";
 
+// The admin dashboard. The navbar and footer buttons both open this.
+const ADMIN_URL = "https://shop-brain-webhook--ndayiragijesamu.replit.app/admin";
+
 // Master switches for the heavy animations. Set one to false to turn it off.
-const ENABLE_INTRO = true; // opening phone animation
+const ENABLE_INTRO = true; // opening animation (about 3.8 seconds, once per session)
 const ENABLE_HERO_3D = true; // pinned 3D phone hero (false = your classic hero)
 const ENABLE_NOTEBOOK_3D = true; // notebook vs Shop Brain scroll scene
 
@@ -49,6 +54,22 @@ const FEATURE_ICONS: Record<string, string[]> = {
   customers: ["💬", "✅", "🧾"],
 };
 
+// Storage can be blocked (private mode, strict browsers). These never throw.
+function readStore(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeStore(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
@@ -58,7 +79,7 @@ const THEME_STORAGE_KEY = "shopbrain-theme";
 
 function getInitialTheme(): Theme {
   if (typeof window === "undefined") return "light";
-  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  const stored = readStore(THEME_STORAGE_KEY);
   if (stored === "light" || stored === "dark") return stored;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
@@ -67,7 +88,7 @@ function useTheme() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    writeStore(THEME_STORAGE_KEY, theme);
   }, [theme]);
   return { theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")) };
 }
@@ -595,7 +616,7 @@ const frGroups: Group[] = [
 ];
 
 const en = {
-  nav: { why: "Why Shop Brain", how: "How it works", features: "Features", pricing: "Pricing", faq: "FAQ", contact: "Contact", privacy: "Privacy" },
+  nav: { why: "Why Shop Brain", how: "How it works", features: "Features", pricing: "Pricing", faq: "FAQ", contact: "Contact", privacy: "Privacy", trust: "Trust & safety", admin: "Admin" },
   hero: {
     title: "Know who owes you. Get paid sooner.",
     body: "Shop Brain keeps your customers' debts in WhatsApp. Add a debt in seconds, send reminders with one message, and see your total any time.",
@@ -698,12 +719,13 @@ const en = {
     explore: "Explore",
     contactHeading: "Contact",
     builtIn: "Built in Kigali 🇷🇼",
+    adminLabel: "Admin dashboard",
   },
 };
 type Copy = typeof en;
 
 const rw: Copy = {
-  nav: { why: "Impamvu", how: "Uko bikora", features: "Ibyo ikora", pricing: "Igiciro", faq: "Ibibazo", contact: "Twandikire", privacy: "Ibanga" },
+  nav: { why: "Impamvu", how: "Uko bikora", features: "Ibyo ikora", pricing: "Igiciro", faq: "Ibibazo", contact: "Twandikire", privacy: "Ibanga", trust: "Icyizere n'umutekano", admin: "Admin" },
   hero: {
     title: "Menya abakubereyemo imyenda. Wishyurwe vuba.",
     body: "Shop Brain ibika imyenda y'abakiriya bawe kuri WhatsApp. Andika umwenda mu masegonda, ohereza inyibutsa n'ubutumwa bumwe, kandi urebe igiteranyo cyose igihe cyose.",
@@ -806,11 +828,12 @@ const rw: Copy = {
     explore: "Reba",
     contactHeading: "Twandikire",
     builtIn: "Byakozwe i Kigali 🇷🇼",
+    adminLabel: "Ikibaho cy'ubuyobozi",
   },
 };
 
 const fr: Copy = {
-  nav: { why: "Pourquoi", how: "Comment ça marche", features: "Fonctionnalités", pricing: "Tarif", faq: "FAQ", contact: "Contact", privacy: "Confidentialité" },
+  nav: { why: "Pourquoi", how: "Comment ça marche", features: "Fonctionnalités", pricing: "Tarif", faq: "FAQ", contact: "Contact", privacy: "Confidentialité", trust: "Confiance et sécurité", admin: "Admin" },
   hero: {
     title: "Sachez qui vous doit de l'argent. Soyez payé plus vite.",
     body: "Shop Brain garde les dettes de vos clients dans WhatsApp. Ajoutez une dette en quelques secondes, envoyez des rappels en un message et consultez votre total à tout moment.",
@@ -913,6 +936,7 @@ const fr: Copy = {
     explore: "Explorer",
     contactHeading: "Contact",
     builtIn: "Conçu à Kigali 🇷🇼",
+    adminLabel: "Tableau de bord admin",
   },
 };
 
@@ -1180,7 +1204,7 @@ export default function Home() {
   const barRef = useRef<HTMLDivElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [lang, setLang] = useState<Lang>(() => {
-    const s = typeof window !== "undefined" ? window.localStorage.getItem("shopbrain-lang") : null;
+    const s = typeof window !== "undefined" ? readStore("shopbrain-lang") : null;
     return s === "rw" || s === "en" || s === "fr" ? s : "rw";
   });
   const { theme, toggleTheme } = useTheme();
@@ -1188,9 +1212,40 @@ export default function Home() {
   useMotion();
 
   useEffect(() => {
-    window.localStorage.setItem("shopbrain-lang", lang);
+    writeStore("shopbrain-lang", lang);
     document.documentElement.lang = lang; // keeps screen readers and browser translation correct
   }, [lang]);
+
+  // Page title and description follow the language (search results and link previews).
+  useEffect(() => {
+    document.title = `Shop Brain · ${copy[lang].hero.title}`;
+    let meta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.name = "description";
+      document.head.appendChild(meta);
+    }
+    meta.content = copy[lang].hero.body;
+  }, [lang]);
+
+  // Structured data so Google understands what Shop Brain is. No ratings, no fake claims.
+  useEffect(() => {
+    if (document.getElementById("shopbrain-jsonld")) return;
+    const s = document.createElement("script");
+    s.id = "shopbrain-jsonld";
+    s.type = "application/ld+json";
+    s.text = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      name: "Shop Brain",
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "WhatsApp",
+      description: en.hero.body,
+      areaServed: "RW",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "RWF", description: "First month free" },
+    });
+    document.head.appendChild(s);
+  }, []);
 
   const botLink = `https://wa.me/${WHATSAPP_BUSINESS_NUMBER}`;
   const supportLink = `https://wa.me/${SUPPORT_NUMBER}`;
@@ -1354,7 +1409,7 @@ export default function Home() {
             Shop Brain
           </a>
 
-          <nav className="hidden md:flex items-center gap-6">
+          <nav className="hidden lg:flex items-center gap-5 xl:gap-6">
             {navLinks.map((l) => (
               <a key={l.href} href={l.href} onClick={(e) => scrollToSection(e, l.href)} className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
                 {l.name}
@@ -1362,12 +1417,21 @@ export default function Home() {
             ))}
             <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
             <LanguageSelector lang={lang} setLang={setLang} />
+            <a
+              href={ADMIN_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md text-sm font-semibold bg-foreground text-background hover:opacity-90 transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              data-testid="link-admin-nav"
+            >
+              <Lock size={14} /> {t.nav.admin}
+            </a>
           </nav>
 
-          <div className="flex items-center gap-2 md:hidden">
+          <div className="flex items-center gap-2 lg:hidden">
             <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
             <LanguageSelector lang={lang} setLang={setLang} />
-            <button className="p-2" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} aria-label="Toggle menu">
+            <button className="p-2" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} aria-label="Toggle menu" aria-expanded={mobileMenuOpen}>
               {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
           </div>
@@ -1376,7 +1440,7 @@ export default function Home() {
       </header>
 
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-40 bg-background pt-20 px-4 md:hidden">
+        <div className="fixed inset-0 z-40 bg-background pt-20 px-4 lg:hidden overflow-y-auto">
           <nav className="flex flex-col gap-2 p-4">
             {navLinks.map((l, i) => (
               <a
@@ -1389,6 +1453,17 @@ export default function Home() {
                 {l.name}
               </a>
             ))}
+            <a
+              href={ADMIN_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMobileMenuOpen(false)}
+              className="sb-rise mt-4 inline-flex items-center justify-center gap-2 py-3.5 rounded-full font-semibold bg-foreground text-background"
+              style={{ animationDelay: `${navLinks.length * 50}ms` }}
+              data-testid="link-admin-mobile"
+            >
+              <Lock size={16} /> {t.nav.admin}
+            </a>
           </nav>
         </div>
       )}
@@ -1442,6 +1517,9 @@ export default function Home() {
 
         {/* Notebook vs Shop Brain: pinned scroll scene */}
         {ENABLE_NOTEBOOK_3D && <PhoneScene lang={lang} msgs={t.chat.msgs} notebook={t.problem.notebook} note={t.problem.notebookNote} />}
+
+        {/* Real numbers from the live system. Hidden automatically until they are big enough to impress. */}
+        <LiveStats lang={lang} />
 
         {/* Why Shop Brain: stats, benefit cards, ticker, notebook comparison */}
         <WhyShopBrain lang={lang} />
@@ -1517,6 +1595,9 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {/* Trust and safety: only protections that already run in the bot */}
+        <TrustSection lang={lang} botLink={botLink} />
 
         {/* FAQ */}
         <section id="faq" className="pb-20 md:pb-28 px-4 md:px-6">
@@ -1629,12 +1710,21 @@ export default function Home() {
                 Shop Brain
               </div>
               <p className="text-white/60 leading-relaxed max-w-sm mb-6">{t.footer.tagline}</p>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label="Shop Brain on Instagram" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors" data-testid="link-instagram">
                   <Instagram size={18} />
                 </a>
                 <a href={supportLink} target="_blank" rel="noopener noreferrer" aria-label="Message Shop Brain support on WhatsApp" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors" data-testid="link-footer-whatsapp">
                   <MessageCircle size={18} />
+                </a>
+                <a
+                  href={ADMIN_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-full text-sm font-semibold border border-white/25 hover:bg-white/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                  data-testid="link-admin-footer"
+                >
+                  <Lock size={14} /> {t.footer.adminLabel}
                 </a>
               </div>
             </div>
@@ -1655,6 +1745,11 @@ export default function Home() {
                     </a>
                   </li>
                 ))}
+                <li>
+                  <a href="#trust" onClick={(e) => scrollToSection(e, "#trust")} className="text-white/70 hover:text-white transition-colors">
+                    {t.nav.trust}
+                  </a>
+                </li>
                 <li>
                   <a href="/privacy" className="text-white/70 hover:text-white transition-colors">
                     {t.nav.privacy}
@@ -1755,7 +1850,6 @@ function SupportForm({ t, businessTypes, supportNumber }: { t: Copy["form"]; bus
       >
         <MessageCircle size={20} /> {t.submit}
       </button>
-      <a href="https://shop-brain-webhook--ndayiragijesamu.replit.app/admin">admin</a>
     </form>
   );
 }

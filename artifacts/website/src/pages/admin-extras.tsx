@@ -6,6 +6,10 @@ import { X, MessageCircle, SkipForward, CheckCircle2, Send, UserX, Filter, Stick
 // No new backend endpoints. No libraries. Animations use transform/opacity
 // (plus one tiny @property angle for the glowing border) and switch off for
 // prefers-reduced-motion.
+//
+// Change in this version: the renewal queue now counts only the reminders you
+// actually opened (not skipped ones) in its completion message, and the
+// confetti only fires when at least one reminder was sent.
 // =============================================================================
 
 const DAY = 86400000;
@@ -306,6 +310,7 @@ export function RenewalQueue({
   const [sent, setSent] = useState(loadSent);
   const [queue] = useState(() => owners.filter((o) => !(sent[o.phone] && Date.now() - sent[o.phone] < DAY)));
   const [idx, setIdx] = useState(0);
+  const [sentN, setSentN] = useState(0); // reminders opened in THIS session (skips are not counted)
   const cur = queue[idx];
   const done = idx >= queue.length;
   const burstDone = useRef(false);
@@ -317,13 +322,14 @@ export function RenewalQueue({
   }, [onClose]);
 
   useEffect(() => {
-    if (done && queue.length > 0 && !burstDone.current) {
+    if (done && queue.length > 0 && sentN > 0 && !burstDone.current) {
       burstDone.current = true;
       burst(window.innerWidth / 2, window.innerHeight / 2.4, 36);
     }
-  }, [done, queue.length]);
+  }, [done, queue.length, sentN]);
 
   const mark = (phone: string) => {
+    setSentN((n) => n + 1);
     const next = { ...sent, [phone]: Date.now() };
     setSent(next);
     try {
@@ -351,7 +357,11 @@ export function RenewalQueue({
         ) : done ? (
           <div className="done">
             <CheckCircle2 size={48} />
-            <b>Queue cleared. {queue.length} reminder{queue.length === 1 ? "" : "s"} sent.</b>
+            <b>
+              {sentN === 0
+                ? "Queue finished. No reminders were sent."
+                : `Queue cleared. ${sentN} reminder${sentN === 1 ? "" : "s"} sent.`}
+            </b>
             <button className="adm-btn pri" onClick={onClose}>Done</button>
           </div>
         ) : (

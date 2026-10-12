@@ -3,31 +3,38 @@ import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import {
   LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock, Pencil, Trash2, Ban,
-  PlayCircle, X, UserPlus, Users, Check, Search, Download, ChevronDown, ChevronLeft, ChevronRight, MoreHorizontal, Copy, Activity,
+  PlayCircle, X, UserPlus, Users, Check, Search, Download, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Copy, Activity,
   LayoutGrid, List, Eye, EyeOff, Command, Zap, Bell, Inbox, TrendingUp, Calendar, Send, Sun, Moon,
+  Star, Tag, Printer, Keyboard, Settings, ArrowUp, Upload, WifiOff, FileText, Bookmark, Layers, HelpCircle,
 } from "lucide-react";
 import { EXTRAS_CSS, extrasPointerMove, burst, RefreshBar, FunnelPanel, InactivePanel, RenewalQueue, NotesBox, HealthPill } from "./admin-extras";
 
 // =============================================================================
-// Shop Brain admin dashboard
+// Shop Brain admin dashboard (admin.tsx)
 //
 // Backend contract (unchanged, nothing new is required from your server):
-//   POST   /admin/verify                    GET   /admin/owners        POST /admin/owners
-//   PATCH  /admin/owners/:phone             DELETE /admin/owners/:phone
-//   POST   /admin/owners/:phone/extend      POST  .../activate | .../deactivate
-//   GET    /admin/owners/:phone/customers   PATCH /admin/customers/:id
+//   POST /admin/verify | GET,POST /admin/owners | PATCH,DELETE /admin/owners/:phone
+//   POST /admin/owners/:phone/extend | .../activate | .../deactivate
+//   GET /admin/owners/:phone/customers | PATCH /admin/customers/:id
 //
-// What changed in this version
-//   - Self-contained light and dark palettes with a theme toggle (saved in the browser).
-//     The old version read your site's theme tokens, which is why some colours and
-//     dividers looked wrong.
-//   - Popup menus are rendered in a portal on <body>, so they open right under the
-//     button that was clicked (a transformed or hovered parent used to push them away).
-//   - Layers fixed: modals now open above the owner drawer, the command palette above both.
-//   - Buttons share one size scale (38px normal, 32px small) and one look, links included.
-//   - 3D scroll animation: cards, panels and KPIs roll in like a drum as you scroll.
-//   - Mobile first: below 1240px the owner list switches to cards, so there is no
-//     sideways scrolling anywhere. All grids, drawers, toolbars and toasts reflow.
+// 50 additions in this version (all client side, saved in this browser):
+//  SEARCH     1 smart syntax (status: lang: tag: owes> customers> days: joined: is:)  2 search history
+//             3 match highlighting  4 clickable filter tokens  5 quick filter chips  6 saved views
+//  ORGANISE   7 pin shops (pinned first)  8 shop tags + tag filter  9 load-more or pages
+//  LAYOUT    10 grid / rail / wall card layouts  11 table column toggles  12 accent colours
+//            13 corner style  14 sticky section nav with scroll-spy  15 collapsible panels
+//            16 panel toggles  17 layout presets (Overview / Analytics / Focus)  18 scroll progress bar
+//            19 back-to-top button  20 calm mode (no motion)
+//  3D        21 roll intensity (off / soft / strong)  22 mouse tilt + glare on cards
+//            23 parallax background  24 3D spotlight ring carousel  25 KPI sparklines
+//  ANALYTICS 26 renewal forecast  27 expiry heat calendar  28 balance spread  29 language split
+//            30 leaderboard  31 data-quality panel  32 daily digest (copy / WhatsApp)  33 quick stats strip
+//  WORKFLOW  34 message templates + editor  35 template composer in the drawer  36 debt reminders per customer
+//            37 message selected shops (queue)  38 bulk pin / tag / copy phones  39 bulk import owners
+//            40 "add another" in the add dialog  41 per-shop activity tab  42 drawer prev / next
+//            43 keyboard list navigation (j k Enter x p e)  44 shortcuts + search help  45 refresh interval
+//            46 offline banner  47 tab title badge  48 idle warning with "stay signed in"
+//            49 export CSV / JSON / copy as table / print  50 customer tools (copy numbers, export owing)
 // =============================================================================
 
 const ADMIN_API_BASE = import.meta.env.VITE_ADMIN_API_URL as string | undefined;
@@ -35,6 +42,11 @@ const SESSION_KEY = "shopbrain_admin_password";
 const PREFS_KEY = "shopbrain_admin_prefs_v2";
 const THEME_KEY = "shopbrain_admin_theme";
 const LOG_KEY = "shopbrain_admin_activity";
+const PINS_KEY = "shopbrain_admin_pins";
+const TAGS_KEY = "shopbrain_admin_tags";
+const VIEWS_KEY = "shopbrain_admin_views";
+const TPL_KEY = "shopbrain_admin_templates";
+const HIST_KEY = "shopbrain_admin_search_history";
 const IDLE_MS = 30 * 60 * 1000;
 const DAY = 86400000;
 const WEEK = 7 * DAY;
@@ -43,6 +55,7 @@ const TABLE_MIN_WIDTH = "(min-width: 1240px)";
 type Theme = "light" | "dark";
 type OwnerStatus = "no_trial" | "active" | "expiring" | "expired";
 type Bucket = OwnerStatus | "deactivated";
+type DrawerTab = "overview" | "customers" | "activity";
 
 interface Owner {
   phone: string;
@@ -68,9 +81,45 @@ interface Customer {
   totalOwed: number;
 }
 type ToastItem = { id: number; kind: "success" | "error" | "info"; title: string; desc?: string; ttl: number; action?: { label: string; run: () => void } };
-type ActivityItem = { id: number; at: number; text: string; ok: boolean };
+type ActivityItem = { id: number; at: number; text: string; ok: boolean; phone?: string };
 type SortKey = "default" | "name" | "created" | "expiry" | "customers" | "outstanding";
-type Prefs = { density: "comfy" | "compact"; view: "table" | "cards"; pageSize: number; auto: boolean };
+type Accent = "emerald" | "blue" | "violet" | "amber" | "rose";
+type Prefs = {
+  density: "comfy" | "compact"; view: "table" | "cards"; pageSize: number; auto: boolean; refreshSec: number;
+  layout: "grid" | "rail" | "wall"; accent: Accent; radius: "soft" | "sharp" | "round"; calm: boolean; roll: "off" | "soft" | "strong";
+  hidden: string[]; collapsed: string[]; cols: string[]; pinFirst: boolean; paging: "pages" | "more";
+};
+type SavedView = { id: string; name: string; query: string; status: Bucket | "all"; sort: { key: SortKey; dir: 1 | -1 } };
+type Tpl = { id: string; name: string; en: string; rw: string; enEnded?: string; rwEnded?: string };
+
+const DEFAULT_PREFS: Prefs = {
+  density: "comfy", view: "cards", pageSize: 10, auto: false, refreshSec: 30, layout: "grid", accent: "emerald", radius: "soft",
+  calm: false, roll: "soft", hidden: [], collapsed: [], cols: [], pinFirst: true, paging: "pages",
+};
+
+const PANELS: { id: string; label: string }[] = [
+  { id: "quick", label: "Quick stats" }, { id: "donut", label: "Shops by status" }, { id: "debt", label: "Biggest balances" },
+  { id: "growth", label: "New shops" }, { id: "spotlight", label: "3D spotlight" }, { id: "forecast", label: "Renewal forecast" },
+  { id: "calendar", label: "Expiry calendar" }, { id: "histogram", label: "Balance spread" }, { id: "people", label: "Languages & leaderboard" },
+  { id: "quality", label: "Data quality" }, { id: "attention", label: "Needs attention" }, { id: "funnel", label: "Funnel & inactive shops" },
+];
+const COLS: [string, string][] = [["phone", "Phone"], ["status", "Status"], ["until", "Access until"], ["customers", "Customers"], ["outstanding", "Outstanding"]];
+const ACCENTS: [Accent, string][] = [["emerald", "#047857"], ["blue", "#2563eb"], ["violet", "#7c3aed"], ["amber", "#d97706"], ["rose", "#e11d48"]];
+const TAG_SUGGESTIONS = ["VIP", "Follow up", "Slow payer", "Partner", "Trial"];
+
+const DEFAULT_TPLS: Tpl[] = [
+  {
+    id: "renew", name: "Renewal",
+    en: "Hello {name}, your Shop Brain access ends on {date}. Reply here and we will extend it for you.",
+    rw: "Muraho {name}, uburenganzira bwawe kuri Shop Brain buzarangira ku wa {date}. Twandikire tubwongere.",
+    enEnded: "Hello {name}, your Shop Brain access ended on {date}. Reply here and we will extend it for you.",
+    rwEnded: "Muraho {name}, uburenganzira bwawe kuri Shop Brain bwarangiye ku wa {date}. Twandikire tubwongere.",
+  },
+  { id: "welcome", name: "Welcome", en: "Welcome to Shop Brain, {name}! Send a message here to record your first debt.", rw: "Murakaza neza kuri Shop Brain, {name}! Mwandikire hano mwandike umwenda wa mbere." },
+  { id: "checkin", name: "Check-in", en: "Hello {name}, how is Shop Brain working for you? Tell us if you need any help.", rw: "Muraho {name}, Shop Brain irabafasha ite? Nimukenera ubufasha, mutwandikire." },
+  { id: "thanks", name: "Thank you", en: "Thank you for using Shop Brain, {name}!", rw: "Murakoze gukoresha Shop Brain, {name}!" },
+];
+let ACTIVE_TPLS: Tpl[] = DEFAULT_TPLS;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -120,18 +169,19 @@ function hue(s: string) {
 
 const waLink = (phone: string, text?: string) => `https://wa.me/${digits(phone)}${text ? `?text=${enc(text)}` : ""}`;
 
-function renewalMessage(o: EOwner) {
-  const n = o.name ? ` ${o.name}` : "";
-  const date = fmtDate(o.trialEndsAt);
+// Message templates: {name} {date} {days} are filled in. The "renew" template also has "ended" wording.
+function fillTpl(t: Tpl, o: EOwner): string {
   const ended = o.daysLeft !== null && o.daysLeft < 0;
-  if (o.language === "rw")
-    return ended
-      ? `Muraho${n}, uburenganzira bwawe kuri Shop Brain bwarangiye ku wa ${date}. Twandikire tubwongere.`
-      : `Muraho${n}, uburenganzira bwawe kuri Shop Brain buzarangira ku wa ${date}. Twandikire tubwongere.`;
-  return ended
-    ? `Hello${n}, your Shop Brain access ended on ${date}. Reply here and we will extend it for you.`
-    : `Hello${n}, your Shop Brain access ends on ${date}. Reply here and we will extend it for you.`;
+  const rw = o.language === "rw";
+  const raw = ended && (rw ? t.rwEnded : t.enEnded) ? (rw ? t.rwEnded! : t.enEnded!) : rw ? t.rw : t.en;
+  return raw
+    .replace(/ ?\{name\}/g, o.name ? ` ${o.name}`.replace(/^ /, raw.includes(" {name}") ? " " : "") : "")
+    .replace(/\{date\}/g, fmtDate(o.trialEndsAt))
+    .replace(/\{days\}/g, o.daysLeft === null ? "" : String(Math.abs(o.daysLeft)));
 }
+const renewalMessage = (o: EOwner) => fillTpl(ACTIVE_TPLS.find((t) => t.id === "renew") ?? DEFAULT_TPLS[0], o);
+const debtMsg = (c: Customer, shop: string, rw: boolean) =>
+  rw ? `Muraho ${c.name}, turabibutsa ko mufitiye ${shop} ${money(c.totalOwed)}. Murakoze.` : `Hello ${c.name}, a friendly reminder that you owe ${shop} ${money(c.totalOwed)}. Thank you.`;
 
 const csvCell = (v: unknown) => {
   let s = v == null ? "" : String(v);
@@ -139,9 +189,8 @@ const csvCell = (v: unknown) => {
   if (/^[=@]/.test(s) || (/^[+\-]/.test(s) && !/^[+\-]\d[\d\s-]*$/.test(s))) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
-function downloadCsv(name: string, header: string[], rows: unknown[][]) {
-  const text = "\ufeff" + [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+function downloadText(name: string, text: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
@@ -149,6 +198,9 @@ function downloadCsv(name: string, header: string[], rows: unknown[][]) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+function downloadCsv(name: string, header: string[], rows: unknown[][]) {
+  downloadText(name, "\ufeff" + [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
 }
 const stamp = () => new Date().toISOString().slice(0, 10);
 
@@ -165,15 +217,6 @@ const BUCKETS: { key: Bucket; label: string; color: string }[] = [
   { key: "no_trial", label: "No trial set", color: "var(--viol)" },
 ];
 
-function loadPrefs(): Prefs {
-  // cards are the default now: they work on every screen and show the 3D scroll effect
-  const base: Prefs = { density: "comfy", view: "cards", pageSize: 10, auto: false };
-  try {
-    return { ...base, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
-  } catch {
-    return base;
-  }
-}
 function loadLog(): ActivityItem[] {
   try {
     return JSON.parse(sessionStorage.getItem(LOG_KEY) || "[]");
@@ -192,16 +235,73 @@ function loadTheme(): Theme {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+// ---- smart search: "status:expired lang:rw tag:vip owes>50k customers<3 days<=7 joined:30 is:pinned maria"
+type Cmp = { f: "owes" | "customers" | "days"; op: string; n: number };
+interface Parsed { text: string; status?: Bucket; lang?: string; tags: string[]; cmps: Cmp[]; joined?: number; is: string[]; tokens: string[] }
+const STATUS_ALIAS: Record<string, Bucket> = { active: "active", expiring: "expiring", expired: "expired", deactivated: "deactivated", off: "deactivated", notrial: "no_trial", no_trial: "no_trial" };
+const cmp = (a: number, op: string, b: number) => (op === "<" ? a < b : op === "<=" ? a <= b : op === ">" ? a > b : op === ">=" ? a >= b : a === b);
+
+function parseQuery(raw: string): Parsed {
+  const p: Parsed = { text: "", tags: [], cmps: [], is: [], tokens: [] };
+  const rest: string[] = [];
+  for (const t of raw.trim().split(/\s+/).filter(Boolean)) {
+    let m: RegExpMatchArray | null;
+    if ((m = t.match(/^status:(\w+)$/i)) && STATUS_ALIAS[m[1].toLowerCase()]) p.status = STATUS_ALIAS[m[1].toLowerCase()];
+    else if ((m = t.match(/^lang:(\w+)$/i))) p.lang = m[1].toLowerCase();
+    else if ((m = t.match(/^tag:(.+)$/i))) p.tags.push(m[1].toLowerCase());
+    else if ((m = t.match(/^(owes|customers|days)(<=|>=|<|>|:|=)(-?\d+(?:\.\d+)?)(k?)$/i)))
+      p.cmps.push({ f: m[1].toLowerCase() as Cmp["f"], op: m[2] === ":" ? "=" : m[2], n: parseFloat(m[3]) * (m[4] ? 1000 : 1) });
+    else if ((m = t.match(/^joined:(\d+)d?$/i))) p.joined = Number(m[1]);
+    else if ((m = t.match(/^is:(\w+)$/i))) p.is.push(m[1].toLowerCase());
+    else {
+      rest.push(t);
+      continue;
+    }
+    p.tokens.push(t);
+  }
+  p.text = rest.join(" ");
+  return p;
+}
+const qTokens = (q: string) => q.split(/\s+/).filter(Boolean);
+const hasToken = (q: string, tok: string) => qTokens(q).some((t) => t.toLowerCase() === tok.toLowerCase());
+// toggles a token in the query; with `prefix`, other tokens of the same kind (lang:, joined:) are replaced
+function toggleToken(q: string, tok: string, prefix?: string) {
+  const had = hasToken(q, tok);
+  let ts = qTokens(q).filter((t) => t.toLowerCase() !== tok.toLowerCase());
+  if (prefix) ts = ts.filter((t) => !t.toLowerCase().startsWith(prefix));
+  return (had ? ts : [...ts, tok]).join(" ");
+}
+
 // ---------------------------------------------------------------------------
-// Theme context
+// Contexts and hooks
 // ---------------------------------------------------------------------------
 
 const ThemeCtx = createContext<{ theme: Theme; toggle: () => void }>({ theme: "light", toggle: () => {} });
 const useTheme = () => useContext(ThemeCtx);
 
-// ---------------------------------------------------------------------------
-// Small hooks
-// ---------------------------------------------------------------------------
+// state that is saved in localStorage (objects are merged with their defaults)
+function useLocal<T>(key: string, init: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const s = localStorage.getItem(key);
+      if (s) {
+        const j = JSON.parse(s);
+        return init && typeof init === "object" && !Array.isArray(init) ? ({ ...init, ...j } as T) : (j as T);
+      }
+    } catch {
+      /* ignore */
+    }
+    return init;
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(v));
+    } catch {
+      /* private mode */
+    }
+  }, [key, v]);
+  return [v, setV];
+}
 
 function useCountUp(target: number, ms = 900) {
   const [v, setV] = useState(prefersReduced() ? target : 0);
@@ -270,21 +370,27 @@ function useScrollLock() {
   }, []);
 }
 
-// 3D scroll "drum" effect. Every element marked data-roll is tilted and pushed back
-// while it is near the top or bottom of the screen and sits flat in the middle, so
-// cards appear to roll past as you scroll. It writes straight to the DOM (no React
-// re-renders), runs once per animation frame, and is skipped for reduced motion.
-function useRoll(dep: string) {
+// 3D scroll "drum" effect + scroll progress + parallax. Every element marked data-roll is tilted and
+// pushed back while it is near the top or bottom of the screen and sits flat in the middle. It writes
+// straight to the DOM (no React re-renders), runs once per animation frame, and respects reduced motion.
+function useRoll(dep: string, mode: "off" | "soft" | "strong", calm: boolean) {
   useEffect(() => {
-    if (prefersReduced()) return;
+    const reduced = prefersReduced();
+    const rootEl = document.querySelector<HTMLElement>(".adm-root");
     let raf = 0;
     const run = () => {
       raf = 0;
-      const els = document.querySelectorAll<HTMLElement>("[data-roll]");
       const vh = window.innerHeight;
-      const maxTilt = window.innerWidth < 760 ? 20 : 30;
+      const y = window.scrollY;
+      rootEl?.style.setProperty("--prog", String(Math.min(1, y / Math.max(1, document.documentElement.scrollHeight - vh))));
+      if (calm || reduced) return;
+      rootEl?.style.setProperty("--sy", String(y));
+      if (mode === "off") return;
+      const strong = mode === "strong";
+      const maxTilt = (window.innerWidth < 760 ? 0.65 : 1) * (strong ? 36 : 22);
+      const depth = strong ? 110 : 55;
       const reads: [HTMLElement, number][] = [];
-      els.forEach((el) => {
+      document.querySelectorAll<HTMLElement>("[data-roll]").forEach((el) => {
         const r = el.getBoundingClientRect();
         reads.push([el, (r.top + r.height / 2 - vh / 2) / (vh * 0.62)]);
       });
@@ -298,7 +404,7 @@ function useRoll(dep: string) {
           return;
         }
         const s = d < 0 ? -1 : 1;
-        el.style.transform = `perspective(1100px) rotateX(${(-s * e * maxTilt).toFixed(2)}deg) translateZ(${(-e * 70).toFixed(1)}px) scale(${(1 - e * 0.05).toFixed(3)})`;
+        el.style.transform = `perspective(1100px) rotateX(${(-s * e * maxTilt).toFixed(2)}deg) translateZ(${(-e * depth).toFixed(1)}px) scale(${(1 - e * 0.05).toFixed(3)})`;
         el.style.opacity = String(1 - e * e * 0.55);
       });
     };
@@ -321,7 +427,7 @@ function useRoll(dep: string) {
         el.style.opacity = "";
       });
     };
-  }, [dep]);
+  }, [dep, mode, calm]);
 }
 
 function Roll({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -339,7 +445,7 @@ function Roll({ children, className = "" }: { children: React.ReactNode; classNa
 const ADM_CSS = `
 .adm-root,.adm-pt{
   --bg:#eaeff6;--fg:#0f172a;--card:#ffffff;--bd:#d0d8e4;--mut:#f0f3f8;--mutfg:#516074;
-  --pri:#047857;--prifg:#ffffff;
+  --pri:#047857;--prifg:#ffffff;--rad:16px;
   --ok:#047857;--warn:#b45309;--amber:#d97706;--bad:#dc2626;--off:#64748b;--viol:#7c3aed;
   --shadow:0 1px 2px rgba(15,23,42,.06),0 8px 22px -14px rgba(15,23,42,.22);
   --ease:cubic-bezier(.16,1,.3,1);--spring:cubic-bezier(.34,1.56,.64,1);
@@ -350,31 +456,44 @@ const ADM_CSS = `
   --ok:#34d399;--warn:#fbbf24;--amber:#fbbf24;--bad:#f87171;--off:#94a3b8;--viol:#a78bfa;
   --shadow:0 1px 2px rgba(0,0,0,.45),0 12px 28px -16px rgba(0,0,0,.8);
   color-scheme:dark}
+.adm-root[data-accent="blue"]{--pri:#2563eb}.adm-root[data-accent="violet"]{--pri:#7c3aed}.adm-root[data-accent="amber"]{--pri:#b45309}.adm-root[data-accent="rose"]{--pri:#e11d48}
+.adm-root[data-theme="dark"][data-accent="blue"]{--pri:#60a5fa;--prifg:#07142e}
+.adm-root[data-theme="dark"][data-accent="violet"]{--pri:#a78bfa;--prifg:#1d0b3d}
+.adm-root[data-theme="dark"][data-accent="amber"]{--pri:#fbbf24;--prifg:#2b1a02}
+.adm-root[data-theme="dark"][data-accent="rose"]{--pri:#fb7185;--prifg:#3b0a16}
+.adm-root[data-rad="sharp"]{--rad:6px}.adm-root[data-rad="round"]{--rad:24px}
 .adm-pt{display:contents;color:var(--fg);font-size:14px;line-height:1.45}
 .adm-root{position:relative;min-height:100vh;min-height:100dvh;background:var(--bg);color:var(--fg);font-size:14px;line-height:1.45;overflow-x:clip;transition:background-color .35s,color .35s}
 .adm-root *,.adm-root *::before,.adm-root *::after,.adm-pt *,.adm-pt *::before,.adm-pt *::after{box-sizing:border-box}
 .adm-root button,.adm-pt button{font:inherit;color:inherit;cursor:pointer}
 .adm-root button:disabled,.adm-pt button:disabled{cursor:not-allowed}
 .adm-root :focus-visible,.adm-pt :focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+.adm-root[data-calm] *:not(.adm-toastbar),.adm-root[data-calm] *::before,.adm-root[data-calm] *::after{animation:none !important;transition:none !important}
+.adm-root[data-calm] .adm-aurora{display:none}
+.adm-root[data-calm] .adm-roll,.adm-root[data-calm] .adm-ocard{transform:none !important;opacity:1 !important}
 
-.adm-aurora{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.adm-aurora{position:fixed;inset:-25vh 0;pointer-events:none;z-index:0;overflow:hidden;transform:translate3d(0,calc(var(--sy,0) * -.1px),0)}
 .adm-aurora::before,.adm-aurora::after{content:"";position:absolute;width:60vmax;height:60vmax;border-radius:50%;animation:adm-drift 30s ease-in-out infinite alternate}
-.adm-aurora::before{top:-26vmax;right:-16vmax;background:radial-gradient(circle,color-mix(in srgb,var(--pri) 16%,transparent),transparent 62%)}
-.adm-aurora::after{bottom:-32vmax;left:-22vmax;background:radial-gradient(circle,rgba(255,201,51,.10),transparent 62%);animation-duration:38s;animation-direction:alternate-reverse}
+.adm-aurora::before{top:-6vmax;right:-16vmax;background:radial-gradient(circle,color-mix(in srgb,var(--pri) 16%,transparent),transparent 62%)}
+.adm-aurora::after{bottom:-12vmax;left:-22vmax;background:radial-gradient(circle,rgba(255,201,51,.10),transparent 62%);animation-duration:38s;animation-direction:alternate-reverse}
 @keyframes adm-drift{to{transform:translate3d(-7vmax,5vmax,0) scale(1.12)}}
 @media (max-width:760px){.adm-aurora{display:none}}
+.adm-prog{position:fixed;top:0;left:0;right:0;height:3px;z-index:36;background:linear-gradient(90deg,var(--pri),color-mix(in srgb,var(--pri) 50%,#facc15));transform-origin:0 50%;transform:scaleX(var(--prog,0));pointer-events:none}
 
 .adm-wrap{position:relative;z-index:1;max-width:1280px;margin:0 auto;padding:28px 20px 120px;min-width:0}
 @keyframes adm-in{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@keyframes adm-fadein{from{opacity:0}to{opacity:1}}
 .adm-in{animation:adm-in .65s var(--ease) both;animation-delay:calc(var(--i,0) * 55ms)}
+[id^="sec-"]{scroll-margin-top:64px}
 
 /* 3D scroll wrappers */
 .adm-roll{min-width:0;transform-origin:50% 50%;backface-visibility:hidden;-webkit-backface-visibility:hidden}
-.adm-kpis>.adm-roll>*,.adm-grid2>.adm-roll>*,.adm-cards>.adm-roll>*,.adm-duo>.adm-roll>*{height:100%}
+.adm-kpis>.adm-roll>*,.adm-grid>.adm-roll>*,.adm-cards>.adm-roll>*,.adm-duo>.adm-roll>*{height:100%}
 .adm-roll>.adm-kpi{width:100%;display:block}
+.adm-grid>.adm-roll.wide{grid-column:1/-1}
 
 /* header */
-.adm-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px}
+.adm-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
 .adm-title{margin:0;font-size:28px;font-weight:800;letter-spacing:-.02em;color:var(--fg);background:linear-gradient(100deg,var(--fg) 35%,var(--pri));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .adm-sub{margin:4px 0 0;color:var(--mutfg);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .adm-live{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--mutfg)}
@@ -383,6 +502,16 @@ const ADM_CSS = `
 .adm-dot.off{background:var(--off)}.adm-dot.off::after{display:none}
 @keyframes adm-pulse{from{transform:scale(1);opacity:.55}to{transform:scale(3);opacity:0}}
 .adm-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.adm-offline{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb,var(--warn) 16%,var(--card));border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);color:var(--warn);font-weight:600;font-size:13px}
+
+/* sticky section nav + fab */
+.adm-nav{position:sticky;top:0;z-index:30;display:flex;gap:6px;align-items:center;margin:0 -6px 16px;padding:8px 6px;overflow-x:auto;scrollbar-width:none;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);background:color-mix(in srgb,var(--bg) 80%,transparent);border-bottom:1px solid transparent}
+.adm-nav::-webkit-scrollbar{display:none}
+.adm-nav button{flex:none;height:32px;padding:0 13px;border:1px solid transparent;border-radius:999px;background:transparent;color:var(--mutfg);font-size:12.5px;font-weight:700;transition:all .25s var(--ease)}
+.adm-nav button:hover{color:var(--fg);background:var(--mut)}
+.adm-nav button.on{background:var(--fg);color:var(--bg)}
+.adm-fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:35;width:44px;height:44px;border-radius:50%;border:1px solid var(--bd);background:var(--card);color:var(--fg);display:grid;place-items:center;box-shadow:0 14px 30px -12px rgba(0,0,0,.5);animation:adm-in .4s var(--spring) both}
+.adm-fab:hover{border-color:var(--pri);color:var(--pri)}
 
 /* buttons: one size scale (38 / 32) and one look, for <button> and <a> alike */
 .adm-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 14px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font-size:13px;font-weight:600;line-height:1;white-space:nowrap;text-decoration:none;transition:transform .2s var(--spring),background .2s,border-color .2s,box-shadow .2s}
@@ -400,6 +529,7 @@ const ADM_CSS = `
 .adm-btn.sq{width:38px;padding:0}
 .adm-btn.ghost{background:transparent;border-color:transparent}
 .adm-btn b{font-variant-numeric:tabular-nums}
+.adm-star{color:var(--mutfg)}.adm-star.on{color:var(--amber)}
 .adm-kbd{font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:3px 5px;border:1px solid var(--bd);border-radius:5px;color:var(--mutfg);background:var(--mut)}
 @media (hover:none){.adm-kbd{display:none}}
 .adm-spin{animation:adm-spin .8s linear infinite}
@@ -412,7 +542,7 @@ const ADM_CSS = `
 .adm-themebtn:hover svg{transform:rotate(25deg) scale(1.12)}
 
 /* cards + spotlight */
-.adm-card{position:relative;background:var(--card);border:1px solid var(--bd);border-radius:16px;box-shadow:var(--shadow)}
+.adm-card{position:relative;background:var(--card);border:1px solid var(--bd);border-radius:var(--rad);box-shadow:var(--shadow)}
 .adm-spot::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .4s;background:radial-gradient(360px circle at var(--mx,50%) var(--my,50%),color-mix(in srgb,var(--pri) 12%,transparent),transparent 60%)}
 .adm-spot:hover::after{opacity:1}
 
@@ -426,14 +556,18 @@ const ADM_CSS = `
 .adm-kpi .val{margin-top:10px;font-size:26px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .adm-kpi .val small{font-size:13px;font-weight:600;color:var(--mutfg);margin-left:4px}
 .adm-kpi .hint{margin-top:2px;font-size:11.5px;color:var(--mutfg)}
+.adm-spark{display:block;width:100%;height:26px;margin-top:8px;color:var(--c,var(--pri))}
+.adm-spark path.l{fill:none;stroke:currentColor;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.adm-spark path.a{fill:currentColor;opacity:.13}
 
-.adm-grid2{display:grid;grid-template-columns:1.1fr 1.4fr 1fr;gap:12px;margin-bottom:22px}
-.adm-duo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:22px}
-@media (max-width:1100px){.adm-grid2{grid-template-columns:1fr 1fr}.adm-grid2>.adm-roll:first-child{grid-column:1/-1}}
-@media (max-width:760px){.adm-grid2{grid-template-columns:1fr}.adm-grid2>.adm-roll:first-child{grid-column:auto}}
+.adm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;margin-bottom:22px}
+.adm-duo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:22px}
 .adm-panel{padding:16px 18px;overflow:hidden;min-width:0}
 .adm-panel h3{margin:0 0 12px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
-.adm-panel h3 svg{color:var(--pri);flex:none}
+.adm-panel h3>.ico{display:inline-flex;color:var(--pri);flex:none}
+.adm-panel h3 .adm-collapse{margin-left:auto;flex:none;width:26px;height:26px}
+.adm-collapse svg{transition:transform .3s var(--spring)}
+.adm-collapsed h3{margin-bottom:0}.adm-collapsed .adm-collapse svg{transform:rotate(180deg)}.adm-collapsed .adm-pbody{display:none}
 .adm-donutwrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .adm-donut{width:132px;height:132px;flex:none}
 .adm-seg{fill:none;stroke-linecap:butt;cursor:pointer;transform-origin:60px 60px;animation:adm-seg 1.1s var(--ease) both;animation-delay:calc(var(--i,0) * 90ms);transition:stroke-width .25s}
@@ -452,13 +586,40 @@ const ADM_CSS = `
 .adm-btrack i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--pri),color-mix(in srgb,var(--pri) 55%,#facc15));transform-origin:0 50%;animation:adm-growx .9s var(--ease) both;animation-delay:calc(var(--i,0) * 70ms + 200ms)}
 @keyframes adm-growx{from{transform:scaleX(0)}}
 .adm-brow b{font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
-.adm-sign{display:flex;align-items:flex-end;gap:7px;height:96px}
-.adm-sign div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%}
+.adm-sign{display:flex;align-items:flex-end;gap:6px;height:104px}
+.adm-sign>*{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%;border:0;background:transparent;padding:0}
 .adm-sign i{display:block;width:100%;min-height:3px;border-radius:5px 5px 2px 2px;background:linear-gradient(0deg,var(--pri),color-mix(in srgb,var(--pri) 50%,#a7f3d0));transform-origin:50% 100%;animation:adm-growy .8s var(--ease) both;animation-delay:calc(var(--i,0) * 60ms + 250ms)}
+.adm-sign i.bad{background:linear-gradient(0deg,var(--bad),color-mix(in srgb,var(--bad) 55%,#fecaca))}
 @keyframes adm-growy{from{transform:scaleY(0)}}
-.adm-sign span{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.adm-sign span{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--fg)}
+.adm-sign small{font-size:9.5px;color:var(--mutfg)}
+.adm-sign button:hover i{filter:brightness(1.15)}
 .adm-trend{font-size:12px;color:var(--mutfg);margin:8px 0 0}
 .adm-trend b{color:var(--ok)}
+.adm-qs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,130px),1fr));gap:10px}
+.adm-qs div{padding:10px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--mut)}
+.adm-qs small{display:block;color:var(--mutfg);font-size:11px;font-weight:600}
+.adm-qs b{font-size:17px;font-variant-numeric:tabular-nums}
+
+/* heat calendar */
+.adm-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.adm-cal em{font-style:normal;text-align:center;font-size:10px;color:var(--mutfg);font-weight:700}
+.adm-cal button{aspect-ratio:1;min-height:30px;border:1px solid var(--bd);border-radius:8px;background:color-mix(in srgb,var(--pri) calc(var(--h,0) * 22%),var(--mut));color:var(--fg);font-size:10.5px;font-weight:700;display:grid;place-items:center;line-height:1;transition:transform .2s var(--spring)}
+.adm-cal button:hover{transform:scale(1.12);border-color:var(--pri)}
+.adm-cal button.today{outline:2px solid var(--pri);outline-offset:1px}
+.adm-cal button.empty{visibility:hidden}
+.adm-cal button small{display:block;font-size:9px;color:var(--mutfg);margin-top:2px}
+.adm-qrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--bd);font-size:12.5px}
+.adm-qrow:last-child{border-bottom:0}
+.adm-qrow b{margin-left:auto;font-variant-numeric:tabular-nums}
+
+/* 3D spotlight ring */
+.adm-ring{height:210px;perspective:900px;display:grid;place-items:center}
+.adm-ringin{position:relative;width:190px;height:158px;transform-style:preserve-3d;transition:transform .9s var(--ease)}
+.adm-ringcard{position:absolute;inset:0;padding:14px;border:1px solid var(--bd);border-radius:calc(var(--rad) - 2px);background:var(--card);box-shadow:var(--shadow);backface-visibility:hidden;-webkit-backface-visibility:hidden;display:grid;gap:8px;align-content:center;justify-items:start;transition:opacity .6s}
+.adm-ringcard b{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.adm-ringctl{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:6px}
+.adm-dots{display:flex;gap:5px}.adm-dots i{width:7px;height:7px;border-radius:50%;background:var(--bd);transition:all .3s}.adm-dots i.on{background:var(--pri);width:18px;border-radius:4px}
 
 /* attention */
 .adm-attn{margin-bottom:22px;padding:16px 18px}
@@ -478,17 +639,25 @@ const ADM_CSS = `
 
 /* toolbar */
 .adm-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
-.adm-search{position:relative;flex:1 1 240px;min-width:0;max-width:380px}
-.adm-search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mutfg);pointer-events:none}
+.adm-search{position:relative;flex:1 1 240px;min-width:0;max-width:420px}
+.adm-search>svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mutfg);pointer-events:none}
 .adm-search input{width:100%;height:38px;padding:0 64px 0 36px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;transition:border-color .2s,box-shadow .25s}
 .adm-search input::placeholder{color:var(--mutfg)}
 .adm-search input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 18%,transparent)}
 .adm-search .r{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:4px;align-items:center}
+.adm-hist{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:40;padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);box-shadow:0 22px 50px -14px rgba(0,0,0,.45)}
+.adm-hist p{margin:4px 8px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mutfg);display:flex;justify-content:space-between}
+.adm-hist button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 10px;border:0;border-radius:8px;background:transparent;font-size:13px;text-align:left}
+.adm-hist button:hover{background:var(--mut)}
 .adm-chips{display:flex;gap:6px;flex-wrap:wrap}
 .adm-chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--bd);border-radius:999px;background:var(--card);color:var(--fg);font-size:12.5px;font-weight:600;transition:all .25s var(--ease)}
 .adm-chip:hover{border-color:color-mix(in srgb,var(--pri) 55%,var(--bd))}
 .adm-chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.adm-chip.tok{background:color-mix(in srgb,var(--pri) 14%,var(--card));border-color:color-mix(in srgb,var(--pri) 45%,var(--bd));font-family:ui-monospace,Menlo,monospace;font-size:12px;height:28px;padding:0 6px 0 10px}
+.adm-chip.tok svg{opacity:.7}
+.adm-chip.sw{padding:0;width:34px;justify-content:center;border-width:2px}
 .adm-chip em{font-style:normal;font-size:11px;opacity:.7;font-variant-numeric:tabular-nums}
+.adm-chip.sm2{height:26px;padding:0 10px;font-size:11.5px}
 .adm-select{height:38px;padding:0 28px 0 11px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;font-size:13px;font-weight:600;max-width:100%}
 .adm-segbtn{display:inline-flex;padding:3px;border:1px solid var(--bd);border-radius:11px;background:var(--card);gap:2px}
 .adm-segbtn button{display:grid;place-items:center;width:32px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--mutfg);transition:all .25s var(--ease)}
@@ -496,9 +665,13 @@ const ADM_CSS = `
 .adm-meta{margin:0 0 10px;color:var(--mutfg);font-size:12.5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .adm-meta b{color:var(--fg);font-variant-numeric:tabular-nums}
 .adm-link{border:0;background:transparent;color:var(--pri);font-weight:600;padding:0;text-decoration:underline;text-underline-offset:3px}
+.adm-mark{background:color-mix(in srgb,var(--amber) 38%,transparent);color:inherit;border-radius:3px;padding:0 1px}
+.adm-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.adm-tag{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700;background:color-mix(in srgb,var(--viol) 14%,transparent);color:var(--viol);border:0}
+button.adm-tag:hover{filter:brightness(1.15)}
 
 /* table (wide screens only; smaller screens use cards) */
-.adm-tablewrap{overflow-x:auto;border-radius:16px}
+.adm-tablewrap{overflow-x:auto;border-radius:var(--rad)}
 .adm-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .adm-table th{position:relative;text-align:left;padding:11px 12px;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mutfg);background:var(--mut);border-bottom:1px solid var(--bd);white-space:nowrap;user-select:none}
 .adm-table th.s{cursor:pointer}.adm-table th.s:hover{color:var(--fg)}
@@ -511,6 +684,7 @@ const ADM_CSS = `
 @keyframes adm-rowin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .adm-tr:hover{background:var(--mut)}
 .adm-tr.sel{background:color-mix(in srgb,var(--pri) 9%,var(--card))}
+.adm-tr.cur td:first-child{box-shadow:inset 3px 0 0 var(--pri)}
 .adm-tr.flash td{animation:adm-flash 1.6s ease-out}
 @keyframes adm-flash{0%{background:color-mix(in srgb,var(--pri) 30%,transparent)}100%{background:transparent}}
 .adm-tr.busy{opacity:.55;pointer-events:none}
@@ -550,18 +724,25 @@ const ADM_CSS = `
 .adm-linkbtn:disabled{color:var(--mutfg)}
 .adm-lang{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:5px;background:var(--mut);border:1px solid var(--bd);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mutfg)}
 
-/* cards view */
+/* cards view: layouts grid / rail / wall, with mouse tilt */
 .adm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));gap:14px}
-.adm-ocard{padding:16px;display:grid;gap:12px;min-width:0;animation:adm-rowin .55s var(--ease) both;animation-delay:calc(var(--i,0) * 40ms);transition:transform .35s var(--spring),border-color .2s,box-shadow .3s}
-.adm-ocard:hover{transform:translateY(-3px)}
+.adm-cards.lay-rail{grid-template-columns:minmax(0,1fr);max-width:780px;margin-inline:auto}
+.adm-cards.lay-wall{grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:10px}
+.adm-ocard{padding:16px;display:grid;gap:12px;min-width:0;animation:adm-fadein .55s var(--ease) both;animation-delay:calc(var(--i,0) * 40ms);transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translateY(var(--ty,0px));transition:transform .25s var(--ease),border-color .2s,box-shadow .3s}
+.adm-ocard:hover{--ty:-3px}
 .adm-ocard.sel{border-color:var(--pri);box-shadow:0 0 0 1px var(--pri),var(--shadow)}
+.adm-ocard.cur{outline:2px solid var(--pri);outline-offset:2px}
 .adm-ocard.adm-flashcard{border-color:var(--pri);box-shadow:0 0 0 3px color-mix(in srgb,var(--pri) 35%,transparent),var(--shadow)}
 .adm-ocard .row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;flex-wrap:wrap}
-.adm-ocard .row .adm-shop{flex:1 1 180px}
+.adm-ocard .row .adm-shop{flex:1 1 150px}
 .adm-ocard .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 0;border-top:1px dashed var(--bd);border-bottom:1px dashed var(--bd)}
 .adm-ocard .stats small{display:block;color:var(--mutfg);font-size:11px}
 .adm-ocard .adm-actions{flex-wrap:wrap;justify-content:flex-start}
 .adm-ocard .info{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:var(--mutfg);font-size:11.5px}
+.lay-wall .adm-ocard{padding:12px;gap:8px}
+.lay-wall .adm-ocard .info,.lay-wall .adm-ocard .adm-meter,.lay-wall .adm-ocard .stats small{display:none}
+.lay-wall .adm-ocard .stats{padding:6px 0}
+.lay-rail .adm-ocard .stats{grid-template-columns:repeat(3,1fr)}
 
 /* pager */
 .adm-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px 4px 0;color:var(--mutfg);font-size:12.5px}
@@ -569,9 +750,10 @@ const ADM_CSS = `
 .adm-pages button{min-width:34px;height:34px;padding:0 8px;border:1px solid var(--bd);border-radius:9px;background:var(--card);color:var(--fg);font-weight:600;transition:all .2s var(--ease)}
 .adm-pages button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .adm-pages button:disabled{opacity:.4}
+.adm-more{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 0 0;color:var(--mutfg);font-size:12.5px}
 
 /* bulk bar */
-.adm-bulk{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 24px);padding:10px 12px 12px;border-radius:16px;background:var(--fg);color:var(--bg);box-shadow:0 24px 60px -16px rgba(0,0,0,.55);animation:adm-bulkin .5s var(--spring) both}
+.adm-bulk{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 24px);padding:10px 12px 12px;border-radius:16px;background:var(--fg);color:var(--bg);box-shadow:0 24px 60px -16px rgba(0,0,0,.55);transform:translateX(-50%);animation:adm-bulkin .5s var(--spring) both}
 @keyframes adm-bulkin{from{opacity:0;transform:translate(-50%,30px) scale(.94)}to{opacity:1;transform:translate(-50%,0)}}
 .adm-bulk .adm-btn{background:transparent;color:var(--bg);border-color:color-mix(in srgb,var(--bg) 32%,transparent)}
 .adm-bulk .adm-btn:hover:not(:disabled){background:color-mix(in srgb,var(--bg) 18%,transparent);border-color:color-mix(in srgb,var(--bg) 45%,transparent)}
@@ -580,7 +762,7 @@ const ADM_CSS = `
 .adm-bulkprog i{display:block;height:100%;background:var(--bg);transition:width .3s var(--ease)}
 
 /* menu (rendered in a portal on <body>, so it always opens at the button) */
-.adm-menu{position:fixed;z-index:120;width:208px;max-width:calc(100vw - 16px);padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg);box-shadow:0 22px 50px -14px rgba(0,0,0,.5);animation:adm-pop .22s var(--spring) both;transform-origin:top right}
+.adm-menu{position:fixed;z-index:120;width:208px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 24px);overflow:auto;padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg);box-shadow:0 22px 50px -14px rgba(0,0,0,.5);animation:adm-pop .22s var(--spring) both;transform-origin:top right}
 @keyframes adm-pop{from{opacity:0;transform:scale(.92) translateY(-4px)}to{opacity:1;transform:none}}
 .adm-menu button{display:flex;align-items:center;gap:9px;width:100%;height:36px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--fg);font-size:13px;font-weight:600;text-align:left}
 .adm-menu button:hover:not(:disabled){background:var(--mut)}
@@ -605,6 +787,7 @@ const ADM_CSS = `
 .adm-input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 18%,transparent)}
 .adm-input.bad{border-color:var(--bad)}
 .adm-input.sm{height:34px;font-size:13px}
+.adm-ta{height:auto;min-height:88px;padding:10px 12px;line-height:1.45;resize:vertical}
 .adm-mf{display:flex;gap:10px;margin-top:18px}
 .adm-mf .adm-btn{flex:1;height:42px}
 .adm-shake{animation:adm-shake .45s}
@@ -612,6 +795,11 @@ const ADM_CSS = `
 .adm-quick{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .adm-warnbox{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;font-size:12.5px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);margin-bottom:12px}
 .adm-dangerbox{padding:12px;border-radius:12px;background:color-mix(in srgb,var(--bad) 10%,transparent);color:var(--fg);font-size:12.5px;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--bad) 38%,transparent)}
+.adm-setgrp{padding:12px 0;border-bottom:1px dashed var(--bd)}.adm-setgrp:last-of-type{border-bottom:0}
+.adm-setgrp>p{margin:0 0 8px;font-size:12.5px;font-weight:700}
+.adm-kbdrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px dashed var(--bd);font-size:13px}
+.adm-code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--mut);border:1px solid var(--bd);border-radius:6px;padding:1px 6px}
+.adm-tpl{padding:12px;border:1px solid var(--bd);border-radius:12px;margin-bottom:10px;background:var(--mut)}
 
 /* drawer */
 .adm-drawerov{position:fixed;inset:0;z-index:50;background:rgba(8,12,28,.5);animation:adm-fade .25s both}
@@ -621,7 +809,8 @@ const ADM_CSS = `
 .adm-dh .t{flex:1;min-width:0}
 .adm-dh h2{margin:0;font-size:17px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .adm-dh .avatar{width:46px;height:46px;font-size:15px}
-.adm-tabs{display:flex;gap:4px;padding:10px 18px 0;border-bottom:1px solid var(--bd);position:relative;overflow:hidden}
+.adm-dnav{display:flex;align-items:center;gap:4px;padding:8px 18px 0;color:var(--mutfg);font-size:12px}
+.adm-tabs{display:flex;gap:4px;padding:6px 18px 0;border-bottom:1px solid var(--bd);position:relative;overflow:hidden}
 .adm-tabs button{position:relative;border:0;background:transparent;padding:9px 12px 12px;font-weight:700;font-size:13px;color:var(--mutfg)}
 .adm-tabs button.on{color:var(--fg)}
 .adm-tabs button.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:var(--pri);animation:adm-growx .35s var(--ease)}
@@ -700,29 +889,31 @@ const ADM_CSS = `
 .adm-back:hover{color:var(--pri);transform:translateX(-3px)}
 
 /* tablet and phone */
-@media (max-width:900px){.adm-duo{grid-template-columns:1fr}}
+@media (max-width:900px){.adm-duo{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:760px){
   .adm-wrap{padding:16px 12px 130px}
   .adm-title{font-size:23px}
   .adm-head{align-items:stretch}
   .adm-tools{width:100%}
   .adm-tools .adm-btn:not(.sq){flex:1 1 calc(50% - 8px)}
-  .adm-tools .hide-sm{display:none}
   .adm-search{flex:1 1 100%;max-width:none}
   .adm-toolbar .adm-select{flex:1 1 140px}
   .adm-toasts{top:12px;bottom:auto;right:12px;left:12px;width:auto}
   .adm-bulk{bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  .adm-fab{bottom:calc(96px + env(safe-area-inset-bottom,0px))}
   .adm-modal{padding:18px;border-radius:18px}
   .adm-lcard{padding:24px}
   .adm-overlay.adm-palov{padding-top:8vh}
   .adm-pager{justify-content:center}
   .adm-attn,.adm-panel{padding:14px}
+  .adm-nav{margin:0 -12px 12px;padding:8px 12px}
 }
 @media (max-width:480px){
   .adm-dh{flex-wrap:wrap}
   .adm-dh .t{flex:1 1 140px}
   .adm-db{padding:14px 12px 24px}
-  .adm-tabs{padding:8px 12px 0}
+  .adm-tabs{padding:6px 12px 0}
+  .adm-dnav{padding:8px 12px 0}
   .adm-mf{flex-direction:column-reverse}
   .adm-kpi .val{font-size:22px}
 }
@@ -730,7 +921,13 @@ const ADM_CSS = `
   .adm-root *,.adm-root *::before,.adm-root *::after,.adm-pt *,.adm-pt *::before,.adm-pt *::after{animation-duration:.01ms !important;animation-delay:0ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
   .adm-toastbar{animation-duration:var(--ttl) !important;animation-iteration-count:1 !important}
   .adm-aurora{display:none}
-  .adm-roll{transform:none !important;opacity:1 !important}
+  .adm-roll,.adm-ocard{transform:none !important;opacity:1 !important}
+}
+@media print{
+  .adm-aurora,.adm-tools,.adm-nav,.adm-bulk,.adm-toasts,.adm-fab,.adm-prog,.adm-toolbar,.adm-chips,.adm-pager,.adm-more,.adm-actions,.adm-offline{display:none !important}
+  .adm-root{background:#fff;color:#000}
+  .adm-roll,.adm-ocard{transform:none !important;opacity:1 !important}
+  .adm-card{box-shadow:none}
 }
 `;
 
@@ -773,6 +970,32 @@ function Avatar({ o, className = "" }: { o: { name: string | null; phone: string
   );
 }
 
+// highlights the part of a text that matches the search
+function Hl({ text, q }: { text: string; q: string }) {
+  if (!q) return <>{text}</>;
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark className="adm-mark">{text.slice(i, i + q.length)}</mark>
+      {text.slice(i + q.length)}
+    </>
+  );
+}
+
+function Spark({ data }: { data: number[] }) {
+  if (data.length < 2) return null;
+  const max = Math.max(...data), min = Math.min(...data), span = Math.max(1, max - min);
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${26 - ((v - min) / span) * 22 - 2}`);
+  return (
+    <svg className="adm-spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden>
+      <path className="a" d={`M0,26 L${pts.join(" L")} L100,26 Z`} />
+      <path className="l" d={`M${pts.join(" L")}`} />
+    </svg>
+  );
+}
+
 type MenuItem = { key: string; label: string; icon?: React.ReactNode; onClick: () => void; danger?: boolean; disabled?: boolean; testid?: string } | "sep";
 
 // A popover menu. It is rendered through a portal on <body> and positioned with
@@ -812,7 +1035,7 @@ function Menu({ trigger, items, aria, className = "adm-btn sm icon", testid }: {
     if (pos) return close();
     const r = btn.current!.getBoundingClientRect();
     const w = Math.min(208, window.innerWidth - 16);
-    const h = items.length * 38 + 16;
+    const h = Math.min(items.length * 38 + 16, window.innerHeight - 24);
     const up = r.bottom + h > window.innerHeight && r.top > h;
     const left = clamp(r.right - w, 8, Math.max(8, window.innerWidth - w - 8));
     setPos({ left, ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }) });
@@ -871,6 +1094,14 @@ function Modal({ children, onClose, width = 420 }: { children: React.ReactNode; 
     </div>
   );
 }
+const ModalHead = ({ title, onClose }: { title: string; onClose: () => void }) => (
+  <div className="adm-mh">
+    <h2>{title}</h2>
+    <button onClick={onClose} className="adm-btn sm icon ghost" aria-label="Close">
+      <X size={18} />
+    </button>
+  </div>
+);
 
 function Toasts({ items, dismiss }: { items: ToastItem[]; dismiss: (id: number) => void }) {
   return (
@@ -903,20 +1134,20 @@ function Toasts({ items, dismiss }: { items: ToastItem[]; dismiss: (id: number) 
   );
 }
 
-function LastUpdated({ at, refreshing, auto }: { at: number | null; refreshing: boolean; auto: boolean }) {
+function LastUpdated({ at, refreshing, auto, sec }: { at: number | null; refreshing: boolean; auto: boolean; sec: number }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, []);
   return (
-    <span className="adm-live" title={auto ? "Refreshing automatically every 30 seconds" : "Auto-refresh is off"}>
+    <span className="adm-live" title={auto ? `Refreshing automatically every ${sec} seconds` : "Auto-refresh is off"}>
       <span className={`adm-dot ${auto ? "" : "off"}`} />
       {refreshing ? "Updating…" : at ? `Updated ${ago(Date.now() - at)}` : "Not loaded yet"}
       {auto && (
         <svg className="adm-ringsvg" viewBox="0 0 16 16" aria-hidden>
           <circle className="bg" cx="8" cy="8" r="7" />
-          <circle key={at ?? 0} className="fg" cx="8" cy="8" r="7" style={{ animationDuration: "30s" }} />
+          <circle key={at ?? 0} className="fg" cx="8" cy="8" r="7" style={{ animationDuration: `${sec}s` }} />
         </svg>
       )}
     </span>
@@ -933,11 +1164,74 @@ function ThemeToggle({ className = "adm-btn sq adm-themebtn" }: { className?: st
   );
 }
 
+// sticky section nav with scroll-spy
+function SectionNav({ items }: { items: { id: string; label: string }[] }) {
+  const [active, setActive] = useState(items[0]?.id ?? "");
+  useEffect(() => {
+    let raf = 0;
+    const run = () => {
+      raf = 0;
+      let cur = items[0]?.id ?? "";
+      for (const it of items) {
+        const el = document.getElementById(it.id);
+        if (el && el.getBoundingClientRect().top <= 130) cur = it.id;
+      }
+      setActive(cur);
+    };
+    const on = () => {
+      if (!raf) raf = requestAnimationFrame(run);
+    };
+    window.addEventListener("scroll", on, { passive: true });
+    on();
+    return () => {
+      window.removeEventListener("scroll", on);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [items]);
+  return (
+    <nav className="adm-nav" aria-label="Sections">
+      {items.map((it) => (
+        <button key={it.id} className={active === it.id ? "on" : ""} onClick={() => document.getElementById(it.id)?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "start" })}>
+          {it.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function ScrollTop() {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const on = () => setShow(window.scrollY > 700);
+    window.addEventListener("scroll", on, { passive: true });
+    on();
+    return () => window.removeEventListener("scroll", on);
+  }, []);
+  if (!show) return null;
+  return (
+    <button className="adm-fab" aria-label="Back to top" title="Back to top" onClick={() => window.scrollTo({ top: 0, behavior: prefersReduced() ? "auto" : "smooth" })}>
+      <ArrowUp size={18} />
+    </button>
+  );
+}
+
+function Seg<T extends string | number | boolean>({ value, options, onChange }: { value: T; options: { v: T; l: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div className="adm-quick">
+      {options.map((o) => (
+        <button key={String(o.v)} type="button" className={`adm-chip ${o.v === value ? "on" : ""}`} onClick={() => onChange(o.v)}>
+          {o.l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Insight widgets
 // ---------------------------------------------------------------------------
 
-function Kpi({ i, label: text, value, suffix, hint, icon, color, on, onClick }: { i: number; label: string; value: number; suffix?: string; hint?: string; icon: React.ReactNode; color?: string; on?: boolean; onClick?: () => void }) {
+function Kpi({ i, label: text, value, suffix, hint, icon, color, on, onClick, spark }: { i: number; label: string; value: number; suffix?: string; hint?: string; icon: React.ReactNode; color?: string; on?: boolean; onClick?: () => void; spark?: number[] }) {
   const v = useCountUp(value);
   const Tag = onClick ? "button" : "div";
   return (
@@ -956,6 +1250,7 @@ function Kpi({ i, label: text, value, suffix, hint, icon, color, on, onClick }: 
         {suffix && <small>{suffix}</small>}
       </div>
       {hint && <div className="hint">{hint}</div>}
+      {spark && <Spark data={spark} />}
     </Tag>
   );
 }
@@ -1018,24 +1313,75 @@ function Donut({ counts, total, filter, onPick }: { counts: Record<Bucket, numbe
   );
 }
 
+// 3D ring of the top shops that slowly rotates; hover pauses it
+function Ring({ owners, still, onOpen }: { owners: EOwner[]; still: boolean; onOpen: (phone: string) => void }) {
+  const n = owners.length;
+  const [turn, setTurn] = useState(0);
+  const [hold, setHold] = useState(false);
+  useEffect(() => {
+    if (still || hold || n < 2 || prefersReduced()) return;
+    const id = setInterval(() => setTurn((t) => t + 1), 4200);
+    return () => clearInterval(id);
+  }, [still, hold, n]);
+  if (!n) return <p style={{ color: "var(--mutfg)", margin: 0 }}>No shops yet.</p>;
+  const step = 360 / n;
+  const R = n < 2 ? 0 : Math.max(120, Math.round(95 / Math.tan(Math.PI / n)));
+  const active = ((turn % n) + n) % n;
+  return (
+    <div onMouseEnter={() => setHold(true)} onMouseLeave={() => setHold(false)}>
+      <div className="adm-ring">
+        <div className="adm-ringin" style={{ transform: `translateZ(${-R}px) rotateY(${-turn * step}deg)` }}>
+          {owners.map((o, i) => (
+            <div key={o.phone} className="adm-ringcard" style={{ transform: `rotateY(${i * step}deg) translateZ(${R}px)`, opacity: i === active ? 1 : 0.5 }} aria-hidden={i !== active}>
+              <Avatar o={o} />
+              <b>{label(o)}</b>
+              <StatusBadge bucket={o.bucket} />
+              <span className="adm-num">{money(o.totalOutstanding)}</span>
+              <button className="adm-btn sm" tabIndex={i === active ? 0 : -1} onClick={() => onOpen(o.phone)}>
+                <Eye size={13} /> Open
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="adm-ringctl">
+        <button className="adm-btn sm icon" aria-label="Previous shop" onClick={() => setTurn((t) => t - 1)}>
+          <ChevronLeft size={14} />
+        </button>
+        <div className="adm-dots">
+          {owners.map((o, i) => (
+            <i key={o.phone} className={i === active ? "on" : ""} />
+          ))}
+        </div>
+        <button className="adm-btn sm icon" aria-label="Next shop" onClick={() => setTurn((t) => t + 1)}>
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Rows
 // ---------------------------------------------------------------------------
 
 interface RowHandlers {
   onSel: (phone: string) => void;
-  onOpen: (phone: string, tab: "overview" | "customers") => void;
+  onOpen: (phone: string, tab: DrawerTab) => void;
   onExtend: (o: EOwner, days: number) => void;
   onEdit: (o: EOwner) => void;
   onToggle: (o: EOwner) => void;
   onRemove: (o: EOwner) => void;
   onCopy: (text: string) => void;
+  onPin: (phone: string) => void;
+  onTag: (tag: string) => void;
 }
 
-function ownerMenu(o: EOwner, h: RowHandlers): MenuItem[] {
+function ownerMenu(o: EOwner, h: RowHandlers, pinned: boolean): MenuItem[] {
   return [
     { key: "open", label: "Open details", icon: <Eye size={14} />, onClick: () => h.onOpen(o.phone, "overview") },
     { key: "cust", label: "View customers", icon: <Users size={14} />, onClick: () => h.onOpen(o.phone, "customers"), disabled: o.customerCount === 0 },
+    { key: "pin", label: pinned ? "Unpin shop" : "Pin shop", icon: <Star size={14} />, onClick: () => h.onPin(o.phone) },
     { key: "copy", label: "Copy phone number", icon: <Copy size={14} />, onClick: () => h.onCopy(o.phone) },
     "sep",
     { key: "toggle", label: o.isActive ? "Deactivate" : "Activate", icon: o.isActive ? <Ban size={14} /> : <PlayCircle size={14} />, onClick: () => h.onToggle(o), testid: `button-toggle-active-${o.phone}` },
@@ -1049,11 +1395,11 @@ function extendMenu(o: EOwner, h: RowHandlers): MenuItem[] {
   ]);
 }
 
-function PhoneCell({ phone, onCopy }: { phone: string; onCopy: (t: string) => void }) {
+function PhoneCell({ phone, onCopy, hq = "" }: { phone: string; onCopy: (t: string) => void; hq?: string }) {
   const [done, setDone] = useState(false);
   return (
     <span className="adm-phone">
-      {phone}
+      <Hl text={phone} q={hq} />
       <button
         type="button"
         className={`adm-copy ${done ? "done" : ""}`}
@@ -1070,62 +1416,95 @@ function PhoneCell({ phone, onCopy }: { phone: string; onCopy: (t: string) => vo
   );
 }
 
-const OwnerRow = React.memo(function OwnerRow({ o, i, selected, busy, flash, maxOut, h }: { o: EOwner; i: number; selected: boolean; busy: boolean; flash: boolean; maxOut: number; h: RowHandlers }) {
+const PinBtn = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
+  <button type="button" className={`adm-btn sm icon ghost adm-star ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on} aria-label={on ? "Unpin" : "Pin"} title={on ? "Unpin" : "Pin to top"}>
+    <Star size={15} fill={on ? "currentColor" : "none"} />
+  </button>
+);
+
+const TagList = ({ tags, onTag }: { tags: string[]; onTag: (t: string) => void }) =>
+  tags.length ? (
+    <div className="adm-tags">
+      {tags.slice(0, 3).map((t) => (
+        <button key={t} type="button" className="adm-tag" onClick={() => onTag(t)} title={`Filter by ${t}`}>
+          {t}
+        </button>
+      ))}
+      {tags.length > 3 && <span className="adm-tag">+{tags.length - 3}</span>}
+    </div>
+  ) : null;
+
+interface RowProps { o: EOwner; i: number; selected: boolean; busy: boolean; flash: boolean; cur: boolean; pinned: boolean; tags: string[]; maxOut: number; hq: string; h: RowHandlers }
+
+const OwnerRow = React.memo(function OwnerRow({ o, i, selected, busy, flash, cur, pinned, tags, maxOut, hq, hide, h }: RowProps & { hide: string[] }) {
   const color = bucketColor(o.bucket);
+  const show = (c: string) => !hide.includes(c);
   return (
-    <tr className={`adm-tr ${selected ? "sel" : ""} ${busy ? "busy" : ""} ${flash ? "flash" : ""}`} style={{ ["--i" as string]: Math.min(i, 14) } as React.CSSProperties} data-testid={`row-owner-${o.phone}`}>
+    <tr className={`adm-tr ${selected ? "sel" : ""} ${busy ? "busy" : ""} ${flash ? "flash" : ""} ${cur ? "cur" : ""}`} style={{ ["--i" as string]: Math.min(i, 14) } as React.CSSProperties} data-testid={`row-owner-${o.phone}`} data-phone={o.phone}>
       <td>
         <input type="checkbox" className="adm-check" checked={selected} onChange={() => h.onSel(o.phone)} aria-label={`Select ${label(o)}`} />
       </td>
       <td>
         <div className="adm-shop">
+          <PinBtn on={pinned} onClick={() => h.onPin(o.phone)} />
           <Avatar o={o} />
           <div className="t">
             <button className="adm-namebtn" onClick={() => h.onOpen(o.phone, "overview")} title="Open details">
-              {o.name ?? "—"}
+              {o.name ? <Hl text={o.name} q={hq} /> : "—"}
             </button>
             <small>
               Joined {fmtDate(o.createdAt)}
               {o.language && <span className="adm-lang">{o.language}</span>}
             </small>
+            <TagList tags={tags} onTag={h.onTag} />
           </div>
         </div>
       </td>
-      <td>
-        <PhoneCell phone={o.phone} onCopy={h.onCopy} />
-      </td>
-      <td>
-        <StatusBadge bucket={o.bucket} />
-        <div>
-          <HealthPill o={o} />
-        </div>
-      </td>
-      <td>
-        <div className="adm-until">
-          <span>{fmtDate(o.trialEndsAt)}</span>
-          {o.daysLeft !== null && <small>{relDays(o.daysLeft)}</small>}
-          {o.elapsed !== null && (
-            <div className="adm-meter" aria-hidden>
-              <i style={{ width: `${Math.max(4, o.elapsed * 100)}%`, ["--c" as string]: color } as React.CSSProperties} />
-            </div>
-          )}
-        </div>
-      </td>
-      <td>
-        <button className="adm-linkbtn" onClick={() => h.onOpen(o.phone, "customers")} disabled={o.customerCount === 0} data-testid={`button-view-customers-${o.phone}`}>
-          <Users size={13} /> {o.customerCount}
-        </button>
-      </td>
-      <td>
-        <div className="adm-out">
-          <span className="adm-num">{money(o.totalOutstanding)}</span>
-          {maxOut > 0 && (
-            <div className="adm-meter" aria-hidden>
-              <i style={{ width: `${Math.max(o.totalOutstanding ? 4 : 0, (o.totalOutstanding / maxOut) * 100)}%`, ["--c" as string]: "var(--pri)" } as React.CSSProperties} />
-            </div>
-          )}
-        </div>
-      </td>
+      {show("phone") && (
+        <td>
+          <PhoneCell phone={o.phone} onCopy={h.onCopy} hq={hq} />
+        </td>
+      )}
+      {show("status") && (
+        <td>
+          <StatusBadge bucket={o.bucket} />
+          <div>
+            <HealthPill o={o} />
+          </div>
+        </td>
+      )}
+      {show("until") && (
+        <td>
+          <div className="adm-until">
+            <span>{fmtDate(o.trialEndsAt)}</span>
+            {o.daysLeft !== null && <small>{relDays(o.daysLeft)}</small>}
+            {o.elapsed !== null && (
+              <div className="adm-meter" aria-hidden>
+                <i style={{ width: `${Math.max(4, o.elapsed * 100)}%`, ["--c" as string]: color } as React.CSSProperties} />
+              </div>
+            )}
+          </div>
+        </td>
+      )}
+      {show("customers") && (
+        <td>
+          <button className="adm-linkbtn" onClick={() => h.onOpen(o.phone, "customers")} disabled={o.customerCount === 0} data-testid={`button-view-customers-${o.phone}`}>
+            <Users size={13} /> {o.customerCount}
+          </button>
+        </td>
+      )}
+      {show("outstanding") && (
+        <td>
+          <div className="adm-out">
+            <span className="adm-num">{money(o.totalOutstanding)}</span>
+            {maxOut > 0 && (
+              <div className="adm-meter" aria-hidden>
+                <i style={{ width: `${Math.max(o.totalOutstanding ? 4 : 0, (o.totalOutstanding / maxOut) * 100)}%`, ["--c" as string]: "var(--pri)" } as React.CSSProperties} />
+              </div>
+            )}
+          </div>
+        </td>
+      )}
       <td>
         <div className="adm-actions">
           <span className="adm-split">
@@ -1140,28 +1519,54 @@ const OwnerRow = React.memo(function OwnerRow({ o, i, selected, busy, flash, max
           <button className="adm-btn sm icon" onClick={() => h.onEdit(o)} disabled={busy} aria-label="Edit" title="Edit" data-testid={`button-edit-${o.phone}`}>
             <Pencil size={14} />
           </button>
-          <Menu aria="More actions" trigger={<MoreHorizontal size={15} />} items={ownerMenu(o, h)} />
+          <Menu aria="More actions" trigger={<MoreHorizontal size={15} />} items={ownerMenu(o, h, pinned)} />
         </div>
       </td>
     </tr>
   );
 });
 
-const OwnerCard = React.memo(function OwnerCard({ o, i, selected, busy, flash, maxOut, h }: { o: EOwner; i: number; selected: boolean; busy: boolean; flash: boolean; maxOut: number; h: RowHandlers }) {
+const OwnerCard = React.memo(function OwnerCard({ o, i, selected, busy, flash, cur, pinned, tags, maxOut, hq, h }: RowProps) {
   const color = bucketColor(o.bucket);
+  const ref = useRef<HTMLDivElement | null>(null);
+  // mouse tilt: the card leans toward the pointer (the glare comes from .adm-spot)
+  const onMove = (e: React.PointerEvent) => {
+    if (e.pointerType !== "mouse" || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - 0.5;
+    const y = (e.clientY - r.top) / r.height - 0.5;
+    ref.current.style.setProperty("--rx", `${(-y * 7).toFixed(2)}deg`);
+    ref.current.style.setProperty("--ry", `${(x * 9).toFixed(2)}deg`);
+  };
+  const onLeave = () => {
+    ref.current?.style.setProperty("--rx", "0deg");
+    ref.current?.style.setProperty("--ry", "0deg");
+  };
   return (
-    <div className={`adm-card adm-spot adm-ocard ${selected ? "sel" : ""} ${flash ? "adm-flashcard" : ""}`} style={{ ["--i" as string]: Math.min(i, 12) } as React.CSSProperties} data-testid={`row-owner-${o.phone}`} aria-busy={busy}>
+    <div
+      ref={ref}
+      onPointerMove={onMove}
+      onPointerLeave={onLeave}
+      className={`adm-card adm-spot adm-ocard ${selected ? "sel" : ""} ${flash ? "adm-flashcard" : ""} ${cur ? "cur" : ""}`}
+      style={{ ["--i" as string]: Math.min(i, 12) } as React.CSSProperties}
+      data-testid={`row-owner-${o.phone}`}
+      data-phone={o.phone}
+      aria-busy={busy}
+    >
       <div className="row">
         <div className="adm-shop">
           <Avatar o={o} />
           <div className="t">
             <button className="adm-namebtn" onClick={() => h.onOpen(o.phone, "overview")}>
-              {o.name ?? "—"}
+              {o.name ? <Hl text={o.name} q={hq} /> : "—"}
             </button>
-            <PhoneCell phone={o.phone} onCopy={h.onCopy} />
+            <PhoneCell phone={o.phone} onCopy={h.onCopy} hq={hq} />
           </div>
         </div>
-        <input type="checkbox" className="adm-check" checked={selected} onChange={() => h.onSel(o.phone)} aria-label={`Select ${label(o)}`} />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+          <PinBtn on={pinned} onClick={() => h.onPin(o.phone)} />
+          <input type="checkbox" className="adm-check" checked={selected} onChange={() => h.onSel(o.phone)} aria-label={`Select ${label(o)}`} />
+        </span>
       </div>
       <div className="row">
         <StatusBadge bucket={o.bucket} />
@@ -1191,8 +1596,13 @@ const OwnerCard = React.memo(function OwnerCard({ o, i, selected, busy, flash, m
       </div>
       <div className="info">
         <span>Joined {fmtDate(o.createdAt)}</span>
-        {o.language && <span className="adm-lang" style={{ margin: 0 }}>{o.language}</span>}
+        {o.language && (
+          <span className="adm-lang" style={{ margin: 0 }}>
+            {o.language}
+          </span>
+        )}
       </div>
+      <TagList tags={tags} onTag={h.onTag} />
       <div className="adm-actions">
         <button className="adm-btn sm pri" onClick={() => h.onExtend(o, 30)} disabled={busy}>
           {busy ? <Loader2 size={13} className="adm-spin" /> : "+30 days"}
@@ -1204,7 +1614,7 @@ const OwnerCard = React.memo(function OwnerCard({ o, i, selected, busy, flash, m
           <Pencil size={14} />
         </button>
         <span style={{ marginLeft: "auto" }}>
-          <Menu aria="More actions" trigger={<MoreHorizontal size={15} />} items={ownerMenu(o, h)} />
+          <Menu aria="More actions" trigger={<MoreHorizontal size={15} />} items={ownerMenu(o, h, pinned)} />
         </span>
       </div>
     </div>
@@ -1262,13 +1672,23 @@ function EditOwnerModal({ owner, others, saving, onCancel, onSave }: { owner: Ow
 
 // Only the phone is required. Name, language and trial length are optional: the
 // owner fills in what is missing the first time they text the bot.
-function AddOwnerModal({ owners, saving, onCancel, onSave }: { owners: Owner[]; saving: boolean; onCancel: () => void; onSave: (d: { phone: string; name: string; language: string; trialDays: number }) => void }) {
+function AddOwnerModal({ owners, saving, onCancel, onSave }: { owners: Owner[]; saving: boolean; onCancel: () => void; onSave: (d: { phone: string; name: string; language: string; trialDays: number }, another: boolean) => Promise<boolean> }) {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [language, setLanguage] = useState("");
   const [trialDays, setTrialDays] = useState<number | "">("");
+  const [another, setAnother] = useState(false);
+  const phoneRef = useRef<HTMLInputElement | null>(null);
   const dup = phone.trim() ? owners.find((o) => tail9(o.phone) === tail9(phone) && digits(phone).length >= 8) : undefined;
   const tooShort = phone.trim().length > 0 && digits(phone).length < 8;
+  const submit = async () => {
+    const ok = await onSave({ phone, name, language, trialDays: trialDays === "" ? 30 : trialDays }, another);
+    if (ok && another) {
+      setPhone("");
+      setName("");
+      phoneRef.current?.focus();
+    }
+  };
   return (
     <Modal onClose={onCancel} width={420}>
       <div className="adm-mh">
@@ -1281,7 +1701,7 @@ function AddOwnerModal({ owners, saving, onCancel, onSave }: { owners: Owner[]; 
         <label>
           Phone Number <span style={{ color: "var(--bad)" }}>*</span>
         </label>
-        <input className={`adm-input ${dup || tooShort ? "bad" : ""}`} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 0788123456" autoFocus data-testid="input-add-phone" />
+        <input ref={phoneRef} className={`adm-input ${dup || tooShort ? "bad" : ""}`} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 0788123456" autoFocus data-testid="input-add-phone" />
         {dup && <span className="err">Already registered as {label(dup)}.</span>}
         {tooShort && <span className="err">That number looks too short.</span>}
       </div>
@@ -1314,11 +1734,14 @@ function AddOwnerModal({ owners, saving, onCancel, onSave }: { owners: Owner[]; 
           ))}
         </div>
       </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600 }}>
+        <input type="checkbox" className="adm-check" checked={another} onChange={(e) => setAnother(e.target.checked)} /> Keep this window open to add another
+      </label>
       <div className="adm-mf">
         <button onClick={onCancel} className="adm-btn" data-testid="button-cancel-add">
           Cancel
         </button>
-        <button onClick={() => onSave({ phone, name, language, trialDays: trialDays === "" ? 30 : trialDays })} disabled={saving || !phone.trim() || !!dup || tooShort} className="adm-btn pri" data-testid="button-save-add">
+        <button onClick={submit} disabled={saving || !phone.trim() || !!dup || tooShort} className="adm-btn pri" data-testid="button-save-add">
           {saving ? "Creating..." : "Create"}
         </button>
       </div>
@@ -1334,12 +1757,7 @@ function ConfirmRemoveModal({ owner, busy, onCancel, onConfirm }: { owner: Owner
   const go = () => (ok ? onConfirm() : setShake((n) => n + 1));
   return (
     <Modal onClose={onCancel} width={440}>
-      <div className="adm-mh">
-        <h2>Remove {label(owner)}?</h2>
-        <button onClick={onCancel} className="adm-btn sm icon ghost" aria-label="Close">
-          <X size={18} />
-        </button>
-      </div>
+      <ModalHead title={`Remove ${label(owner)}?`} onClose={onCancel} />
       <div className="adm-dangerbox">
         This cannot be undone. Their customer records remain, but the owner login will no longer work.
         {owner.customerCount > 0 && (
@@ -1377,16 +1795,404 @@ function ConfirmRemoveModal({ owner, busy, onCancel, onConfirm }: { owner: Owner
   );
 }
 
+function PromptModal({ title, placeholder, cta, onSubmit, onClose }: { title: string; placeholder: string; cta: string; onSubmit: (v: string) => void; onClose: () => void }) {
+  const [v, setV] = useState("");
+  const go = () => v.trim() && onSubmit(v.trim());
+  return (
+    <Modal onClose={onClose} width={380}>
+      <ModalHead title={title} onClose={onClose} />
+      <input className="adm-input" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()} placeholder={placeholder} autoFocus />
+      <div className="adm-mf">
+        <button className="adm-btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="adm-btn pri" disabled={!v.trim()} onClick={go}>
+          {cta}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function SettingsModal({ prefs, upd, onReset, onClose }: { prefs: Prefs; upd: (p: Partial<Prefs>) => void; onReset: () => void; onClose: () => void }) {
+  const { theme, toggle } = useTheme();
+  const flip = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  return (
+    <Modal onClose={onClose} width={520}>
+      <ModalHead title="Appearance & behaviour" onClose={onClose} />
+      <div className="adm-setgrp">
+        <p>Theme</p>
+        <Seg value={theme} options={[{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }]} onChange={(v) => v !== theme && toggle()} />
+      </div>
+      <div className="adm-setgrp">
+        <p>Accent colour</p>
+        <div className="adm-quick">
+          {ACCENTS.map(([k, c]) => (
+            <button key={k} type="button" className={`adm-chip sw ${prefs.accent === k ? "on" : ""}`} style={{ background: c, borderColor: prefs.accent === k ? "var(--fg)" : c }} aria-label={k} onClick={() => upd({ accent: k })}>
+              {prefs.accent === k && <Check size={14} color="#fff" />}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="adm-setgrp">
+        <p>Corners</p>
+        <Seg value={prefs.radius} options={[{ v: "sharp", l: "Sharp" }, { v: "soft", l: "Soft" }, { v: "round", l: "Round" }]} onChange={(v) => upd({ radius: v })} />
+      </div>
+      <div className="adm-setgrp">
+        <p>3D scroll effect</p>
+        <Seg value={prefs.roll} options={[{ v: "off", l: "Off" }, { v: "soft", l: "Soft" }, { v: "strong", l: "Strong" }]} onChange={(v) => upd({ roll: v })} />
+        <div style={{ marginTop: 8 }}>
+          <Seg value={prefs.calm} options={[{ v: false, l: "Animations on" }, { v: true, l: "Calm mode (no motion)" }]} onChange={(v) => upd({ calm: v })} />
+        </div>
+      </div>
+      <div className="adm-setgrp">
+        <p>Shop list layout (cards)</p>
+        <Seg value={prefs.layout} options={[{ v: "grid", l: "Grid" }, { v: "rail", l: "Rail" }, { v: "wall", l: "Wall" }]} onChange={(v) => upd({ layout: v })} />
+        <div style={{ marginTop: 8 }}>
+          <Seg value={prefs.paging} options={[{ v: "pages", l: "Pages" }, { v: "more", l: "Load more" }]} onChange={(v) => upd({ paging: v })} />
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <Seg value={prefs.pinFirst} options={[{ v: true, l: "Pinned shops first" }, { v: false, l: "Normal order" }]} onChange={(v) => upd({ pinFirst: v })} />
+        </div>
+      </div>
+      <div className="adm-setgrp">
+        <p>Auto-refresh</p>
+        <Seg
+          value={prefs.auto ? prefs.refreshSec : 0}
+          options={[{ v: 0, l: "Off" }, { v: 15, l: "15 s" }, { v: 30, l: "30 s" }, { v: 60, l: "60 s" }]}
+          onChange={(v) => (v === 0 ? upd({ auto: false }) : upd({ auto: true, refreshSec: v }))}
+        />
+      </div>
+      <div className="adm-setgrp">
+        <p>Table columns (wide screens)</p>
+        <div className="adm-quick">
+          {COLS.map(([id, l]) => (
+            <button key={id} type="button" className={`adm-chip ${prefs.cols.includes(id) ? "" : "on"}`} onClick={() => upd({ cols: flip(prefs.cols, id) })}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="adm-setgrp">
+        <p>Dashboard panels</p>
+        <div className="adm-quick" style={{ marginBottom: 8 }}>
+          <button className="adm-btn sm" onClick={() => upd({ hidden: [] })}>
+            Overview (all)
+          </button>
+          <button className="adm-btn sm" onClick={() => upd({ hidden: ["attention", "funnel"] })}>
+            Analytics
+          </button>
+          <button className="adm-btn sm" onClick={() => upd({ hidden: PANELS.map((p) => p.id).filter((id) => id !== "attention") })}>
+            Focus list
+          </button>
+        </div>
+        <div className="adm-quick">
+          {PANELS.map((p) => (
+            <button key={p.id} type="button" className={`adm-chip ${prefs.hidden.includes(p.id) ? "" : "on"}`} onClick={() => upd({ hidden: flip(prefs.hidden, p.id) })}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="adm-mf">
+        <button className="adm-btn" onClick={onReset}>
+          Reset all
+        </button>
+        <button className="adm-btn pri" onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ViewsModal({ views, setViews, current, onApply, onClose }: { views: SavedView[]; setViews: (v: SavedView[]) => void; current: Omit<SavedView, "id" | "name">; onApply: (v: SavedView) => void; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const save = () => {
+    if (!name.trim()) return;
+    setViews([...views, { id: String(Date.now()), name: name.trim(), ...current }]);
+    setName("");
+  };
+  return (
+    <Modal onClose={onClose} width={460}>
+      <ModalHead title="Saved views" onClose={onClose} />
+      <p style={{ margin: "-6px 0 12px", color: "var(--mutfg)", fontSize: 12.5 }}>
+        Saves the current search, status filter and sort: <span className="adm-code">{current.query || "no search"}</span> · {current.status} · {current.sort.key}
+      </p>
+      <div className="adm-quick" style={{ marginBottom: 14, flexWrap: "nowrap" }}>
+        <input className="adm-input" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="Name this view, e.g. Expiring Kinyarwanda shops" />
+        <button className="adm-btn pri" onClick={save} disabled={!name.trim()}>
+          Save
+        </button>
+      </div>
+      {views.length === 0 ? (
+        <div className="adm-empty" style={{ padding: 24 }}>
+          <Bookmark size={28} />
+          No saved views yet.
+        </div>
+      ) : (
+        views.map((v) => (
+          <div key={v.id} className="adm-qrow">
+            <Bookmark size={14} />
+            <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+              <b style={{ marginLeft: 0 }}>{v.name}</b>
+              <small style={{ display: "block", color: "var(--mutfg)" }}>{v.query || "no search"} · {v.status}</small>
+            </span>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              <button className="adm-btn sm" onClick={() => onApply(v)}>
+                Apply
+              </button>
+              <button className="adm-btn sm icon danger" aria-label="Delete view" onClick={() => setViews(views.filter((x) => x.id !== v.id))}>
+                <Trash2 size={13} />
+              </button>
+            </span>
+          </div>
+        ))
+      )}
+    </Modal>
+  );
+}
+
+function TemplatesModal({ tpls, setTpls, onClose }: { tpls: Tpl[]; setTpls: (t: Tpl[]) => void; onClose: () => void }) {
+  const patch = (id: string, p: Partial<Tpl>) => setTpls(tpls.map((t) => (t.id === id ? { ...t, ...p } : t)));
+  return (
+    <Modal onClose={onClose} width={620}>
+      <ModalHead title="Message templates" onClose={onClose} />
+      <p style={{ margin: "-6px 0 12px", color: "var(--mutfg)", fontSize: 12.5 }}>
+        Use <span className="adm-code">{"{name}"}</span> <span className="adm-code">{"{date}"}</span> <span className="adm-code">{"{days}"}</span>. The Kinyarwanda text is used for shops whose language is rw.
+      </p>
+      {tpls.map((t) => (
+        <div key={t.id} className="adm-tpl">
+          <div className="adm-quick" style={{ flexWrap: "nowrap", marginBottom: 8 }}>
+            <input className="adm-input sm" value={t.name} onChange={(e) => patch(t.id, { name: e.target.value })} aria-label="Template name" />
+            {t.id !== "renew" && (
+              <button className="adm-btn sm icon danger" aria-label="Delete template" onClick={() => setTpls(tpls.filter((x) => x.id !== t.id))}>
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
+          <div className="adm-field" style={{ marginBottom: 8 }}>
+            <label>English</label>
+            <textarea className="adm-input adm-ta" value={t.en} onChange={(e) => patch(t.id, { en: e.target.value })} />
+          </div>
+          <div className="adm-field" style={{ marginBottom: t.enEnded !== undefined ? 8 : 0 }}>
+            <label>Kinyarwanda</label>
+            <textarea className="adm-input adm-ta" value={t.rw} onChange={(e) => patch(t.id, { rw: e.target.value })} />
+          </div>
+          {t.enEnded !== undefined && (
+            <>
+              <div className="adm-field" style={{ marginBottom: 8 }}>
+                <label>English, if access already ended</label>
+                <textarea className="adm-input adm-ta" value={t.enEnded} onChange={(e) => patch(t.id, { enEnded: e.target.value })} />
+              </div>
+              <div className="adm-field" style={{ marginBottom: 0 }}>
+                <label>Kinyarwanda, if access already ended</label>
+                <textarea className="adm-input adm-ta" value={t.rwEnded ?? ""} onChange={(e) => patch(t.id, { rwEnded: e.target.value })} />
+              </div>
+            </>
+          )}
+        </div>
+      ))}
+      <div className="adm-mf">
+        <button className="adm-btn" onClick={() => setTpls([...tpls, { id: `t${Date.now()}`, name: "New template", en: "Hello {name}, ", rw: "Muraho {name}, " }])}>
+          Add template
+        </button>
+        <button className="adm-btn" onClick={() => setTpls(DEFAULT_TPLS)}>
+          Reset defaults
+        </button>
+        <button className="adm-btn pri" onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function parseImport(text: string, owners: Owner[]) {
+  const seen = new Set(owners.map((o) => tail9(o.phone)));
+  const rows: { phone: string; name: string; language: string }[] = [];
+  let dup = 0, bad = 0;
+  text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).forEach((line) => {
+    const [phone = "", name = "", lang = ""] = line.split(/[,;\t]/).map((s) => s.trim());
+    if (digits(phone).length < 8) return void bad++;
+    if (seen.has(tail9(phone))) return void dup++;
+    seen.add(tail9(phone));
+    rows.push({ phone, name, language: /^(rw|kin)/i.test(lang) ? "rw" : /^(en|eng)/i.test(lang) ? "en" : "" });
+  });
+  return { rows, dup, bad };
+}
+
+function ImportModal({ owners, call, onDone, onClose }: { owners: Owner[]; call: <T = any>(path: string, opts?: { method?: string; body?: unknown }, fallback?: string) => Promise<T>; onDone: (ok: number, failed: number) => void; onClose: () => void }) {
+  const [text, setText] = useState("");
+  const [days, setDays] = useState(30);
+  const [prog, setProg] = useState<{ done: number; total: number } | null>(null);
+  const parsed = useMemo(() => parseImport(text, owners), [text, owners]);
+  const run = async () => {
+    let ok = 0, failed = 0;
+    setProg({ done: 0, total: parsed.rows.length });
+    for (let i = 0; i < parsed.rows.length; i++) {
+      try {
+        await call("/admin/owners", { method: "POST", body: { ...parsed.rows[i], trialDays: days } }, "Failed to create owner.");
+        ok++;
+      } catch (e) {
+        if ((e as Error).message === "Unauthorized") break;
+        failed++;
+      }
+      setProg({ done: i + 1, total: parsed.rows.length });
+    }
+    onDone(ok, failed);
+  };
+  return (
+    <Modal onClose={prog ? () => {} : onClose} width={500}>
+      <ModalHead title="Import owners" onClose={onClose} />
+      <div className="adm-field">
+        <label>
+          One owner per line <small>phone, name, language (rw or en) — only the phone is required</small>
+        </label>
+        <textarea className="adm-input adm-ta" style={{ minHeight: 150, fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }} value={text} onChange={(e) => setText(e.target.value)} placeholder={"0788123456, Mama Kamana, rw\n0722000111"} autoFocus />
+      </div>
+      <div className="adm-field">
+        <label>Trial length for all of them</label>
+        <Seg value={days} options={[7, 14, 30, 60, 90].map((d) => ({ v: d, l: `${d} days` }))} onChange={setDays} />
+      </div>
+      <p style={{ color: "var(--mutfg)", fontSize: 12.5, margin: "0 0 4px" }}>
+        <b style={{ color: "var(--fg)" }}>{parsed.rows.length}</b> ready to add · {parsed.dup} already registered or repeated · {parsed.bad} unreadable
+      </p>
+      {prog && (
+        <div className="adm-meter" style={{ marginTop: 10 }}>
+          <i style={{ width: `${(prog.done / Math.max(1, prog.total)) * 100}%`, animation: "none", ["--c" as string]: "var(--pri)" } as React.CSSProperties} />
+        </div>
+      )}
+      <div className="adm-mf">
+        <button className="adm-btn" onClick={onClose} disabled={!!prog}>
+          Cancel
+        </button>
+        <button className="adm-btn pri" onClick={run} disabled={!!prog || parsed.rows.length === 0}>
+          {prog ? `Adding ${prog.done}/${prog.total}…` : `Add ${parsed.rows.length} owner${parsed.rows.length === 1 ? "" : "s"}`}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function HelpModal({ onClose }: { onClose: () => void }) {
+  const keys: [string, string][] = [["⌘/Ctrl K", "Command palette"], ["/", "Focus search"], ["n", "Add owner"], ["r", "Refresh"], ["j / k", "Next / previous shop"], ["Enter", "Open highlighted shop"], ["x", "Select highlighted shop"], ["p", "Pin highlighted shop"], ["e", "+30 days for highlighted shop"], ["t", "Toggle theme"], ["d", "Daily digest"], ["← / →", "Previous / next shop inside the drawer"], ["?", "This help"], ["Esc", "Close or clear selection"]];
+  const syn: [string, string][] = [["status:expired", "expired, expiring, active, deactivated, notrial"], ["lang:rw", "language (rw, en, none)"], ["tag:vip", "shops with a tag"], ["owes>50k", "outstanding, also < >= <= :"], ["customers<3", "number of customers"], ["days<=7", "days until access ends (negative = already ended)"], ["joined:30", "joined in the last 30 days"], ["is:pinned", "pinned, noname, nolang, dupe, nocust, owing"]];
+  return (
+    <Modal onClose={onClose} width={560}>
+      <ModalHead title="Shortcuts & search tips" onClose={onClose} />
+      <p className="adm-sec">Keyboard</p>
+      {keys.map(([k, d]) => (
+        <div key={k} className="adm-kbdrow">
+          <span>{d}</span>
+          <span className="adm-kbd">{k}</span>
+        </div>
+      ))}
+      <p className="adm-sec" style={{ marginTop: 16 }}>Search syntax (mix freely, plus plain words)</p>
+      {syn.map(([k, d]) => (
+        <div key={k} className="adm-kbdrow">
+          <span className="adm-code">{k}</span>
+          <span style={{ color: "var(--mutfg)", textAlign: "right", fontSize: 12.5 }}>{d}</span>
+        </div>
+      ))}
+    </Modal>
+  );
+}
+
+function DigestModal({ text, onCopy, onClose }: { text: string; onCopy: (t: string) => void; onClose: () => void }) {
+  return (
+    <Modal onClose={onClose} width={500}>
+      <ModalHead title="Daily digest" onClose={onClose} />
+      <textarea className="adm-input adm-ta" style={{ minHeight: 260, fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }} value={text} readOnly />
+      <div className="adm-mf">
+        <button className="adm-btn" onClick={() => onCopy(text)}>
+          <Copy size={14} /> Copy
+        </button>
+        <a className="adm-btn pri" href={`https://wa.me/?text=${enc(text)}`} target="_blank" rel="noopener noreferrer">
+          <MessageCircle size={14} /> Share on WhatsApp
+        </a>
+      </div>
+    </Modal>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Owner drawer: overview + customers
+// Owner drawer: overview + customers + activity
 // ---------------------------------------------------------------------------
 
+function TagEditor({ tags, all, onAdd, onRemove }: { tags: string[]; all: string[]; onAdd: (t: string) => void; onRemove: (t: string) => void }) {
+  const [v, setV] = useState("");
+  const add = (t: string) => {
+    const x = t.trim();
+    if (x && !tags.some((y) => y.toLowerCase() === x.toLowerCase())) onAdd(x);
+    setV("");
+  };
+  const sugg = [...new Set([...all, ...TAG_SUGGESTIONS])].filter((t) => !tags.includes(t)).slice(0, 6);
+  return (
+    <div>
+      <div className="adm-quick" style={{ marginBottom: 8 }}>
+        {tags.length === 0 && <span style={{ color: "var(--mutfg)", fontSize: 12.5 }}>No tags yet.</span>}
+        {tags.map((t) => (
+          <button key={t} className="adm-tag" style={{ padding: "4px 9px", fontSize: 11.5 }} onClick={() => onRemove(t)} title="Remove tag">
+            {t} <X size={11} />
+          </button>
+        ))}
+      </div>
+      <div className="adm-quick" style={{ flexWrap: "nowrap" }}>
+        <input className="adm-input sm" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add(v)} placeholder="Add a tag" aria-label="Add a tag" />
+        <button className="adm-btn sm" onClick={() => add(v)} disabled={!v.trim()}>
+          Add
+        </button>
+      </div>
+      <div className="adm-quick" style={{ marginTop: 8 }}>
+        {sugg.map((t) => (
+          <button key={t} className="adm-chip sm2" onClick={() => add(t)}>
+            + {t}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Composer({ owner, tpls, onCopy }: { owner: EOwner; tpls: Tpl[]; onCopy: (t: string) => void }) {
+  const [id, setId] = useState(tpls[0]?.id ?? "");
+  const tpl = tpls.find((t) => t.id === id) ?? tpls[0];
+  const auto = useMemo(() => (tpl ? fillTpl(tpl, owner) : ""), [tpl, owner]);
+  const [text, setText] = useState(auto);
+  useEffect(() => setText(auto), [auto]);
+  if (!tpl) return null;
+  return (
+    <div>
+      <select className="adm-select" style={{ width: "100%", marginBottom: 8 }} value={tpl.id} onChange={(e) => setId(e.target.value)} aria-label="Message template">
+        {tpls.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+      <textarea className="adm-input adm-ta" value={text} onChange={(e) => setText(e.target.value)} aria-label="Message text" />
+      <div className="adm-quick" style={{ marginTop: 8 }}>
+        <a className="adm-btn sm pri" href={waLink(owner.phone, text)} target="_blank" rel="noopener noreferrer">
+          <MessageCircle size={13} /> Send on WhatsApp
+        </a>
+        <button className="adm-btn sm" onClick={() => onCopy(text)}>
+          <Copy size={13} /> Copy
+        </button>
+        <button className="adm-btn sm ghost" onClick={() => setText(auto)} disabled={text === auto}>
+          Reset
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function OwnerDrawer({
-  owner, tab, setTab, call, busy, onClose, onExtend, onEdit, onToggle, onRemove, onCopy, log,
+  owner, tab, setTab, call, busy, onClose, onExtend, onEdit, onToggle, onRemove, onCopy, log, tags, allTags, onAddTag, onRemoveTag, tpls, activity, navLabel, onNav,
 }: {
   owner: EOwner;
-  tab: "overview" | "customers";
-  setTab: (t: "overview" | "customers") => void;
+  tab: DrawerTab;
+  setTab: (t: DrawerTab) => void;
   call: <T = any>(path: string, opts?: { method?: string; body?: unknown }, fallback?: string) => Promise<T>;
   busy: boolean;
   onClose: () => void;
@@ -1395,7 +2201,15 @@ function OwnerDrawer({
   onToggle: (o: EOwner) => void;
   onRemove: (o: EOwner) => void;
   onCopy: (t: string) => void;
-  log: (text: string, ok?: boolean) => void;
+  log: (text: string, ok?: boolean, phone?: string) => void;
+  tags: string[];
+  allTags: string[];
+  onAddTag: (t: string) => void;
+  onRemoveTag: (t: string) => void;
+  tpls: Tpl[];
+  activity: ActivityItem[];
+  navLabel: string;
+  onNav: (dir: 1 | -1) => void;
 }) {
   useEscape(onClose);
   useScrollLock();
@@ -1410,6 +2224,19 @@ function OwnerDrawer({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [days, setDays] = useState("");
 
+  // previous / next shop with the arrow keys (not while typing or while a dialog is open)
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+      if (document.querySelector(".adm-overlay")) return;
+      if (e.key === "ArrowRight") onNav(1);
+      else if (e.key === "ArrowLeft") onNav(-1);
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onNav]);
+
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -1420,6 +2247,9 @@ function OwnerDrawer({
       setCustomers((c) => c ?? []);
     }
   }, [call, owner.phone]);
+  useEffect(() => {
+    setCustomers(null);
+  }, [owner.phone]);
   useEffect(() => {
     load();
   }, [load, owner.customerCount]);
@@ -1438,12 +2268,14 @@ function OwnerDrawer({
   const noNum = (customers ?? []).filter((c) => !c.phone).length;
   const avg = owing ? Math.round((customers ?? []).reduce((s, c) => s + Math.max(0, c.totalOwed), 0) / owing) : 0;
   const color = bucketColor(owner.bucket);
+  const rw = owner.language === "rw";
+  const mine = activity.filter((a) => a.phone === owner.phone);
 
   const saveCustomer = async (id: string) => {
     setSavingId(id);
     try {
       await call(`/admin/customers/${enc(id)}`, { method: "PATCH", body: { name: editName, phone: editPhone.trim() ? editPhone : null } }, "Failed to save customer.");
-      log(`Edited customer "${editName}" of ${label(owner)}`);
+      log(`Edited customer "${editName}" of ${label(owner)}`, true, owner.phone);
       setEditingId(null);
       await load();
     } catch (e) {
@@ -1453,8 +2285,12 @@ function OwnerDrawer({
     }
   };
 
-  const exportCustomers = () =>
-    downloadCsv(`${label(owner).replace(/[^\w-]+/g, "_")}-customers-${stamp()}.csv`, ["Name", "Phone", "Owed (Frw)", "Registered"], (customers ?? []).map((c) => [c.name, c.phone ?? "", c.totalOwed, formatCustomerTimestamp(c.createdAt)]));
+  const exportCustomers = (onlyOwing = false) =>
+    downloadCsv(
+      `${label(owner).replace(/[^\w-]+/g, "_")}-${onlyOwing ? "debtors" : "customers"}-${stamp()}.csv`,
+      ["Name", "Phone", "Owed (Frw)", "Registered"],
+      (customers ?? []).filter((c) => !onlyOwing || c.totalOwed > 0).map((c) => [c.name, c.phone ?? "", c.totalOwed, formatCustomerTimestamp(c.createdAt)])
+    );
 
   const FILTERS: { k: typeof filter; l: string }[] = [
     { k: "all", l: "All" },
@@ -1478,6 +2314,15 @@ function OwnerDrawer({
             <X size={18} />
           </button>
         </div>
+        <div className="adm-dnav">
+          <button className="adm-btn sm icon ghost" onClick={() => onNav(-1)} aria-label="Previous shop">
+            <ChevronLeft size={15} />
+          </button>
+          <span>{navLabel}</span>
+          <button className="adm-btn sm icon ghost" onClick={() => onNav(1)} aria-label="Next shop">
+            <ChevronRight size={15} />
+          </button>
+        </div>
         <div className="adm-tabs" role="tablist">
           <button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "on" : ""} onClick={() => setTab("overview")}>
             Overview
@@ -1485,10 +2330,13 @@ function OwnerDrawer({
           <button role="tab" aria-selected={tab === "customers"} className={tab === "customers" ? "on" : ""} onClick={() => setTab("customers")}>
             Customers ({owner.customerCount})
           </button>
+          <button role="tab" aria-selected={tab === "activity"} className={tab === "activity" ? "on" : ""} onClick={() => setTab("activity")}>
+            Activity ({mine.length})
+          </button>
         </div>
 
         {tab === "overview" ? (
-          <div className="adm-db" key="ov">
+          <div className="adm-db" key={`ov-${owner.phone}`}>
             <div className="adm-stats" style={{ ["--i" as string]: 0 } as React.CSSProperties}>
               <div className="adm-stat">
                 <small>Customers</small>
@@ -1544,12 +2392,19 @@ function OwnerDrawer({
               </div>
             </div>
 
-            <div style={{ ["--i" as string]: 3 } as React.CSSProperties}>
+            <div style={{ marginBottom: 16, ["--i" as string]: 3 } as React.CSSProperties}>
+              <p className="adm-sec">Message</p>
+              <Composer owner={owner} tpls={tpls} onCopy={onCopy} />
+            </div>
+
+            <div style={{ marginBottom: 16, ["--i" as string]: 4 } as React.CSSProperties}>
+              <p className="adm-sec">Tags</p>
+              <TagEditor tags={tags} all={allTags} onAdd={onAddTag} onRemove={onRemoveTag} />
+            </div>
+
+            <div style={{ ["--i" as string]: 5 } as React.CSSProperties}>
               <p className="adm-sec">Manage</p>
               <div className="adm-quick">
-                <a className="adm-btn sm" href={waLink(owner.phone, renewalMessage(owner))} target="_blank" rel="noopener noreferrer">
-                  <MessageCircle size={13} /> Renewal message
-                </a>
                 <a className="adm-btn sm" href={waLink(owner.phone)} target="_blank" rel="noopener noreferrer">
                   <MessageCircle size={13} /> Open chat
                 </a>
@@ -1565,12 +2420,12 @@ function OwnerDrawer({
               </div>
             </div>
 
-            <div style={{ ["--i" as string]: 4 } as React.CSSProperties}>
+            <div style={{ marginTop: 16, ["--i" as string]: 6 } as React.CSSProperties}>
               <NotesBox phone={owner.phone} />
             </div>
 
             {customers && customers.length > 0 && (
-              <div style={{ marginTop: 20, ["--i" as string]: 5 } as React.CSSProperties}>
+              <div style={{ marginTop: 20, ["--i" as string]: 7 } as React.CSSProperties}>
                 <p className="adm-sec">Top debtors</p>
                 <div className="adm-bars">
                   {[...customers]
@@ -1601,8 +2456,8 @@ function OwnerDrawer({
               </div>
             )}
           </div>
-        ) : (
-          <div className="adm-db" key="cu">
+        ) : tab === "customers" ? (
+          <div className="adm-db" key={`cu-${owner.phone}`}>
             {error && (
               <div className="adm-err" data-testid="text-customers-error">
                 <AlertTriangle size={15} /> {error}
@@ -1618,9 +2473,16 @@ function OwnerDrawer({
                 <option value="newest">Newest</option>
                 <option value="name">Name A–Z</option>
               </select>
-              <button className="adm-btn" onClick={exportCustomers} disabled={!customers?.length}>
-                <Download size={13} /> CSV
-              </button>
+              <Menu
+                aria="Customer tools"
+                className="adm-btn"
+                trigger={<><Download size={13} /> Tools</>}
+                items={[
+                  { key: "csv", label: "Export all (CSV)", icon: <Download size={14} />, onClick: () => exportCustomers(false), disabled: !customers?.length },
+                  { key: "owing", label: "Export debtors only", icon: <Download size={14} />, onClick: () => exportCustomers(true), disabled: !owing },
+                  { key: "nums", label: "Copy phone numbers", icon: <Copy size={14} />, onClick: () => onCopy((customers ?? []).filter((c) => c.phone).map((c) => c.phone).join("\n")), disabled: !customers?.some((c) => c.phone) },
+                ]}
+              />
             </div>
             <div className="adm-chips" style={{ marginBottom: 12 }}>
               {FILTERS.map((f) => (
@@ -1670,8 +2532,8 @@ function OwnerDrawer({
                             {c.totalOwed > 0 ? money(c.totalOwed) : "Cleared"}
                           </span>
                           {c.phone && (
-                            <a className="adm-btn sm icon" href={waLink(c.phone)} target="_blank" rel="noopener noreferrer" aria-label={`Message ${c.name}`}>
-                              <MessageCircle size={13} />
+                            <a className="adm-btn sm icon" href={waLink(c.phone, c.totalOwed > 0 ? debtMsg(c, label(owner), rw) : undefined)} target="_blank" rel="noopener noreferrer" aria-label={c.totalOwed > 0 ? `Remind ${c.name} about the debt` : `Message ${c.name}`} title={c.totalOwed > 0 ? "Send a debt reminder on WhatsApp" : "Open chat"}>
+                              {c.totalOwed > 0 ? <Bell size={13} /> : <MessageCircle size={13} />}
                             </a>
                           )}
                           <button
@@ -1694,6 +2556,27 @@ function OwnerDrawer({
               </div>
             )}
           </div>
+        ) : (
+          <div className="adm-db" key={`ac-${owner.phone}`}>
+            {mine.length === 0 ? (
+              <div className="adm-empty">
+                <Activity size={32} />
+                No actions on this shop in this session yet.
+              </div>
+            ) : (
+              <div className="adm-log">
+                {mine.map((a, i) => (
+                  <div key={a.id} style={{ ["--i" as string]: Math.min(i, 12) } as React.CSSProperties}>
+                    <i className={a.ok ? "" : "bad"} />
+                    <span>
+                      {a.text}
+                      <small>{new Date(a.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </aside>
     </>
@@ -1706,7 +2589,7 @@ function OwnerDrawer({
 
 type PaletteAction = { id: string; label: string; hint?: string; icon: React.ReactNode; run: () => void };
 
-function Palette({ owners, actions, onOpenOwner, onClose }: { owners: EOwner[]; actions: PaletteAction[]; onOpenOwner: (phone: string) => void; onClose: () => void }) {
+function Palette({ owners, tags, actions, onOpenOwner, onClose }: { owners: EOwner[]; tags: Record<string, string[]>; actions: PaletteAction[]; onOpenOwner: (phone: string) => void; onClose: () => void }) {
   useEscape(onClose);
   useScrollLock();
   const [q, setQ] = useState("");
@@ -1716,12 +2599,12 @@ function Palette({ owners, actions, onOpenOwner, onClose }: { owners: EOwner[]; 
   const rows = useMemo(() => {
     const s = q.trim().toLowerCase();
     const acts = actions.filter((a) => !s || a.label.toLowerCase().includes(s));
-    const os = s ? owners.filter((o) => (o.name ?? "").toLowerCase().includes(s) || o.phone.includes(s)).slice(0, 6) : [];
+    const os = s ? owners.filter((o) => (o.name ?? "").toLowerCase().includes(s) || o.phone.includes(s) || (tags[o.phone] ?? []).some((t) => t.toLowerCase().includes(s))).slice(0, 6) : [];
     return [
       ...os.map((o) => ({ kind: "owner" as const, id: o.phone, label: label(o), hint: o.phone, icon: <Avatar o={o} className="adm-mini" />, run: () => onOpenOwner(o.phone) })),
       ...acts.map((a) => ({ kind: "action" as const, ...a })),
     ];
-  }, [q, owners, actions, onOpenOwner]);
+  }, [q, owners, actions, onOpenOwner, tags]);
 
   useEffect(() => setIdx(0), [q]);
   useEffect(() => {
@@ -1746,7 +2629,7 @@ function Palette({ owners, actions, onOpenOwner, onClose }: { owners: EOwner[]; 
         <input
           autoFocus
           value={q}
-          placeholder="Search shops or type a command…"
+          placeholder="Search shops, tags or type a command…"
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") {
@@ -1828,38 +2711,52 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [flash, setFlash] = useState<Record<string, boolean>>({});
 
-  const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
+  const [prefs, setPrefs] = useLocal<Prefs>(PREFS_KEY, DEFAULT_PREFS);
+  const [pins, setPins] = useLocal<string[]>(PINS_KEY, []);
+  const [tags, setTags] = useLocal<Record<string, string[]>>(TAGS_KEY, {});
+  const [views, setViews] = useLocal<SavedView[]>(VIEWS_KEY, []);
+  const [tpls, setTpls] = useLocal<Tpl[]>(TPL_KEY, DEFAULT_TPLS);
+  const [hist, setHist] = useLocal<string[]>(HIST_KEY, []);
+  ACTIVE_TPLS = tpls;
+  const upd = useCallback((p: Partial<Prefs>) => setPrefs((x) => ({ ...x, ...p })), [setPrefs]);
+
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<Bucket | "all">("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "default", dir: 1 });
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<{ label: string; done: number; total: number } | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [searchFocus, setSearchFocus] = useState(false);
 
   const [editingOwner, setEditingOwner] = useState<Owner | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [removing, setRemoving] = useState<Owner | null>(null);
-  const [drawer, setDrawer] = useState<{ phone: string; tab: "overview" | "customers" } | null>(null);
+  const [drawer, setDrawer] = useState<{ phone: string; tab: DrawerTab } | null>(null);
   const [showActivity, setShowActivity] = useState(false);
   const [palette, setPalette] = useState(false);
-  const [queueOpen, setQueueOpen] = useState(false);
+  const [queue, setQueue] = useState<{ owners: EOwner[]; tplId: string } | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showViews, setShowViews] = useState(false);
+  const [showTpls, setShowTpls] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [digest, setDigest] = useState<string | null>(null);
+  const [tagPrompt, setTagPrompt] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>(loadLog);
+  const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const toastSeq = useRef(0);
+  const lastActive = useRef(Date.now());
+  const warned = useRef(false);
 
   // The table needs a wide screen. Everywhere else the list is shown as cards, so nothing scrolls sideways.
   const wide = useMedia(TABLE_MIN_WIDTH);
   const view: "table" | "cards" = wide ? prefs.view : "cards";
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-    } catch {
-      /* private mode */
-    }
-  }, [prefs]);
+  const hidden = prefs.hidden;
+  const isShown = (id: string) => !hidden.includes(id);
 
   // ---- toasts and activity log
   const push = useCallback((t: Omit<ToastItem, "id" | "ttl"> & { ttl?: number }) => {
@@ -1867,9 +2764,9 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     setToasts((x) => [...x.slice(-3), { ttl: t.action ? 7000 : 4500, ...t, id }]);
   }, []);
   const dismiss = useCallback((id: number) => setToasts((x) => x.filter((t) => t.id !== id)), []);
-  const log = useCallback((text: string, ok = true) => {
+  const log = useCallback((text: string, ok = true, phone?: string) => {
     setActivity((a) => {
-      const next = [{ id: Date.now() + Math.random(), at: Date.now(), text, ok }, ...a].slice(0, 60);
+      const next = [{ id: Date.now() + Math.random(), at: Date.now(), text, ok, phone }, ...a].slice(0, 80);
       try {
         sessionStorage.setItem(LOG_KEY, JSON.stringify(next));
       } catch {
@@ -1881,7 +2778,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   const copy = useCallback(
     (text: string) => {
       navigator.clipboard?.writeText(text).then(
-        () => push({ kind: "success", title: "Copied", desc: text, ttl: 1800 }),
+        () => push({ kind: "success", title: "Copied", desc: text.length > 80 ? `${text.slice(0, 80)}…` : text, ttl: 1800 }),
         () => push({ kind: "error", title: "Could not copy" })
       );
     },
@@ -1948,6 +2845,36 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     }
   }, []);
 
+  // ---- pins, tags, search history
+  const pinSet = useMemo(() => new Set(pins), [pins]);
+  const togglePin = useCallback((phone: string) => setPins((p) => (p.includes(phone) ? p.filter((x) => x !== phone) : [...p, phone])), [setPins]);
+  const addTag = useCallback(
+    (phones: string[], tag: string) =>
+      setTags((t) => {
+        const n = { ...t };
+        phones.forEach((p) => {
+          const cur = n[p] ?? [];
+          if (!cur.some((x) => x.toLowerCase() === tag.toLowerCase())) n[p] = [...cur, tag];
+        });
+        return n;
+      }),
+    [setTags]
+  );
+  const removeTag = useCallback(
+    (phone: string, tag: string) =>
+      setTags((t) => {
+        const n = { ...t, [phone]: (t[phone] ?? []).filter((x) => x !== tag) };
+        if (!n[phone].length) delete n[phone];
+        return n;
+      }),
+    [setTags]
+  );
+  const allTags = useMemo(() => [...new Set(Object.values(tags).flat())].sort((a, b) => a.localeCompare(b)), [tags]);
+  const remember = (q: string) => {
+    const v = q.trim();
+    if (v) setHist((h) => [v, ...h.filter((x) => x !== v)].slice(0, 6));
+  };
+
   // ---- derived data
   const now = useMemo(() => Date.now(), [owners]); // eslint-disable-line react-hooks/exhaustive-deps
   const enriched = useMemo<EOwner[]>(
@@ -1965,6 +2892,11 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     [owners, now]
   );
   const byPhone = useMemo(() => new Map(enriched.map((o) => [o.phone, o])), [enriched]);
+  const dupes = useMemo(() => {
+    const m = new Map<string, string[]>();
+    enriched.forEach((o) => m.set(tail9(o.phone), [...(m.get(tail9(o.phone)) ?? []), o.phone]));
+    return new Set([...m.values()].filter((v) => v.length > 1).flat());
+  }, [enriched]);
 
   const counts = useMemo(() => {
     const c: Record<Bucket, number> = { active: 0, expiring: 0, expired: 0, no_trial: 0, deactivated: 0 };
@@ -1983,7 +2915,10 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     });
     return w;
   }, [enriched, now]);
+  const cumulative = useMemo(() => weeks.map((_, i) => owners.length - weeks.slice(i + 1).reduce((s, x) => s + x, 0)), [weeks, owners.length]);
   const topDebt = useMemo(() => [...enriched].filter((o) => o.totalOutstanding > 0).sort((a, b) => b.totalOutstanding - a.totalOutstanding).slice(0, 7), [enriched]);
+  const spot = useMemo(() => [...enriched].sort((a, b) => b.totalOutstanding - a.totalOutstanding || b.customerCount - a.customerCount).slice(0, 6), [enriched]);
+  const topCust = useMemo(() => [...enriched].filter((o) => o.customerCount > 0).sort((a, b) => b.customerCount - a.customerCount).slice(0, 5), [enriched]);
   const attention = useMemo(
     () => enriched.filter((o) => o.isActive && o.daysLeft !== null && o.daysLeft <= 7 && o.daysLeft >= -14).sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0)).slice(0, 6),
     [enriched]
@@ -1993,39 +2928,119 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     [enriched]
   );
 
+  const forecast = useMemo(() => {
+    const w = new Array(8).fill(0) as number[];
+    let overdue = 0;
+    enriched.forEach((o) => {
+      if (!o.isActive || o.daysLeft === null) return;
+      if (o.daysLeft < 0) overdue++;
+      else if (Math.floor(o.daysLeft / 7) < 8) w[Math.floor(o.daysLeft / 7)]++;
+    });
+    return { w, overdue };
+  }, [enriched]);
+  const calendar = useMemo(() => {
+    const c = new Array(28).fill(0) as number[];
+    enriched.forEach((o) => {
+      if (o.isActive && o.daysLeft !== null && o.daysLeft >= 0 && o.daysLeft < 28) c[o.daysLeft]++;
+    });
+    return c;
+  }, [enriched]);
+  const spread = useMemo(() => {
+    const b = [
+      { l: "No balance", q: "owes:0", n: 0, t: (v: number) => v === 0 },
+      { l: "Up to 10k", q: "owes>0 owes<=10k", n: 0, t: (v: number) => v > 0 && v <= 10000 },
+      { l: "10k – 50k", q: "owes>10k owes<=50k", n: 0, t: (v: number) => v > 10000 && v <= 50000 },
+      { l: "50k – 200k", q: "owes>50k owes<=200k", n: 0, t: (v: number) => v > 50000 && v <= 200000 },
+      { l: "Over 200k", q: "owes>200k", n: 0, t: (v: number) => v > 200000 },
+    ];
+    enriched.forEach((o) => b.forEach((x) => x.t(o.totalOutstanding) && x.n++));
+    return b;
+  }, [enriched]);
+  const langs = useMemo(() => {
+    const l = { rw: 0, en: 0, none: 0 };
+    enriched.forEach((o) => (o.language === "rw" ? l.rw++ : o.language === "en" ? l.en++ : l.none++));
+    return l;
+  }, [enriched]);
+  const quality = useMemo(
+    () => [
+      { label: "Missing a shop name", q: "is:noname", n: enriched.filter((o) => !o.name).length },
+      { label: "No language chosen", q: "is:nolang", n: enriched.filter((o) => !o.language).length },
+      { label: "No trial date set", q: "status:notrial", n: counts.no_trial },
+      { label: "Duplicate phone numbers", q: "is:dupe", n: dupes.size },
+      { label: "No customers yet", q: "is:nocust", n: enriched.filter((o) => o.customerCount === 0).length },
+    ],
+    [enriched, counts, dupes]
+  );
+  const quick = useMemo(() => {
+    const n = Math.max(1, owners.length);
+    const withDate = enriched.filter((o) => o.isActive && o.daysLeft !== null && o.daysLeft >= 0);
+    return {
+      avgCust: (totalCustomers / n).toFixed(1),
+      avgOut: Math.round(totalOutstandingAll / n),
+      activeRate: Math.round((counts.active / n) * 100),
+      owingRate: Math.round((enriched.filter((o) => o.totalOutstanding > 0).length / n) * 100),
+      avgDays: withDate.length ? Math.round(withDate.reduce((s, o) => s + (o.daysLeft ?? 0), 0) / withDate.length) : 0,
+    };
+  }, [owners.length, enriched, totalCustomers, totalOutstandingAll, counts]);
+
+  // ---- search + filters
+  const parsed = useMemo(() => parseQuery(query), [query]);
+  const hq = parsed.text.trim();
+
   const visible = useMemo(() => {
     let list = enriched;
     if (statusFilter !== "all") list = list.filter((o) => o.bucket === statusFilter);
-    const q = query.trim().toLowerCase();
+    const p = parsed;
+    if (p.status) list = list.filter((o) => o.bucket === p.status);
+    if (p.lang) list = list.filter((o) => (o.language ?? "none") === p.lang);
+    if (p.tags.length) list = list.filter((o) => p.tags.every((t) => (tags[o.phone] ?? []).some((x) => x.toLowerCase() === t)));
+    p.cmps.forEach((c) => {
+      list = list.filter((o) => {
+        const v = c.f === "owes" ? o.totalOutstanding : c.f === "customers" ? o.customerCount : o.daysLeft;
+        return v !== null && cmp(v, c.op, c.n);
+      });
+    });
+    if (p.joined) list = list.filter((o) => Date.now() - Date.parse(o.createdAt) <= p.joined! * DAY);
+    p.is.forEach((f) => {
+      list = list.filter((o) =>
+        f === "pinned" ? pinSet.has(o.phone) : f === "noname" ? !o.name : f === "nolang" ? !o.language : f === "dupe" ? dupes.has(o.phone) : f === "nocust" ? o.customerCount === 0 : f === "owing" ? o.totalOutstanding > 0 : f === "active" ? o.isActive : true
+      );
+    });
+    const q = p.text.trim().toLowerCase();
     if (q) {
       const dq = digits(q);
-      list = list.filter((o) => (o.name ?? "").toLowerCase().includes(q) || (dq && o.phone.includes(dq)) || (o.language ?? "").toLowerCase() === q);
+      list = list.filter((o) => (o.name ?? "").toLowerCase().includes(q) || (dq && o.phone.includes(dq)) || (o.language ?? "").toLowerCase() === q || (tags[o.phone] ?? []).some((t) => t.toLowerCase().includes(q)));
     }
-    if (sort.key === "default") return list;
-    const val = (o: EOwner): number | string => {
-      switch (sort.key) {
-        case "name": return (o.name ?? "\uffff").toLowerCase();
-        case "created": return Date.parse(o.createdAt) || 0;
-        case "expiry": return o.daysLeft ?? Number.POSITIVE_INFINITY;
-        case "customers": return o.customerCount;
-        default: return o.totalOutstanding;
-      }
-    };
-    return [...list].sort((a, b) => {
-      const x = val(a), y = val(b);
-      return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
-    });
-  }, [enriched, statusFilter, query, sort]);
+    if (sort.key !== "default") {
+      const val = (o: EOwner): number | string => {
+        switch (sort.key) {
+          case "name": return (o.name ?? "\uffff").toLowerCase();
+          case "created": return Date.parse(o.createdAt) || 0;
+          case "expiry": return o.daysLeft ?? Number.POSITIVE_INFINITY;
+          case "customers": return o.customerCount;
+          default: return o.totalOutstanding;
+        }
+      };
+      list = [...list].sort((a, b) => {
+        const x = val(a), y = val(b);
+        return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
+      });
+    }
+    if (prefs.pinFirst && pins.length) list = [...list.filter((o) => pinSet.has(o.phone)), ...list.filter((o) => !pinSet.has(o.phone))];
+    return list;
+  }, [enriched, statusFilter, parsed, sort, tags, pinSet, pins.length, dupes, prefs.pinFirst]);
 
   const pages = Math.max(1, Math.ceil(visible.length / prefs.pageSize));
+  const [moreN, setMoreN] = useState(prefs.pageSize);
   useEffect(() => setPage(0), [statusFilter, query, sort, prefs.pageSize]);
+  useEffect(() => setMoreN(prefs.pageSize), [statusFilter, query, sort, prefs.pageSize, prefs.paging]);
   useEffect(() => {
     if (page > pages - 1) setPage(pages - 1);
   }, [page, pages]);
-  const pageRows = useMemo(() => visible.slice(page * prefs.pageSize, (page + 1) * prefs.pageSize), [visible, page, prefs.pageSize]);
+  const pageRows = useMemo(() => (prefs.paging === "more" ? visible.slice(0, moreN) : visible.slice(page * prefs.pageSize, (page + 1) * prefs.pageSize)), [visible, page, prefs.pageSize, prefs.paging, moreN]);
 
   // 3D scroll effect: re-scan whenever the set of rolling elements can change
-  useRoll(`${owners.length}|${pageRows.length}|${view}|${statusFilter}|${page}|${loading ? 1 : 0}|${attention.length}`);
+  useRoll(`${owners.length}|${pageRows.length}|${view}|${prefs.layout}|${statusFilter}|${page}|${loading ? 1 : 0}|${attention.length}|${hidden.join(",")}|${prefs.collapsed.join(",")}`, prefs.roll, prefs.calm);
 
   // drop selections that no longer exist after a refresh
   useEffect(() => {
@@ -2042,17 +3057,17 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         try {
           await call(`/admin/owners/${enc(o.phone)}/extend`, { method: "POST", body: { days } }, "Failed to update owner.");
           push({ kind: "success", title: `+${days} days for ${label(o)}`, desc: "Access extended." });
-          burst(window.innerWidth / 2, 120);
-          log(`Extended ${label(o)} by ${days} days`);
+          if (!prefs.calm) burst(window.innerWidth / 2, 120);
+          log(`Extended ${label(o)} by ${days} days`, true, o.phone);
           markFlash([o.phone]);
           await fetchOwners(true);
         } catch (e) {
           if ((e as Error).message !== "Unauthorized") push({ kind: "error", title: "Could not extend access", desc: errMsg(e) });
-          log(`Failed to extend ${label(o)}`, false);
+          log(`Failed to extend ${label(o)}`, false, o.phone);
         }
       });
     },
-    [call, push, log, markFlash, fetchOwners, withBusy]
+    [call, push, log, markFlash, fetchOwners, withBusy, prefs.calm]
   );
 
   const setActive = useCallback(
@@ -2060,7 +3075,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       await withBusy([o.phone], async () => {
         try {
           await call(`/admin/owners/${enc(o.phone)}/${active ? "activate" : "deactivate"}`, { method: "POST" }, "Failed to update owner.");
-          log(`${active ? "Activated" : "Deactivated"} ${label(o)}${undo ? " (undo)" : ""}`);
+          log(`${active ? "Activated" : "Deactivated"} ${label(o)}${undo ? " (undo)" : ""}`, true, o.phone);
           push({
             kind: "success",
             title: `${label(o)} ${active ? "activated" : "deactivated"}`,
@@ -2070,7 +3085,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           await fetchOwners(true);
         } catch (e) {
           if ((e as Error).message !== "Unauthorized") push({ kind: "error", title: "Could not update owner", desc: errMsg(e) });
-          log(`Failed to ${active ? "activate" : "deactivate"} ${label(o)}`, false);
+          log(`Failed to ${active ? "activate" : "deactivate"} ${label(o)}`, false, o.phone);
         }
       });
     },
@@ -2083,9 +3098,18 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         try {
           await call(`/admin/owners/${enc(phone)}`, { method: "PATCH", body: updates }, "Failed to save changes.");
           setEditingOwner(null);
-          if (updates.newPhone) setDrawer((d) => (d && d.phone === phone ? { ...d, phone: updates.newPhone! } : d));
+          if (updates.newPhone) {
+            setDrawer((d) => (d && d.phone === phone ? { ...d, phone: updates.newPhone! } : d));
+            setPins((p) => p.map((x) => (x === phone ? updates.newPhone! : x)));
+            setTags((t) => {
+              if (!t[phone]) return t;
+              const n = { ...t, [updates.newPhone!]: t[phone] };
+              delete n[phone];
+              return n;
+            });
+          }
           push({ kind: "success", title: "Changes saved" });
-          log(`Edited ${updates.name || phone}`);
+          log(`Edited ${updates.name || phone}`, true, updates.newPhone ?? phone);
           markFlash([updates.newPhone ?? phone]);
           await fetchOwners(true);
         } catch (e) {
@@ -2093,7 +3117,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         }
       });
     },
-    [call, push, log, markFlash, fetchOwners, withBusy]
+    [call, push, log, markFlash, fetchOwners, withBusy, setPins, setTags]
   );
 
   const removeOwner = useCallback(
@@ -2104,29 +3128,31 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           setRemoving(null);
           setDrawer((d) => (d && d.phone === o.phone ? null : d));
           push({ kind: "success", title: `${label(o)} removed` });
-          log(`Removed ${label(o)}`);
+          log(`Removed ${label(o)}`, true, o.phone);
           await fetchOwners(true);
         } catch (e) {
           if ((e as Error).message !== "Unauthorized") push({ kind: "error", title: "Could not remove owner", desc: errMsg(e) });
-          log(`Failed to remove ${label(o)}`, false);
+          log(`Failed to remove ${label(o)}`, false, o.phone);
         }
       });
     },
     [call, push, log, fetchOwners, withBusy]
   );
 
-  const createOwner = async (data: { phone: string; name: string; language: string; trialDays: number }) => {
+  const createOwner = async (data: { phone: string; name: string; language: string; trialDays: number }, another: boolean): Promise<boolean> => {
     setCreating(true);
     setError(null);
     try {
       await call("/admin/owners", { method: "POST", body: data }, "Failed to create owner.");
-      setShowAddModal(false);
+      if (!another) setShowAddModal(false);
       push({ kind: "success", title: "Owner created", desc: data.name || data.phone });
-      log(`Created ${data.name || data.phone} (${data.trialDays} days)`);
+      log(`Created ${data.name || data.phone} (${data.trialDays} days)`, true, data.phone);
       markFlash([data.phone]);
       await fetchOwners(true);
+      return true;
     } catch (e) {
-      if ((e as Error).message !== "Unauthorized") setError(errMsg(e, "Failed to create owner."));
+      if ((e as Error).message !== "Unauthorized") push({ kind: "error", title: "Could not create owner", desc: errMsg(e) });
+      return false;
     } finally {
       setCreating(false);
     }
@@ -2155,6 +3181,16 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     await fetchOwners(true);
   };
 
+  // ---- query helpers
+  const goShops = () => document.getElementById("sec-shops")?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "start" });
+  const applyQuery = (q: string) => {
+    setQuery(q);
+    setStatusFilter("all");
+    goShops();
+  };
+  const toggleTok = (tok: string, prefix?: string) => setQuery((q) => toggleToken(q, tok, prefix));
+  const removeToken = (tok: string) => setQuery((q) => qTokens(q).filter((t) => t !== tok).join(" "));
+
   // ---- handlers for rows (stable identities so rows can be memoised)
   const handlers = useMemo<RowHandlers>(
     () => ({
@@ -2170,18 +3206,41 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       onToggle: (o) => void setActive(o, !o.isActive),
       onRemove: (o) => setRemoving(o),
       onCopy: copy,
+      onPin: togglePin,
+      onTag: (t) => setQuery((q) => (hasToken(q, `tag:${t}`) ? q : [...qTokens(q), `tag:${t}`].join(" "))),
     }),
-    [extend, setActive, copy]
+    // tpls is a dependency so rows rebuild their WhatsApp links after a template edit
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [extend, setActive, copy, togglePin, tpls]
   );
 
-  const exportOwners = (list: EOwner[], name: string) =>
-    downloadCsv(`${name}-${stamp()}.csv`, ["Shop", "Phone", "Language", "Status", "Access until", "Days left", "Customers", "Outstanding (Frw)", "Joined"], list.map((o) => [o.name ?? "", o.phone, o.language ?? "", BUCKETS.find((b) => b.key === o.bucket)!.label, o.trialEndsAt ? fmtDate(o.trialEndsAt) : "", o.daysLeft ?? "", o.customerCount, o.totalOutstanding, fmtDate(o.createdAt)]));
+  // ---- exports
+  const exportHeader = ["Shop", "Phone", "Language", "Status", "Access until", "Days left", "Customers", "Outstanding (Frw)", "Joined", "Tags"];
+  const exportRow = (o: EOwner) => [o.name ?? "", o.phone, o.language ?? "", BUCKETS.find((b) => b.key === o.bucket)!.label, o.trialEndsAt ? fmtDate(o.trialEndsAt) : "", o.daysLeft ?? "", o.customerCount, o.totalOutstanding, fmtDate(o.createdAt), (tags[o.phone] ?? []).join("; ")];
+  const exportOwners = (list: EOwner[], name: string) => downloadCsv(`${name}-${stamp()}.csv`, exportHeader, list.map(exportRow));
+  const exportJson = (list: EOwner[], name: string) =>
+    downloadText(`${name}-${stamp()}.json`, JSON.stringify(list.map((o) => ({ ...o, tags: tags[o.phone] ?? [], pinned: pinSet.has(o.phone) })), null, 2), "application/json");
+  const copyTable = (list: EOwner[]) => copy([exportHeader, ...list.map(exportRow)].map((r) => r.join("\t")).join("\n"));
 
-  const toggleSort = (key: SortKey) =>
-    setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: key === "name" || key === "expiry" ? 1 : -1 }));
+  const buildDigest = () => {
+    const d = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const lines = [
+      `Shop Brain daily digest, ${d}`,
+      "",
+      `Shops: ${owners.length} (${counts.active} active, ${counts.expiring} expiring soon, ${counts.expired} expired, ${counts.deactivated} deactivated, ${counts.no_trial} without a trial date)`,
+      `Customers: ${totalCustomers.toLocaleString()} · Outstanding: ${money(totalOutstandingAll)}`,
+      `New shops this week: ${weeks[7]} (last week ${weeks[6]})`,
+      "",
+      attention.length ? "Needs attention:" : "Nobody needs a renewal right now.",
+      ...attention.map((o) => `• ${label(o)}: ${(o.daysLeft ?? 0) < 0 ? "ended" : "ends"} ${relDays(o.daysLeft)}`),
+    ];
+    if (topDebt.length) lines.push("", "Biggest balances:", ...topDebt.slice(0, 3).map((o) => `• ${label(o)}: ${money(o.totalOutstanding)}`));
+    return lines.join("\n");
+  };
 
-  // ---- keyboard shortcuts, auto refresh, idle sign-out
-  const overlayOpen = !!(showAddModal || editingOwner || removing || drawer || showActivity || palette || queueOpen);
+  // ---- keyboard shortcuts, auto refresh, idle sign-out, tab title, online status
+  const overlayOpen = !!(showAddModal || editingOwner || removing || drawer || showActivity || palette || queue || showSettings || showViews || showTpls || showImport || showHelp || digest !== null || tagPrompt);
+  const cursorIdx = cursor ? pageRows.findIndex((o) => o.phone === cursor) : -1;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -2192,45 +3251,79 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         return;
       }
       if (typing || e.ctrlKey || e.metaKey || e.altKey || overlayOpen) return;
+      const cur = cursor ? byPhone.get(cursor) : undefined;
       if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
-      } else if (e.key === "n") {
+      } else if (e.key === "?") setShowHelp(true);
+      else if (e.key === "n") {
         e.preventDefault();
         setShowAddModal(true);
-      } else if (e.key === "r") {
-        void fetchOwners(true);
-      } else if (e.key === "Escape") {
-        setSelected(new Set());
-      }
+      } else if (e.key === "r") void fetchOwners(true);
+      else if (e.key === "t") toggleTheme();
+      else if (e.key === "d") setDigest(buildDigest());
+      else if (e.key === "j" || e.key === "k") {
+        if (!pageRows.length) return;
+        const next = clamp((cursorIdx < 0 ? (e.key === "j" ? -1 : pageRows.length) : cursorIdx) + (e.key === "j" ? 1 : -1), 0, pageRows.length - 1);
+        setCursor(pageRows[next].phone);
+        requestAnimationFrame(() => document.querySelector(`[data-phone="${pageRows[next].phone}"]`)?.scrollIntoView({ block: "center", behavior: prefersReduced() ? "auto" : "smooth" }));
+      } else if (cur && e.key === "Enter") setDrawer({ phone: cur.phone, tab: "overview" });
+      else if (cur && e.key === "x") handlers.onSel(cur.phone);
+      else if (cur && e.key === "p") togglePin(cur.phone);
+      else if (cur && e.key === "e") void extend(cur, 30);
+      else if (e.key === "Escape") setSelected(new Set());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [overlayOpen, fetchOwners]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayOpen, fetchOwners, cursor, cursorIdx, pageRows, byPhone, toggleTheme, handlers, togglePin, extend, owners, counts, attention, topDebt, weeks]);
 
   useEffect(() => {
     if (!prefs.auto) return;
     const id = setInterval(() => {
-      if (!document.hidden && !overlayOpen) void fetchOwners(true);
-    }, 30000);
+      if (!document.hidden && !overlayOpen && navigator.onLine) void fetchOwners(true);
+    }, prefs.refreshSec * 1000);
     return () => clearInterval(id);
-  }, [prefs.auto, overlayOpen, fetchOwners]);
+  }, [prefs.auto, prefs.refreshSec, overlayOpen, fetchOwners]);
 
   useEffect(() => {
-    let last = Date.now();
     const bump = () => {
-      last = Date.now();
+      lastActive.current = Date.now();
+      warned.current = false;
     };
     const evs = ["pointerdown", "keydown", "scroll", "pointermove"] as const;
     evs.forEach((e) => window.addEventListener(e, bump, { passive: true }));
     const id = setInterval(() => {
-      if (Date.now() - last > IDLE_MS) onLogout("You were signed out after 30 minutes of inactivity.");
-    }, 30000);
+      const idle = Date.now() - lastActive.current;
+      if (idle > IDLE_MS) onLogout("You were signed out after 30 minutes of inactivity.");
+      else if (idle > IDLE_MS - 120000 && !warned.current) {
+        warned.current = true;
+        push({ kind: "info", title: "Still there?", desc: "You will be signed out in 2 minutes.", ttl: 20000, action: { label: "Stay signed in", run: bump } });
+      }
+    }, 15000);
     return () => {
       evs.forEach((e) => window.removeEventListener(e, bump));
       clearInterval(id);
     };
-  }, [onLogout]);
+  }, [onLogout, push]);
+
+  useEffect(() => {
+    const on = () => setOnline(true), off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+
+  useEffect(() => {
+    const prev = document.title;
+    document.title = `${attention.length ? `(${attention.length}) ` : ""}Shop Brain Admin`;
+    return () => {
+      document.title = prev;
+    };
+  }, [attention.length]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     extrasPointerMove(e);
@@ -2243,6 +3336,19 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
 
   // ---- derived UI bits
   const drawerOwner = drawer ? byPhone.get(drawer.phone) ?? null : null;
+  const drawerIdx = drawer ? visible.findIndex((o) => o.phone === drawer.phone) : -1;
+  const navDrawer = useCallback(
+    (dir: 1 | -1) => {
+      if (!visible.length) return;
+      setDrawer((d) => {
+        if (!d) return d;
+        const i = visible.findIndex((o) => o.phone === d.phone);
+        const next = visible[(i + dir + visible.length) % visible.length];
+        return next ? { ...d, phone: next.phone } : d;
+      });
+    },
+    [visible]
+  );
   const allOnPage = pageRows.length > 0 && pageRows.every((o) => selected.has(o.phone));
   const selectedList = useMemo(() => [...selected].map((p) => byPhone.get(p)).filter(Boolean) as EOwner[], [selected, byPhone]);
   const filtersActive = statusFilter !== "all" || query.trim() !== "";
@@ -2251,46 +3357,116 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     setStatusFilter("all");
   };
   const pickBucket = (b: Bucket) => setStatusFilter((cur) => (cur === b ? "all" : b));
+  const togglePanel = (id: string) => upd({ collapsed: prefs.collapsed.includes(id) ? prefs.collapsed.filter((x) => x !== id) : [...prefs.collapsed, id] });
+  const currentView = { query, status: statusFilter, sort };
+  const applyView = (v: SavedView) => {
+    setQuery(v.query);
+    setStatusFilter(v.status);
+    setSort(v.sort);
+    setShowViews(false);
+    goShops();
+  };
 
   const paletteActions = useMemo<PaletteAction[]>(
     () => [
       { id: "add", label: "Add owner", hint: "N", icon: <UserPlus size={16} />, run: () => setShowAddModal(true) },
       { id: "refresh", label: "Refresh data", hint: "R", icon: <RefreshCw size={16} />, run: () => void fetchOwners(true) },
-      { id: "queue", label: "Open renewal queue", icon: <Send size={16} />, run: () => setQueueOpen(true) },
+      { id: "queue", label: "Open renewal queue", icon: <Send size={16} />, run: () => setQueue({ owners: renewalList, tplId: "renew" }) },
+      { id: "digest", label: "Daily digest", hint: "D", icon: <FileText size={16} />, run: () => setDigest(buildDigest()) },
+      { id: "import", label: "Import owners from a list", icon: <Upload size={16} />, run: () => setShowImport(true) },
+      { id: "tpls", label: "Edit message templates", icon: <FileText size={16} />, run: () => setShowTpls(true) },
+      { id: "views", label: "Saved views", icon: <Bookmark size={16} />, run: () => setShowViews(true) },
+      { id: "settings", label: "Appearance & behaviour", icon: <Settings size={16} />, run: () => setShowSettings(true) },
+      { id: "help", label: "Shortcuts & search tips", hint: "?", icon: <HelpCircle size={16} />, run: () => setShowHelp(true) },
       { id: "csv", label: "Export all shops to CSV", icon: <Download size={16} />, run: () => exportOwners(enriched, "shopbrain-owners") },
-      { id: "theme", label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme", icon: theme === "dark" ? <Sun size={16} /> : <Moon size={16} />, run: toggleTheme },
-      { id: "f-all", label: "Show all shops", icon: <Users size={16} />, run: () => setStatusFilter("all") },
+      { id: "json", label: "Export all shops to JSON", icon: <Download size={16} />, run: () => exportJson(enriched, "shopbrain-owners") },
+      { id: "print", label: "Print this page", icon: <Printer size={16} />, run: () => window.print() },
+      { id: "theme", label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme", hint: "T", icon: theme === "dark" ? <Sun size={16} /> : <Moon size={16} />, run: toggleTheme },
+      { id: "f-all", label: "Show all shops", icon: <Users size={16} />, run: () => clearFilters() },
       { id: "f-exp", label: "Show expiring soon", icon: <Clock size={16} />, run: () => setStatusFilter("expiring") },
       { id: "f-expd", label: "Show expired", icon: <XCircle size={16} />, run: () => setStatusFilter("expired") },
       { id: "f-act", label: "Show active", icon: <CheckCircle2 size={16} />, run: () => setStatusFilter("active") },
-      { id: "view", label: prefs.view === "table" ? "Switch to card view" : "Switch to table view", icon: prefs.view === "table" ? <LayoutGrid size={16} /> : <List size={16} />, run: () => setPrefs((p) => ({ ...p, view: p.view === "table" ? "cards" : "table" })) },
-      { id: "auto", label: prefs.auto ? "Turn auto-refresh off" : "Turn auto-refresh on", icon: <Zap size={16} />, run: () => setPrefs((p) => ({ ...p, auto: !p.auto })) },
+      { id: "f-pin", label: "Show pinned shops", icon: <Star size={16} />, run: () => applyQuery("is:pinned") },
+      { id: "lay-grid", label: "Card layout: grid", icon: <LayoutGrid size={16} />, run: () => upd({ layout: "grid", view: "cards" }) },
+      { id: "lay-rail", label: "Card layout: rail", icon: <List size={16} />, run: () => upd({ layout: "rail", view: "cards" }) },
+      { id: "lay-wall", label: "Card layout: wall", icon: <Layers size={16} />, run: () => upd({ layout: "wall", view: "cards" }) },
+      { id: "view", label: prefs.view === "table" ? "Switch to card view" : "Switch to table view", icon: prefs.view === "table" ? <LayoutGrid size={16} /> : <List size={16} />, run: () => upd({ view: prefs.view === "table" ? "cards" : "table" }) },
+      { id: "calm", label: prefs.calm ? "Turn calm mode off" : "Turn calm mode on (no motion)", icon: <Zap size={16} />, run: () => upd({ calm: !prefs.calm }) },
+      { id: "auto", label: prefs.auto ? "Turn auto-refresh off" : "Turn auto-refresh on", icon: <Zap size={16} />, run: () => upd({ auto: !prefs.auto }) },
       { id: "log", label: "Open activity log", icon: <Activity size={16} />, run: () => setShowActivity(true) },
       { id: "out", label: "Log out", icon: <LockKeyhole size={16} />, run: () => onLogout() },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prefs.view, prefs.auto, enriched, fetchOwners, onLogout, theme, toggleTheme]
+    [prefs.view, prefs.auto, prefs.calm, enriched, fetchOwners, onLogout, theme, toggleTheme, renewalList, upd, tags, pins, owners, counts, attention, topDebt, weeks]
   );
 
   const chips: { k: Bucket | "all"; l: string; n: number }[] = [
     { k: "all", l: "All", n: owners.length },
     ...BUCKETS.map((b) => ({ k: b.key as Bucket | "all", l: b.label, n: counts[b.key] })),
   ];
+  const quickChips: { l: string; tok: string; prefix?: string }[] = [
+    { l: "Pinned", tok: "is:pinned" },
+    { l: "Owes money", tok: "is:owing" },
+    { l: "No customers", tok: "is:nocust" },
+    { l: "Duplicates", tok: "is:dupe" },
+    { l: "Kinyarwanda", tok: "lang:rw", prefix: "lang:" },
+    { l: "English", tok: "lang:en", prefix: "lang:" },
+    { l: "Joined 7d", tok: "joined:7", prefix: "joined:" },
+    { l: "Joined 30d", tok: "joined:30", prefix: "joined:" },
+    { l: "Ends within 7d", tok: "days<=7" },
+  ];
   const thisWeek = weeks[7], lastWeek = weeks[6];
+  const hide = prefs.cols;
+
+  // ---- panels (collapsible, hideable, rolling)
+  const panel = (id: string, title: string, icon: React.ReactNode, body: React.ReactNode, i: number, cls = "") => {
+    if (!isShown(id)) return null;
+    const col = prefs.collapsed.includes(id);
+    return (
+      <Roll key={id} className={cls}>
+        <div className={`adm-card adm-spot adm-panel adm-in ${col ? "adm-collapsed" : ""}`} style={{ ["--i" as string]: i } as React.CSSProperties}>
+          <h3>
+            <span className="ico">{icon}</span> {title}
+            <button className="adm-btn sm icon ghost adm-collapse" onClick={() => togglePanel(id)} aria-label={col ? `Expand ${title}` : `Collapse ${title}`} aria-expanded={!col}>
+              <ChevronUp size={14} />
+            </button>
+          </h3>
+          <div className="adm-pbody">{body}</div>
+        </div>
+      </Roll>
+    );
+  };
+  const gridIds = ["quick", "donut", "debt", "growth", "spotlight", "forecast", "calendar", "histogram", "people", "quality"];
+  const anyGrid = gridIds.some(isShown);
+  const navItems = [
+    { id: "sec-overview", label: "Overview" },
+    ...(anyGrid ? [{ id: "sec-insights", label: "Insights" }] : []),
+    ...(isShown("attention") ? [{ id: "sec-attention", label: "Attention" }] : []),
+    { id: "sec-shops", label: `Shops (${visible.length})` },
+  ];
+  const dayLabel = (d: number) => new Date(Date.now() + d * DAY).getDate();
+  const weekdayOffset = (new Date().getDay() + 6) % 7;
 
   return (
-    <div className="adm-root" data-theme={theme} onPointerMove={onPointerMove}>
+    <div className="adm-root" data-theme={theme} data-accent={prefs.accent} data-rad={prefs.radius} data-calm={prefs.calm ? "1" : undefined} onPointerMove={onPointerMove}>
       <style>{ADM_CSS + EXTRAS_CSS + FIX_CSS}</style>
       <div className="adm-aurora" aria-hidden />
+      <div className="adm-prog" aria-hidden />
       <RefreshBar active={loading || refreshing} />
       <div className="adm-wrap">
+        {!online && (
+          <div className="adm-offline" role="alert">
+            <WifiOff size={16} /> You are offline. Changes will not save until the connection is back.
+          </div>
+        )}
+
         {/* header */}
         <div className="adm-head adm-in">
           <div>
             <h1 className="adm-title">Shop Brain Admin</h1>
             <p className="adm-sub">
               {owners.length} registered shop{owners.length === 1 ? "" : "s"}
-              <LastUpdated at={lastFetched} refreshing={refreshing} auto={prefs.auto} />
+              <LastUpdated at={lastFetched} refreshing={refreshing} auto={prefs.auto} sec={prefs.refreshSec} />
             </p>
           </div>
           <div className="adm-tools">
@@ -2300,24 +3476,41 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             <button onClick={() => setShowAddModal(true)} className="adm-btn pri" data-testid="button-add-owner">
               <UserPlus size={14} /> Add Owner
             </button>
-            <button onClick={() => setQueueOpen(true)} className="adm-btn" title="Step through renewal reminders">
+            <button onClick={() => setQueue({ owners: renewalList, tplId: "renew" })} className="adm-btn" title="Step through renewal reminders">
               <Send size={14} /> Renewals {renewalList.length > 0 && <b>{renewalList.length}</b>}
             </button>
-            <button onClick={() => setPrefs((p) => ({ ...p, auto: !p.auto }))} className={`adm-btn ${prefs.auto ? "ok" : ""}`} aria-pressed={prefs.auto} title="Refresh every 30 seconds">
+            <button onClick={() => upd({ auto: !prefs.auto })} className={`adm-btn ${prefs.auto ? "ok" : ""}`} aria-pressed={prefs.auto} title={`Refresh every ${prefs.refreshSec} seconds`}>
               <Zap size={14} /> Live
             </button>
             <button onClick={() => fetchOwners(true)} disabled={loading || refreshing} className="adm-btn" data-testid="button-refresh">
               <RefreshCw size={14} className={loading || refreshing ? "adm-spin" : ""} /> Refresh
             </button>
-            <button onClick={() => setShowActivity(true)} className="adm-btn" title="Activity log">
-              <Activity size={14} /> Activity {activity.length > 0 && <b>{activity.length}</b>}
-            </button>
             <button onClick={() => onLogout()} className="adm-btn" data-testid="button-admin-logout">
               Log out
+            </button>
+            <Menu
+              aria="More tools"
+              className="adm-btn sq"
+              trigger={<MoreHorizontal size={16} />}
+              items={[
+                { key: "digest", label: "Daily digest", icon: <FileText size={14} />, onClick: () => setDigest(buildDigest()) },
+                { key: "views", label: "Saved views", icon: <Bookmark size={14} />, onClick: () => setShowViews(true) },
+                { key: "tpls", label: "Message templates", icon: <FileText size={14} />, onClick: () => setShowTpls(true) },
+                { key: "import", label: "Import owners", icon: <Upload size={14} />, onClick: () => setShowImport(true) },
+                { key: "act", label: `Activity log${activity.length ? ` (${activity.length})` : ""}`, icon: <Activity size={14} />, onClick: () => setShowActivity(true) },
+                "sep",
+                { key: "help", label: "Shortcuts & tips", icon: <Keyboard size={14} />, onClick: () => setShowHelp(true) },
+                { key: "print", label: "Print", icon: <Printer size={14} />, onClick: () => window.print() },
+              ]}
+            />
+            <button onClick={() => setShowSettings(true)} className="adm-btn sq" aria-label="Appearance and behaviour" title="Appearance & behaviour">
+              <Settings size={16} />
             </button>
             <ThemeToggle />
           </div>
         </div>
+
+        <SectionNav items={navItems} />
 
         {error && (
           <div className="adm-err" data-testid="text-dashboard-error">
@@ -2329,13 +3522,13 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         )}
 
         {/* KPIs */}
-        <div className="adm-kpis">
+        <div className="adm-kpis" id="sec-overview">
           {loading && owners.length === 0 ? (
             [0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="adm-card adm-skel" style={{ height: 108 }} />)
           ) : (
             <>
               <Roll>
-                <Kpi i={0} label="Total shops" value={owners.length} icon={<Users size={15} />} hint={`${thisWeek} new this week`} />
+                <Kpi i={0} label="Total shops" value={owners.length} icon={<Users size={15} />} hint={`${thisWeek} new this week`} spark={cumulative} />
               </Roll>
               <Roll>
                 <Kpi i={1} label="Active" value={counts.active} icon={<CheckCircle2 size={15} />} color="var(--ok)" on={statusFilter === "active"} onClick={() => pickBucket("active")} hint="Click to filter" />
@@ -2352,48 +3545,50 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
               <Roll>
                 <Kpi i={5} label="Total outstanding" value={totalOutstandingAll} suffix="Frw" icon={<Zap size={15} />} color="var(--viol)" hint="Owed to shops" />
               </Roll>
+              <Roll>
+                <Kpi i={6} label="New shops, 8 weeks" value={weeks.reduce((s, x) => s + x, 0)} icon={<UserPlus size={15} />} color="var(--ok)" hint={`${thisWeek} this week`} spark={weeks} />
+              </Roll>
             </>
           )}
         </div>
 
-        {/* insights */}
-        {owners.length > 0 && (
-          <div className="adm-grid2">
-            <Roll>
-              <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 6 } as React.CSSProperties}>
-                <h3>
-                  <Activity size={15} /> Shops by status
-                </h3>
-                <Donut counts={counts} total={owners.length} filter={statusFilter} onPick={pickBucket} />
-              </div>
-            </Roll>
-            <Roll>
-              <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 7 } as React.CSSProperties}>
-                <h3>
-                  <TrendingUp size={15} /> Biggest outstanding balances
-                </h3>
-                {topDebt.length === 0 ? (
-                  <p style={{ color: "var(--mutfg)" }}>No outstanding balances.</p>
-                ) : (
-                  <div className="adm-bars">
-                    {topDebt.map((o, i) => (
-                      <button key={o.phone} className="adm-brow" onClick={() => setDrawer({ phone: o.phone, tab: "overview" })} style={{ ["--i" as string]: i } as React.CSSProperties}>
-                        <span className="n">{label(o)}</span>
-                        <span className="adm-btrack">
-                          <i style={{ width: `${(o.totalOutstanding / topDebt[0].totalOutstanding) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
-                        </span>
-                        <b>{money(o.totalOutstanding)}</b>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Roll>
-            <Roll>
-              <div className="adm-card adm-spot adm-panel adm-in" style={{ ["--i" as string]: 8 } as React.CSSProperties}>
-                <h3>
-                  <UserPlus size={15} /> New shops, last 8 weeks
-                </h3>
+        {/* analytics panels */}
+        {owners.length > 0 && anyGrid && (
+          <div className="adm-grid" id="sec-insights">
+            {panel(
+              "quick", "Quick stats", <Activity size={15} />,
+              <div className="adm-qs">
+                <div><small>Customers per shop</small><b>{quick.avgCust}</b></div>
+                <div><small>Outstanding per shop</small><b>{money(quick.avgOut)}</b></div>
+                <div><small>Active rate</small><b>{quick.activeRate}%</b></div>
+                <div><small>Shops with debts</small><b>{quick.owingRate}%</b></div>
+                <div><small>Avg days left (active)</small><b>{quick.avgDays}</b></div>
+              </div>,
+              5, "wide"
+            )}
+            {panel("donut", "Shops by status", <Activity size={15} />, <Donut counts={counts} total={owners.length} filter={statusFilter} onPick={pickBucket} />, 6)}
+            {panel(
+              "debt", "Biggest outstanding balances", <TrendingUp size={15} />,
+              topDebt.length === 0 ? (
+                <p style={{ color: "var(--mutfg)", margin: 0 }}>No outstanding balances.</p>
+              ) : (
+                <div className="adm-bars">
+                  {topDebt.map((o, i) => (
+                    <button key={o.phone} className="adm-brow" onClick={() => setDrawer({ phone: o.phone, tab: "overview" })} style={{ ["--i" as string]: i } as React.CSSProperties}>
+                      <span className="n">{label(o)}</span>
+                      <span className="adm-btrack">
+                        <i style={{ width: `${(o.totalOutstanding / topDebt[0].totalOutstanding) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+                      </span>
+                      <b>{money(o.totalOutstanding)}</b>
+                    </button>
+                  ))}
+                </div>
+              ),
+              7
+            )}
+            {panel(
+              "growth", "New shops, last 8 weeks", <UserPlus size={15} />,
+              <>
                 <div className="adm-sign">
                   {weeks.map((n, i) => (
                     <div key={i} title={`${n} new shop${n === 1 ? "" : "s"}`}>
@@ -2405,15 +3600,127 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
                 <p className="adm-trend">
                   {thisWeek} this week vs {lastWeek} last week {thisWeek > lastWeek && <b>▲</b>}
                 </p>
-              </div>
-            </Roll>
+              </>,
+              8
+            )}
+            {panel("spotlight", "3D spotlight: top shops", <Layers size={15} />, <Ring owners={spot} still={prefs.calm} onOpen={(phone) => setDrawer({ phone, tab: "overview" })} />, 9)}
+            {panel(
+              "forecast", "Renewal forecast", <TrendingUp size={15} />,
+              <>
+                <div className="adm-sign">
+                  <button onClick={() => applyQuery("days<0 is:active")} title={`${forecast.overdue} already ended`}>
+                    <span>{forecast.overdue || ""}</span>
+                    <i className="bad" style={{ height: `${Math.max(4, (forecast.overdue / Math.max(1, forecast.overdue, ...forecast.w)) * 100)}%`, opacity: forecast.overdue ? 1 : 0.25 }} />
+                    <small>Late</small>
+                  </button>
+                  {forecast.w.map((n, i) => (
+                    <button key={i} onClick={() => applyQuery(`days>=${i * 7} days<=${i * 7 + 6} is:active`)} title={`${n} ending in week ${i + 1}`}>
+                      <span>{n || ""}</span>
+                      <i style={{ height: `${Math.max(4, (n / Math.max(1, forecast.overdue, ...forecast.w)) * 100)}%`, ["--i" as string]: i, opacity: n ? 1 : 0.25 } as React.CSSProperties} />
+                      <small>W{i + 1}</small>
+                    </button>
+                  ))}
+                </div>
+                <p className="adm-trend">Active shops by the week their access ends. Click a bar to list them.</p>
+              </>,
+              10
+            )}
+            {panel(
+              "calendar", "Expiry calendar, next 28 days", <Calendar size={15} />,
+              <div className="adm-cal">
+                {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
+                  <em key={i}>{d}</em>
+                ))}
+                {Array.from({ length: weekdayOffset }).map((_, i) => (
+                  <button key={`e${i}`} className="empty" tabIndex={-1} aria-hidden />
+                ))}
+                {calendar.map((n, d) => (
+                  <button key={d} className={d === 0 ? "today" : ""} style={{ ["--h" as string]: Math.min(4, n) } as React.CSSProperties} title={`${n} shop${n === 1 ? "" : "s"} ending ${relDays(d)}`} onClick={() => applyQuery(`days:${d} is:active`)}>
+                    <span>
+                      {dayLabel(d)}
+                      {n > 0 && <small>{n}</small>}
+                    </span>
+                  </button>
+                ))}
+              </div>,
+              11
+            )}
+            {panel(
+              "histogram", "Balance spread", <TrendingUp size={15} />,
+              <div className="adm-bars">
+                {spread.map((b, i) => (
+                  <button key={b.l} className="adm-brow" onClick={() => applyQuery(b.q)} style={{ ["--i" as string]: i } as React.CSSProperties}>
+                    <span className="n">{b.l}</span>
+                    <span className="adm-btrack">
+                      <i style={{ width: `${(b.n / Math.max(1, ...spread.map((x) => x.n))) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+                    </span>
+                    <b>{b.n}</b>
+                  </button>
+                ))}
+              </div>,
+              12
+            )}
+            {panel(
+              "people", "Languages & leaderboard", <Users size={15} />,
+              <>
+                <div className="adm-bars" style={{ marginBottom: 14 }}>
+                  {([["Kinyarwanda", langs.rw, "lang:rw"], ["English", langs.en, "lang:en"], ["Not set", langs.none, "lang:none"]] as [string, number, string][]).map(([l, n, q], i) => (
+                    <button key={l} className="adm-brow" onClick={() => applyQuery(q)} style={{ ["--i" as string]: i } as React.CSSProperties}>
+                      <span className="n">{l}</span>
+                      <span className="adm-btrack">
+                        <i style={{ width: `${(n / Math.max(1, owners.length)) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+                      </span>
+                      <b>{n}</b>
+                    </button>
+                  ))}
+                </div>
+                <p className="adm-sec">Most customers</p>
+                {topCust.length === 0 ? (
+                  <p style={{ color: "var(--mutfg)", margin: 0 }}>No customers yet.</p>
+                ) : (
+                  <div className="adm-bars">
+                    {topCust.map((o, i) => (
+                      <button key={o.phone} className="adm-brow" onClick={() => setDrawer({ phone: o.phone, tab: "customers" })} style={{ ["--i" as string]: i } as React.CSSProperties}>
+                        <span className="n">{label(o)}</span>
+                        <span className="adm-btrack">
+                          <i style={{ width: `${(o.customerCount / topCust[0].customerCount) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+                        </span>
+                        <b>{o.customerCount}</b>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>,
+              13
+            )}
+            {panel(
+              "quality", "Data quality", <CheckCircle2 size={15} />,
+              quality.every((x) => x.n === 0) ? (
+                <div className="adm-allclear">
+                  <CheckCircle2 size={20} /> Everything looks clean.
+                </div>
+              ) : (
+                <div>
+                  {quality.map((x) => (
+                    <div key={x.q} className="adm-qrow">
+                      <span>{x.label}</span>
+                      <b>{x.n}</b>
+                      <button className="adm-btn sm" disabled={x.n === 0} onClick={() => applyQuery(x.q)}>
+                        Show
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ),
+              14
+            )}
           </div>
         )}
 
         {/* needs attention */}
-        {owners.length > 0 && (
+        {owners.length > 0 && isShown("attention") && (
           <Roll>
-            <div className={`adm-card adm-attn adm-in ${attention.length > 0 ? "adm-glowborder" : ""}`} style={{ ["--i" as string]: 9 } as React.CSSProperties}>
+            <div id="sec-attention" className={`adm-card adm-attn adm-in ${attention.length > 0 ? "adm-glowborder" : ""}`} style={{ ["--i" as string]: 15 } as React.CSSProperties}>
               <h3>
                 <Bell size={15} /> Needs attention <small style={{ color: "var(--mutfg)", fontWeight: 500 }}>expiring within 7 days, or ended in the last 14</small>
               </h3>
@@ -2449,7 +3756,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         )}
 
         {/* activation funnel + inactive shops */}
-        {owners.length > 0 && (
+        {owners.length > 0 && isShown("funnel") && (
           <div className="adm-duo">
             <Roll>
               <FunnelPanel owners={enriched} />
@@ -2461,19 +3768,47 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
         )}
 
         {/* toolbar */}
-        <div className="adm-toolbar adm-in" style={{ ["--i" as string]: 10 } as React.CSSProperties}>
+        <div className="adm-toolbar adm-in" id="sec-shops" style={{ ["--i" as string]: 10 } as React.CSSProperties}>
           <div className="adm-search">
             <Search size={15} />
-            <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name or phone" aria-label="Search shops" data-testid="input-search" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => setSearchFocus(true)}
+              onBlur={() => {
+                setSearchFocus(false);
+                remember(query);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && (remember(query), e.currentTarget.blur())}
+              placeholder="Search name, phone, tag… or status:expired owes>50k"
+              aria-label="Search shops"
+              data-testid="input-search"
+            />
             <div className="r">
               {query ? (
-                <button className="adm-btn sm icon ghost" onClick={() => setQuery("")} aria-label="Clear search" style={{ width: 24, height: 24 }}>
+                <button className="adm-btn sm icon ghost" onMouseDown={(e) => e.preventDefault()} onClick={() => setQuery("")} aria-label="Clear search" style={{ width: 24, height: 24 }}>
                   <X size={13} />
                 </button>
               ) : (
                 <span className="adm-kbd">/</span>
               )}
             </div>
+            {searchFocus && !query && hist.length > 0 && (
+              <div className="adm-hist">
+                <p>
+                  Recent searches
+                  <button className="adm-link" style={{ height: "auto", width: "auto", padding: 0, fontSize: 11 }} onMouseDown={(e) => e.preventDefault()} onClick={() => setHist([])}>
+                    Clear
+                  </button>
+                </p>
+                {hist.map((h) => (
+                  <button key={h} onMouseDown={(e) => e.preventDefault()} onClick={() => setQuery(h)}>
+                    <Search size={13} /> {h}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <select className="adm-select" value={sort.key} onChange={(e) => setSort({ key: e.target.value as SortKey, dir: e.target.value === "name" || e.target.value === "expiry" || e.target.value === "default" ? 1 : -1 })} aria-label="Sort shops">
             <option value="default">Sort: default</option>
@@ -2485,30 +3820,82 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           </select>
           {wide && (
             <div className="adm-segbtn" role="group" aria-label="View">
-              <button className={prefs.view === "table" ? "on" : ""} onClick={() => setPrefs((p) => ({ ...p, view: "table" }))} aria-label="Table view" title="Table view">
+              <button className={prefs.view === "table" ? "on" : ""} onClick={() => upd({ view: "table" })} aria-label="Table view" title="Table view">
                 <List size={15} />
               </button>
-              <button className={prefs.view === "cards" ? "on" : ""} onClick={() => setPrefs((p) => ({ ...p, view: "cards" }))} aria-label="Card view" title="Card view">
+              <button className={prefs.view === "cards" ? "on" : ""} onClick={() => upd({ view: "cards" })} aria-label="Card view" title="Card view">
                 <LayoutGrid size={15} />
               </button>
             </div>
           )}
+          {view === "cards" && (
+            <div className="adm-segbtn" role="group" aria-label="Card layout">
+              {([["grid", LayoutGrid, "Grid"], ["rail", List, "Rail"], ["wall", Layers, "Wall"]] as const).map(([k, Ic, t]) => (
+                <button key={k} className={prefs.layout === k ? "on" : ""} onClick={() => upd({ layout: k })} aria-label={`${t} layout`} title={`${t} layout`}>
+                  <Ic size={15} />
+                </button>
+              ))}
+            </div>
+          )}
           {wide && view === "table" && (
-            <button className="adm-btn" onClick={() => setPrefs((p) => ({ ...p, density: p.density === "comfy" ? "compact" : "comfy" }))} title="Row density">
+            <button className="adm-btn" onClick={() => upd({ density: prefs.density === "comfy" ? "compact" : "comfy" })} title="Row density">
               {prefs.density === "comfy" ? "Comfortable" : "Compact"}
             </button>
           )}
-          <button className="adm-btn" onClick={() => exportOwners(visible, "shopbrain-owners")} disabled={!visible.length} title="Export the rows currently shown">
-            <Download size={14} /> CSV
-          </button>
+          <Menu
+            aria="Saved views"
+            className="adm-btn"
+            trigger={<><Bookmark size={14} /> Views</>}
+            items={[
+              ...views.slice(0, 6).map((v) => ({ key: v.id, label: v.name, icon: <Bookmark size={14} />, onClick: () => applyView(v) })),
+              ...(views.length ? (["sep"] as const) : []),
+              { key: "manage", label: "Save or manage views…", icon: <Settings size={14} />, onClick: () => setShowViews(true) },
+            ]}
+          />
+          <Menu
+            aria="Export"
+            className="adm-btn"
+            trigger={<><Download size={14} /> Export</>}
+            items={[
+              { key: "csv", label: "CSV (rows shown)", icon: <Download size={14} />, onClick: () => exportOwners(visible, "shopbrain-owners"), disabled: !visible.length },
+              { key: "json", label: "JSON (rows shown)", icon: <Download size={14} />, onClick: () => exportJson(visible, "shopbrain-owners"), disabled: !visible.length },
+              { key: "tsv", label: "Copy as table", icon: <Copy size={14} />, onClick: () => copyTable(visible), disabled: !visible.length },
+              "sep",
+              { key: "print", label: "Print", icon: <Printer size={14} />, onClick: () => window.print() },
+            ]}
+          />
         </div>
-        <div className="adm-chips adm-in" style={{ marginBottom: 12, ["--i" as string]: 11 } as React.CSSProperties} role="group" aria-label="Filter by status">
+        <div className="adm-chips adm-in" style={{ marginBottom: 10, ["--i" as string]: 11 } as React.CSSProperties} role="group" aria-label="Filter by status">
           {chips.map((c) => (
             <button key={c.k} className={`adm-chip ${statusFilter === c.k ? "on" : ""}`} onClick={() => setStatusFilter(c.k)}>
               {c.l} <em>{c.n}</em>
             </button>
           ))}
         </div>
+        <div className="adm-chips" style={{ marginBottom: 10 }} role="group" aria-label="Quick filters">
+          {quickChips.map((c) => (
+            <button key={c.tok} className={`adm-chip sm2 ${hasToken(query, c.tok) ? "on" : ""}`} onClick={() => toggleTok(c.tok, c.prefix)}>
+              {c.l}
+            </button>
+          ))}
+          {allTags.slice(0, 8).map((t) => (
+            <button key={t} className={`adm-chip sm2 ${hasToken(query, `tag:${t}`) ? "on" : ""}`} onClick={() => toggleTok(`tag:${t}`)}>
+              <Tag size={11} /> {t}
+            </button>
+          ))}
+        </div>
+        {parsed.tokens.length > 0 && (
+          <div className="adm-chips" style={{ marginBottom: 10 }} aria-label="Active search filters">
+            {parsed.tokens.map((t) => (
+              <span key={t} className="adm-chip tok">
+                {t}
+                <button className="adm-btn sm icon ghost" style={{ width: 22, height: 22 }} onClick={() => removeToken(t)} aria-label={`Remove ${t}`}>
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <p className="adm-meta">
           <span>
             <b>{visible.length}</b> of {owners.length} shops
@@ -2523,6 +3910,9 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
               · <b>{selected.size}</b> selected
             </span>
           )}
+          <button className="adm-link" onClick={() => setShowHelp(true)} style={{ marginLeft: "auto" }}>
+            Search tips
+          </button>
         </p>
 
         {/* list */}
@@ -2536,10 +3926,15 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           <div className="adm-card adm-empty">
             <Users size={44} />
             <b style={{ color: "var(--fg)", fontSize: 16 }}>No shop owners registered yet.</b>
-            <span>Add your first owner to start a trial.</span>
-            <button className="adm-btn pri" onClick={() => setShowAddModal(true)}>
-              <UserPlus size={14} /> Add Owner
-            </button>
+            <span>Add your first owner to start a trial, or import a list.</span>
+            <div className="adm-quick" style={{ justifyContent: "center" }}>
+              <button className="adm-btn pri" onClick={() => setShowAddModal(true)}>
+                <UserPlus size={14} /> Add Owner
+              </button>
+              <button className="adm-btn" onClick={() => setShowImport(true)}>
+                <Upload size={14} /> Import
+              </button>
+            </div>
           </div>
         ) : visible.length === 0 ? (
           <div className="adm-card adm-empty">
@@ -2572,37 +3967,53 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
                       />
                     </th>
                     {([
-                      ["Shop", "name"], ["Phone", null], ["Status", null], ["Access until", "expiry"], ["Customers", "customers"], ["Outstanding", "outstanding"], ["Actions", null],
-                    ] as [string, SortKey | null][]).map(([t, k]) => (
-                      <th key={t} className={k ? "s" : ""} onClick={k ? () => toggleSort(k) : undefined} style={t === "Actions" ? { textAlign: "right" } : undefined}>
-                        {t}
-                        {k && sort.key === k && <ChevronDown size={12} className={sort.dir === 1 ? "up" : ""} />}
-                      </th>
-                    ))}
+                      ["Shop", "name", "shop"], ["Phone", null, "phone"], ["Status", null, "status"], ["Access until", "expiry", "until"], ["Customers", "customers", "customers"], ["Outstanding", "outstanding", "outstanding"], ["Actions", null, "actions"],
+                    ] as [string, SortKey | null, string][])
+                      .filter(([, , id]) => !hide.includes(id))
+                      .map(([t, k]) => (
+                        <th key={t} className={k ? "s" : ""} onClick={k ? () => toggleSort(k) : undefined} style={t === "Actions" ? { textAlign: "right" } : undefined}>
+                          {t}
+                          {k && sort.key === k && <ChevronDown size={12} className={sort.dir === 1 ? "up" : ""} />}
+                        </th>
+                      ))}
                   </tr>
                 </thead>
                 <tbody>
                   {pageRows.map((o, i) => (
-                    <OwnerRow key={o.phone} o={o} i={i} selected={selected.has(o.phone)} busy={!!busy[o.phone]} flash={!!flash[o.phone]} maxOut={maxOut} h={handlers} />
+                    <OwnerRow key={o.phone} o={o} i={i} selected={selected.has(o.phone)} busy={!!busy[o.phone]} flash={!!flash[o.phone]} cur={cursor === o.phone} pinned={pinSet.has(o.phone)} tags={tags[o.phone] ?? EMPTY} maxOut={maxOut} hq={hq} hide={hide} h={handlers} />
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
         ) : (
-          <div className="adm-cards">
+          <div className={`adm-cards lay-${prefs.layout}`}>
             {pageRows.map((o, i) => (
               <Roll key={o.phone}>
-                <OwnerCard o={o} i={i} selected={selected.has(o.phone)} busy={!!busy[o.phone]} flash={!!flash[o.phone]} maxOut={maxOut} h={handlers} />
+                <OwnerCard o={o} i={i} selected={selected.has(o.phone)} busy={!!busy[o.phone]} flash={!!flash[o.phone]} cur={cursor === o.phone} pinned={pinSet.has(o.phone)} tags={tags[o.phone] ?? EMPTY} maxOut={maxOut} hq={hq} h={handlers} />
               </Roll>
             ))}
           </div>
         )}
 
-        {visible.length > 0 && (
-          <Pager page={page} pages={pages} total={visible.length} size={prefs.pageSize} setPage={setPage} setSize={(n) => setPrefs((p) => ({ ...p, pageSize: n }))} from={page * prefs.pageSize + 1} to={Math.min(visible.length, (page + 1) * prefs.pageSize)} />
-        )}
+        {visible.length > 0 &&
+          (prefs.paging === "pages" ? (
+            <Pager page={page} pages={pages} total={visible.length} size={prefs.pageSize} setPage={setPage} setSize={(n) => upd({ pageSize: n })} from={page * prefs.pageSize + 1} to={Math.min(visible.length, (page + 1) * prefs.pageSize)} />
+          ) : (
+            <div className="adm-more">
+              <span>
+                Showing <b style={{ color: "var(--fg)" }}>{pageRows.length}</b> of <b style={{ color: "var(--fg)" }}>{visible.length}</b>
+              </span>
+              {pageRows.length < visible.length && (
+                <button className="adm-btn" onClick={() => setMoreN((n) => n + prefs.pageSize)}>
+                  <ChevronDown size={14} /> Load {Math.min(prefs.pageSize, visible.length - pageRows.length)} more
+                </button>
+              )}
+            </div>
+          ))}
       </div>
+
+      <ScrollTop />
 
       {/* bulk bar */}
       {selected.size > 0 && (
@@ -2624,9 +4035,25 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           <button className="adm-btn sm" disabled={!!bulk} onClick={() => runBulk("Deactivate", [...selected].filter((p) => byPhone.get(p)?.isActive), (o) => call(`/admin/owners/${enc(o.phone)}/deactivate`, { method: "POST" }, "Failed to update owner."))}>
             <Ban size={13} /> Deactivate
           </button>
-          <button className="adm-btn sm" onClick={() => exportOwners(selectedList, "shopbrain-selected")}>
-            <Download size={13} /> CSV
-          </button>
+          <Menu
+            aria="Message selected shops"
+            className="adm-btn sm"
+            trigger={<><Send size={13} /> Message</>}
+            items={tpls.map((t) => ({ key: t.id, label: t.name, icon: <MessageCircle size={14} />, onClick: () => setQueue({ owners: selectedList, tplId: t.id }) }))}
+          />
+          <Menu
+            aria="More bulk actions"
+            className="adm-btn sm"
+            trigger={<><MoreHorizontal size={13} /> More</>}
+            items={[
+              { key: "pin", label: "Pin selected", icon: <Star size={14} />, onClick: () => setPins((p) => [...new Set([...p, ...selected])]) },
+              { key: "unpin", label: "Unpin selected", icon: <Star size={14} />, onClick: () => setPins((p) => p.filter((x) => !selected.has(x))) },
+              { key: "tag", label: "Add tag…", icon: <Tag size={14} />, onClick: () => setTagPrompt(true) },
+              { key: "nums", label: "Copy phone numbers", icon: <Copy size={14} />, onClick: () => copy(selectedList.map((o) => o.phone).join("\n")) },
+              { key: "csv", label: "Export CSV", icon: <Download size={14} />, onClick: () => exportOwners(selectedList, "shopbrain-selected") },
+              { key: "json", label: "Export JSON", icon: <Download size={14} />, onClick: () => exportJson(selectedList, "shopbrain-selected") },
+            ]}
+          />
           <button className="adm-btn sm icon" onClick={() => setSelected(new Set())} aria-label="Clear selection" disabled={!!bulk}>
             <X size={14} />
           </button>
@@ -2653,20 +4080,55 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           onRemove={(o) => setRemoving(o)}
           onCopy={copy}
           log={log}
+          tags={tags[drawerOwner.phone] ?? EMPTY}
+          allTags={allTags}
+          onAddTag={(t) => addTag([drawerOwner.phone], t)}
+          onRemoveTag={(t) => removeTag(drawerOwner.phone, t)}
+          tpls={tpls}
+          activity={activity}
+          navLabel={drawerIdx >= 0 ? `${drawerIdx + 1} of ${visible.length} shown` : "Not in the current list"}
+          onNav={navDrawer}
         />
       )}
       {editingOwner && <EditOwnerModal owner={editingOwner} others={owners} saving={!!busy[editingOwner.phone]} onCancel={() => setEditingOwner(null)} onSave={(u) => saveEdit(editingOwner.phone, u)} />}
       {showAddModal && <AddOwnerModal owners={owners} saving={creating} onCancel={() => setShowAddModal(false)} onSave={createOwner} />}
       {removing && <ConfirmRemoveModal owner={removing} busy={!!busy[removing.phone]} onCancel={() => setRemoving(null)} onConfirm={() => removeOwner(removing)} />}
-      {queueOpen && <RenewalQueue owners={renewalList} getMessage={(o) => renewalMessage(o as EOwner)} link={waLink} onClose={() => setQueueOpen(false)} />}
+      {queue && <RenewalQueue owners={queue.owners} getMessage={(o) => { const t = tpls.find((x) => x.id === queue.tplId) ?? tpls[0]; return t ? fillTpl(t, o as EOwner) : renewalMessage(o as EOwner); }} link={waLink} onClose={() => setQueue(null)} />}
+      {showSettings && <SettingsModal prefs={prefs} upd={upd} onReset={() => setPrefs(DEFAULT_PREFS)} onClose={() => setShowSettings(false)} />}
+      {showViews && <ViewsModal views={views} setViews={setViews} current={currentView} onApply={applyView} onClose={() => setShowViews(false)} />}
+      {showTpls && <TemplatesModal tpls={tpls} setTpls={setTpls} onClose={() => setShowTpls(false)} />}
+      {showImport && (
+        <ImportModal
+          owners={owners}
+          call={call}
+          onClose={() => setShowImport(false)}
+          onDone={(ok, failed) => {
+            setShowImport(false);
+            push({ kind: failed ? "error" : "success", title: `Imported ${ok} owner${ok === 1 ? "" : "s"}`, desc: failed ? `${failed} failed.` : undefined });
+            log(`Imported ${ok} owners (${failed} failed)`, failed === 0);
+            void fetchOwners(true);
+          }}
+        />
+      )}
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      {digest !== null && <DigestModal text={digest} onCopy={copy} onClose={() => setDigest(null)} />}
+      {tagPrompt && (
+        <PromptModal
+          title={`Add a tag to ${selected.size} shop${selected.size === 1 ? "" : "s"}`}
+          placeholder="e.g. VIP"
+          cta="Add tag"
+          onClose={() => setTagPrompt(false)}
+          onSubmit={(t) => {
+            addTag([...selected], t);
+            log(`Tagged ${selected.size} shops "${t}"`);
+            setTagPrompt(false);
+            setSelected(new Set());
+          }}
+        />
+      )}
       {showActivity && (
         <Modal onClose={() => setShowActivity(false)} width={480}>
-          <div className="adm-mh">
-            <h2>Activity log</h2>
-            <button onClick={() => setShowActivity(false)} className="adm-btn sm icon ghost" aria-label="Close">
-              <X size={18} />
-            </button>
-          </div>
+          <ModalHead title="Activity log" onClose={() => setShowActivity(false)} />
           <p style={{ margin: "-6px 0 10px", color: "var(--mutfg)", fontSize: 12 }}>Actions taken in this browser session. Cleared when you close the tab.</p>
           {activity.length === 0 ? (
             <div className="adm-empty" style={{ padding: 30 }}>
@@ -2688,11 +4150,16 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           )}
         </Modal>
       )}
-      {palette && <Palette owners={enriched} actions={paletteActions} onOpenOwner={(phone) => setDrawer({ phone, tab: "overview" })} onClose={() => setPalette(false)} />}
+      {palette && <Palette owners={enriched} tags={tags} actions={paletteActions} onOpenOwner={(phone) => setDrawer({ phone, tab: "overview" })} onClose={() => setPalette(false)} />}
       <Toasts items={toasts} dismiss={dismiss} />
     </div>
   );
+
+  function toggleSort(key: SortKey) {
+    setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: key === "name" || key === "expiry" ? 1 : -1 }));
+  }
 }
+const EMPTY: string[] = [];
 
 // ---------------------------------------------------------------------------
 // Login gate (same /admin/verify call as before) + theme provider

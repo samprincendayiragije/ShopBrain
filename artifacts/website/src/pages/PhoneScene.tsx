@@ -8,11 +8,17 @@ import type { Frame } from "./motion";
 //   1  NOBODY KNOWS    a crossed-out line, question marks, a coffee ring, a torn corner
 //   2  SHOP BRAIN      the notebook slides away, the phone arrives, the same debts
 //                      appear as short WhatsApp messages
-//   3  YOUR TOTAL      the total counts up, with a receipt for every payment
+//   3  YOUR TOTAL      the total counts up and a paper receipt slides out beside the phone
+//
+// WHAT CHANGED IN THIS VERSION
+//   - A receipt card (chapter 3) that slides out of the phone, so "a receipt for
+//     every payment" is shown, not just said.
+//   - A green glow behind the phone that breathes with the scroll.
+//   - Frozen mode now also cross-fades the receipt, so slow phones see the same story.
 //
 // WHY THIS ONE IS SAFE ON PCs AND PHONES
 //   - No WebGL, no canvas, no images, no video, no filters, no blur, no
-//     backdrop-filter. About 80 DOM nodes and two moving layers.
+//     backdrop-filter. About 90 DOM nodes and four moving layers.
 //   - Only transform and opacity move every frame (compositor only). Everything
 //     else changes once, when a chapter changes.
 //   - It listens to scroll only while the section is within one screen of the
@@ -34,12 +40,19 @@ const HAND = { fontFamily: "'Caveat', cursive" } as const;
 
 type Lang = "rw" | "en" | "fr";
 type Cap = { tag: string; t: string; d: string };
-type Copy = { caps: Cap[]; head: string; chat: { me: boolean; text: string }[]; owed: string };
+type Copy = {
+  caps: Cap[];
+  head: string;
+  chat: { me: boolean; text: string }[];
+  owed: string;
+  rc: { h: string; who: string; amt: string; ok: string };
+};
 
 const COPY: Record<Lang, Copy> = {
   en: {
     head: "Debts",
     owed: "Total owed",
+    rc: { h: "Receipt", who: "Eric", amt: "3,500 RWF", ok: "Paid ✓" },
     caps: [
       { tag: "THE NOTEBOOK", t: "Written once. Lost for good.", d: "Pages tear, names smudge, and the amount is a guess." },
       { tag: "NOBODY KNOWS", t: "Nobody remembers who paid", d: "Customers forget, you chase, and the time you spend chasing is time you are not selling." },
@@ -58,6 +71,7 @@ const COPY: Record<Lang, Copy> = {
   rw: {
     head: "Imyenda",
     owed: "Igiteranyo",
+    rc: { h: "Inyemezabwishyu", who: "Eric", amt: "3,500 RWF", ok: "Yishyuye ✓" },
     caps: [
       { tag: "IGATABO", t: "Wandika rimwe, rirazimira", d: "Impapuro zirashwanyuka, amazina arasibangana, amafaranga ukayakeka." },
       { tag: "NTA WUZI", t: "Nta wibuka uwishyuye", d: "Abakiriya baribagirwa, ukabakurikirana, umwanya wari gucuruza ugatakara." },
@@ -76,6 +90,7 @@ const COPY: Record<Lang, Copy> = {
   fr: {
     head: "Dettes",
     owed: "Total dû",
+    rc: { h: "Reçu", who: "Eric", amt: "3 500 RWF", ok: "Payé ✓" },
     caps: [
       { tag: "LE CAHIER", t: "Écrit une fois, perdu pour toujours", d: "Les pages se déchirent, les noms s'effacent et le montant est une devinette." },
       { tag: "PERSONNE NE SAIT", t: "Personne ne sait qui a payé", d: "Les clients oublient, vous relancez, et ce temps-là n'est pas du temps passé à vendre." },
@@ -100,7 +115,11 @@ const TOTAL = 17000;
 // ---- device checks
 function flag() {
   if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search).get("nb");
+  try {
+    return new URLSearchParams(window.location.search).get("nb");
+  } catch {
+    return null;
+  }
 }
 
 function isWeakDevice() {
@@ -153,6 +172,9 @@ const CSS = `
 .sbn-obj{position:relative;width:22em;height:26em;font-size:clamp(10px,min(4.2vw,2.7vh),19px);font-size:clamp(10px,min(4.2vw,2.7dvh),19px);perspective:1200px}
 .sbn-root[data-lite="1"] .sbn-obj{perspective:none}
 
+/* glow behind the phone */
+.sbn-glow{position:absolute;left:50%;top:50%;width:30em;height:30em;margin:-15em 0 0 -15em;border-radius:50%;pointer-events:none;opacity:0;background:radial-gradient(circle,rgba(18,146,77,.38),transparent 62%)}
+
 /* notebook */
 .sbn-nbw{position:absolute;left:50%;top:50%;width:19em;height:24em;margin:-12em 0 0 -9.5em;opacity:0}
 .sbn-nbshadow{position:absolute;left:6%;right:0;bottom:-3%;height:9%;background:radial-gradient(ellipse at 50% 50%,rgba(0,0,0,.55),transparent 70%)}
@@ -194,14 +216,24 @@ const CSS = `
 .sbn-total b{font-variant-numeric:tabular-nums}
 .sbn-notch{position:absolute;left:50%;top:.55em;width:4.2em;height:.95em;margin-left:-2.1em;border-radius:1em;background:#000}
 
+/* the receipt that slides out in chapter 3 */
+.sbn-rc{position:absolute;right:-1.4em;bottom:3.2em;width:8.6em;padding:.8em .9em 1.1em;border-radius:.4em;background:#FBF7E8;color:#1B2559;box-shadow:0 1em 2em rgba(0,0,0,.4);opacity:0;visibility:hidden;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - .5em),92% 100%,84% calc(100% - .5em),76% 100%,68% calc(100% - .5em),60% 100%,52% calc(100% - .5em),44% 100%,36% calc(100% - .5em),28% 100%,20% calc(100% - .5em),12% 100%,4% calc(100% - .5em),0 100%)}
+.sbn-rc h5{margin:0 0 .5em;font-size:.72em;font-weight:800;letter-spacing:.04em;opacity:.7}
+.sbn-rc p{margin:0;font-size:1.5em;line-height:1.1}
+.sbn-rc strong{display:block;margin-top:.25em;font-size:.95em;font-variant-numeric:tabular-nums}
+.sbn-rc em{display:inline-block;margin-top:.5em;padding:.1em .5em;border-radius:.3em;background:${GREEN};color:#fff;font-style:normal;font-size:.72em;font-weight:700}
+
 .sbn-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:${SUN};transform-origin:0 50%;transform:scaleX(0)}
 
-/* frozen mode (a very slow device): no movement, just cross-fade the two objects by chapter */
-.sbn-root[data-frozen="1"] .sbn-nbw,.sbn-root[data-frozen="1"] .sbn-phw{transition:opacity .5s ease;visibility:visible}
+/* frozen mode (a very slow device): no movement, just cross-fade the objects by chapter */
+.sbn-root[data-frozen="1"] .sbn-nbw,.sbn-root[data-frozen="1"] .sbn-phw,.sbn-root[data-frozen="1"] .sbn-rc{transition:opacity .5s ease;visibility:visible}
 .sbn-root[data-frozen="1"] .sbn-nbw{opacity:1}
 .sbn-root[data-frozen="1"] .sbn-phw{opacity:0}
+.sbn-root[data-frozen="1"] .sbn-rc{opacity:0}
 .sbn-root[data-frozen="1"][data-ch="2"] .sbn-nbw,.sbn-root[data-frozen="1"][data-ch="3"] .sbn-nbw{opacity:0}
 .sbn-root[data-frozen="1"][data-ch="2"] .sbn-phw,.sbn-root[data-frozen="1"][data-ch="3"] .sbn-phw{opacity:1}
+.sbn-root[data-frozen="1"][data-ch="3"] .sbn-rc{opacity:1}
 `;
 
 type Props = { lang: Lang; msgs?: unknown; notebook: string[]; note: string };
@@ -214,11 +246,13 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
   const phw = useRef<HTMLDivElement | null>(null);
   const bar = useRef<HTMLDivElement | null>(null);
   const cnt = useRef<HTMLSpanElement | null>(null);
+  const rcp = useRef<HTMLDivElement | null>(null);
+  const glw = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!on) return;
-    const root = sec.current, nb = nbw.current, ph = phw.current, br = bar.current, ct = cnt.current;
-    if (!root || !nb || !ph || !br || !ct || !ct.firstChild) return;
+    const root = sec.current, nb = nbw.current, ph = phw.current, br = bar.current, ct = cnt.current, rc = rcp.current, gl = glw.current;
+    if (!root || !nb || !ph || !br || !ct || !rc || !gl || !ct.firstChild) return;
     const txt = ct.firstChild as Text; // updated through .data, so no DOM nodes are added or removed
 
     const q = <T extends HTMLElement>(sel: string) => Array.from(root.querySelectorAll<T>(sel));
@@ -239,7 +273,7 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
     let lite = liteStart.current;
     let frozen = false, needClear = false, dirty = true;
     let lastP = -1, lastQ = -1, ch = -1, nB = -1, qOn = -1, totOn = -1, cLast = -1, lk = -1, ls = -1, lt = -1;
-    let nbHidden = false, phHidden = true;
+    let nbHidden = false, phHidden = true, rcHidden = true;
     const lw = [-1, -1, -1, -1];
     let prevT = 0, samples = 0, sum = 0;
 
@@ -250,15 +284,16 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
       const en = ease(clamp((qa - 0.2) / 0.8, 0, 1)); // notebook arrives while the section scrolls in
       const e1 = ease(clamp((p - 0.46) / 0.14, 0, 1)); // notebook leaves
       const e2 = ease(clamp((p - 0.48) / 0.14, 0, 1)); // phone arrives
+      const e3 = ease(clamp((p - 0.8) / 0.12, 0, 1)); // receipt slides out
 
       if (needClear) {
         needClear = false;
-        for (const el of [nb, ph]) {
+        for (const el of [nb, ph, rc, gl]) {
           el.style.transform = "";
           el.style.opacity = "";
           el.style.visibility = "";
         }
-        bar.current && (bar.current.style.transform = "");
+        br.style.transform = "";
       }
 
       if (!frozen) {
@@ -280,7 +315,21 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
           phHidden = phH;
           ph.style.visibility = phH ? "hidden" : "visible";
         }
-        bar.current && (bar.current.style.transform = `scaleX(${p.toFixed(4)})`);
+
+        // receipt: slides out from behind the phone, settles with a small tilt
+        rc.style.transform = `translate3d(${(-5 * (1 - e3)).toFixed(2)}em,${(2.5 * (1 - e3)).toFixed(2)}em,0) rotate(${(-12 * (1 - e3) + 5 * e3).toFixed(1)}deg) scale(${(0.8 + 0.2 * e3).toFixed(3)})`;
+        rc.style.opacity = e3.toFixed(3);
+        const rcH = e3 <= 0;
+        if (rcH !== rcHidden) {
+          rcHidden = rcH;
+          rc.style.visibility = rcH ? "hidden" : "visible";
+        }
+
+        // glow breathes with the phone
+        gl.style.opacity = (e2 * 0.9).toFixed(3);
+        gl.style.transform = `scale(${(0.7 + 0.45 * e2 + 0.1 * Math.sin(p * Math.PI * 3)).toFixed(3)})`;
+
+        br.style.transform = `scaleX(${p.toFixed(4)})`;
       }
 
       // handwriting, one line after another
@@ -449,6 +498,8 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
 
           <div className="sbn-objwrap" aria-hidden>
             <div className="sbn-obj">
+              <div ref={glw} className="sbn-glow" />
+
               {/* the notebook */}
               <div ref={nbw} className="sbn-nbw">
                 <div className="sbn-nbshadow" />
@@ -513,6 +564,14 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
                     <div className="sbn-notch" />
                   </div>
                 </div>
+              </div>
+
+              {/* the receipt */}
+              <div ref={rcp} className="sbn-rc">
+                <h5>{c.rc.h}</h5>
+                <p style={HAND}>{c.rc.who}</p>
+                <strong>{c.rc.amt}</strong>
+                <em>{c.rc.ok}</em>
               </div>
             </div>
           </div>
