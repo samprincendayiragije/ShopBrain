@@ -1,9 +1,43 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
+import { timingSafeEqual } from "node:crypto";
 import { supabase } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
 const ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"];
+
+// ---------------------------------------------------------------------------
+// Security helpers
+// ---------------------------------------------------------------------------
+
+// Constant-time password compare (a plain !== leaks timing information).
+function safeEqual(a: string | undefined, b: string): boolean {
+  if (typeof a !== "string") return false;
+  const A = Buffer.from(a);
+  const B = Buffer.from(b);
+  return A.length === B.length && timingSafeEqual(A, B);
+}
+
+// Simple in-memory brake on wrong passwords: 8 failures per IP per 15 minutes.
+// (Enough to stop guessing; restarts reset it, which is fine for a single server.)
+const FAIL_LIMIT = 8;
+const FAIL_WINDOW_MS = 15 * 60 * 1000;
+const fails = new Map<string, { n: number; resetAt: number }>();
+
+function isBlocked(ip: string): boolean {
+  const f = fails.get(ip);
+  if (!f) return false;
+  if (Date.now() > f.resetAt) {
+    fails.delete(ip);
+    return false;
+  }
+  return f.n >= FAIL_LIMIT;
+}
+function noteFail(ip: string): void {
+  const f = fails.get(ip);
+  if (!f || Date.now() > f.resetAt) fails.set(ip, { n: 1, resetAt: Date.now() + FAIL_WINDOW_MS });
+  else f.n++;
+}
 
 // Every /admin/* route below (except /admin/verify) requires this header,
 // set to the same ADMIN_PASSWORD. The frontend keeps the password in
@@ -13,8 +47,13 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
     res.status(500).json({ ok: false, message: "ADMIN_PASSWORD not configured on server." });
     return;
   }
-  const supplied = req.header("x-admin-password");
-  if (supplied !== ADMIN_PASSWORD) {
+  const ip = req.ip ?? "unknown";
+  if (isBlocked(ip)) {
+    res.status(429).json({ ok: false, message: "Too many attempts. Try again in a few minutes." });
+    return;
+  }
+  if (!safeEqual(req.header("x-admin-password"), ADMIN_PASSWORD)) {
+    noteFail(ip);
     res.status(401).json({ ok: false, message: "Unauthorized." });
     return;
   }
@@ -26,13 +65,235 @@ router.post("/admin/verify", (req: Request, res: Response) => {
     res.status(500).json({ ok: false, message: "ADMIN_PASSWORD not configured on server." });
     return;
   }
+  const ip = req.ip ?? "unknown";
+  if (isBlocked(ip)) {
+    res.status(429).json({ ok: false, message: "Too many attempts. Try again in a few minutes." });
+    return;
+  }
   const { password } = req.body as { password?: string };
-  if (password !== ADMIN_PASSWORD) {
+  if (!safeEqual(password, ADMIN_PASSWORD)) {
+    noteFail(ip);
     res.status(401).json({ ok: false, message: "Invalid password." });
     return;
   }
   res.json({ ok: true });
 });
+
+// ---------------------------------------------------------------------------
+// Data helpers
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const KIGALI_OFFSET_MS = 2 * 60 * 60 * 1000; // UTC+2, no daylight saving
+const kigaliDay = (ts: number) => new Date(ts + KIGALI_OFFSET_MS).toISOString().slice(0, 10);
+
+// Reads every row of a table in pages of 1000 (Supabase returns at most 1000 per request).
+async function fetchAll<T = any>(table: string, cols: string, apply?: (q: any) => any, orderBy = "id"): Promise<T[]> {
+  const out: T[] = [];
+  for (let page = 0; page < 500; page++) {
+    const from = page * 1000;
+    let q: any = supabase.from(table).select(cols).order(orderBy, { ascending: true }).range(from, from + 999);
+    if (apply) q = apply(q);
+    const { data, error } = await q;
+    if (error) throw error;
+    out.push(...((data ?? []) as T[]));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
+async function countRows(table: string, apply?: (q: any) => any): Promise<number> {
+  let q: any = supabase.from(table).select("*", { count: "exact", head: true });
+  if (apply) q = apply(q);
+  const { count, error } = await q;
+  if (error) throw error;
+  return count ?? 0;
+}
+
+// Owners who finished onboarding and have not been switched off.
+// (is_active can be null on old rows, so null counts as active.)
+const activeOwnersFilter = (q: any) => q.not("name", "is", null).or("is_active.is.null,is_active.eq.true");
+
+// ---------------------------------------------------------------------------
+// PUBLIC: totals for the marketing site (no names, no phones, nothing personal)
+// GET /api/public/stats
+// ---------------------------------------------------------------------------
+
+let publicCache: { at: number; body: Record<string, unknown> } | null = null;
+const PUBLIC_CACHE_MS = 5 * 60 * 1000;
+
+router.get("/public/stats", async (_req: Request, res: Response) => {
+  // Open to any website because it only returns anonymous totals.
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Cache-Control", "public, max-age=300");
+
+  if (publicCache && Date.now() - publicCache.at < PUBLIC_CACHE_MS) {
+    res.json(publicCache.body);
+    return;
+  }
+
+  try {
+    const [shops, customers, payments, unpaid, reminders, firstOwner] = await Promise.all([
+      countRows("owners", activeOwnersFilter),
+      countRows("customers"),
+      fetchAll<{ amount: number }>("payments", "amount"),
+      fetchAll<{ amount: number }>("transactions", "amount", (q) => q.eq("paid", false)),
+      countRows("reminder_logs", (q) => q.in("status", ["sent", "delivered", "read"])),
+      supabase.from("owners").select("created_at").not("name", "is", null).order("created_at", { ascending: true }).limit(1),
+    ]);
+
+    const collected = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const outstanding = unpaid.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+    const body = {
+      ok: true,
+      shops,
+      customers,
+      // Debt tracked = what is still owed + what has been paid back. It is slightly
+      // conservative: payments recorded before the payments table existed are not counted.
+      tracked: outstanding + collected,
+      collected,
+      reminders,
+      since: firstOwner.data?.[0]?.created_at ?? null,
+      updatedAt: new Date().toISOString(),
+    };
+    publicCache = { at: Date.now(), body };
+    res.json(body);
+  } catch (err) {
+    console.error("public stats failed:", err);
+    // Serve the last good numbers if we have them, otherwise let the site hide the section.
+    if (publicCache) res.json(publicCache.body);
+    else res.status(503).json({ ok: false });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ADMIN: dashboard overview
+// GET /api/admin/overview
+// ---------------------------------------------------------------------------
+
+let overviewCache: { at: number; body: Record<string, unknown> } | null = null;
+const OVERVIEW_CACHE_MS = 60 * 1000;
+
+router.get("/admin/overview", requireAdmin, async (req: Request, res: Response) => {
+  if (req.query["fresh"] !== "1" && overviewCache && Date.now() - overviewCache.at < OVERVIEW_CACHE_MS) {
+    res.json(overviewCache.body);
+    return;
+  }
+  try {
+    const now = Date.now();
+    const since30 = new Date(now - 30 * DAY_MS).toISOString();
+
+    const [owners, customers, unpaid, payments30, pending, sent, delivered, read, failed] = await Promise.all([
+      fetchAll<{ phone: string; name: string | null; created_at: string; trial_ends_at: string | null; is_active: boolean | null }>(
+        "owners",
+        "phone, name, created_at, trial_ends_at, is_active",
+        undefined,
+        "phone"
+      ),
+      fetchAll<{ id: string; shop_id: string }>("customers", "id, shop_id"),
+      fetchAll<{ customer_id: string; amount: number }>("transactions", "customer_id, amount", (q) => q.eq("paid", false)),
+      fetchAll<{ amount: number; created_at: string }>("payments", "amount, created_at", (q) => q.gte("created_at", since30)),
+      countRows("reminder_logs", (q) => q.eq("status", "pending")),
+      countRows("reminder_logs", (q) => q.eq("status", "sent")),
+      countRows("reminder_logs", (q) => q.eq("status", "delivered")),
+      countRows("reminder_logs", (q) => q.eq("status", "read")),
+      countRows("reminder_logs", (q) => q.eq("status", "failed")),
+    ]);
+
+    // owner status counts
+    let activeOwners = 0, expiring = 0, expired = 0;
+    for (const o of owners) {
+      if (o.is_active === false) continue;
+      activeOwners++;
+      if (!o.trial_ends_at) continue;
+      const days = (new Date(o.trial_ends_at).getTime() - now) / DAY_MS;
+      if (days < 0) expired++;
+      else if (days <= 5) expiring++;
+    }
+
+    // outstanding per shop
+    const shopOfCustomer = new Map<string, string>();
+    const customersPerShop = new Map<string, number>();
+    for (const c of customers) {
+      shopOfCustomer.set(c.id, c.shop_id);
+      customersPerShop.set(c.shop_id, (customersPerShop.get(c.shop_id) ?? 0) + 1);
+    }
+    const outstandingPerShop = new Map<string, number>();
+    let outstanding = 0;
+    for (const t of unpaid) {
+      const shop = shopOfCustomer.get(t.customer_id);
+      const amt = Number(t.amount) || 0;
+      outstanding += amt;
+      if (shop) outstandingPerShop.set(shop, (outstandingPerShop.get(shop) ?? 0) + amt);
+    }
+    const nameOf = new Map(owners.map((o) => [o.phone, o.name]));
+    const topShops = [...outstandingPerShop.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([phone, amount]) => ({ phone, name: nameOf.get(phone) ?? phone, outstanding: amount, customers: customersPerShop.get(phone) ?? 0 }));
+
+    // collected per day, last 14 days (Kigali dates)
+    const daily: { date: string; amount: number }[] = [];
+    const dailyMap = new Map<string, number>();
+    for (let i = 13; i >= 0; i--) {
+      const d = kigaliDay(now - i * DAY_MS);
+      dailyMap.set(d, 0);
+      daily.push({ date: d, amount: 0 });
+    }
+    let collected7 = 0, collected30 = 0;
+    for (const p of payments30) {
+      const ts = new Date(p.created_at).getTime();
+      const amt = Number(p.amount) || 0;
+      collected30 += amt;
+      if (ts >= now - 7 * DAY_MS) collected7 += amt;
+      const key = kigaliDay(ts);
+      if (dailyMap.has(key)) dailyMap.set(key, (dailyMap.get(key) ?? 0) + amt);
+    }
+    for (const d of daily) d.amount = dailyMap.get(d.date) ?? 0;
+
+    // new shops per week, last 8 weeks
+    const weekly: { week: string; count: number }[] = [];
+    for (let i = 7; i >= 0; i--) {
+      const start = now - (i + 1) * 7 * DAY_MS;
+      const end = now - i * 7 * DAY_MS;
+      const count = owners.filter((o) => {
+        const t = new Date(o.created_at).getTime();
+        return t > start && t <= end;
+      }).length;
+      weekly.push({ week: kigaliDay(end), count });
+    }
+
+    const body = {
+      ok: true,
+      generatedAt: new Date(now).toISOString(),
+      kpis: {
+        owners: owners.length,
+        activeOwners,
+        trialExpiring: expiring,
+        trialExpired: expired,
+        customers: customers.length,
+        outstanding,
+        collected7,
+        collected30,
+        payments30: payments30.length,
+      },
+      reminders: { pending, sent, delivered, read, failed },
+      daily,
+      weekly,
+      topShops,
+    };
+    overviewCache = { at: now, body };
+    res.json(body);
+  } catch (err) {
+    console.error("admin overview failed:", err);
+    res.status(500).json({ ok: false, message: "Failed to build overview." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ADMIN: existing routes (unchanged unless noted)
+// ---------------------------------------------------------------------------
 
 // GET /api/admin/owners
 // Returns every shop owner with computed stats: customer count and total
@@ -188,6 +449,7 @@ router.post("/admin/owners/:phone/extend", requireAdmin, async (req: Request, re
     return;
   }
 
+  overviewCache = null;
   res.json({ ok: true, trialEndsAt: base.toISOString() });
 });
 
@@ -238,6 +500,7 @@ router.post("/admin/owners", requireAdmin, async (req: Request, res: Response) =
     return;
   }
 
+  overviewCache = null;
   res.json({ ok: true, phone: cleanedPhone });
 });
 
@@ -245,7 +508,7 @@ router.post("/admin/owners", requireAdmin, async (req: Request, res: Response) =
 // body: { name?: string, language?: "en" | "rw", newPhone?: string } — edits
 // an owner's info. newPhone renames the owner's phone/ID and cascades that
 // change to every table that stores it as a string reference (customers,
-// reminder_logs) so the shop's existing data stays linked correctly.
+// reminder_logs, and now payments) so the shop's existing data stays linked.
 router.patch("/admin/owners/:phone", requireAdmin, async (req: Request, res: Response) => {
   const { phone } = req.params;
   const { name, language, newPhone } = req.body as { name?: string; language?: string; newPhone?: string };
@@ -260,8 +523,10 @@ router.patch("/admin/owners/:phone", requireAdmin, async (req: Request, res: Res
       }
 
       // Cascade: owners.phone is referenced as a plain string in
-      // customers.shop_id and reminder_logs.owner_phone, so all three need
-      // updating together for the shop's data to stay attached.
+      // customers.shop_id, reminder_logs.owner_phone and payments.shop_id,
+      // so all of them need updating together for the shop's data to stay attached.
+      // NOTE: if other tables (stock, sales, expenses, supplier debts, owner_notices)
+      // also store the shop phone, add them here too.
       const { error: ownerErr } = await supabase.from("owners").update({ phone: cleanedNewPhone }).eq("phone", phone);
       if (ownerErr) {
         res.status(500).json({ ok: false, message: "Failed to update phone number." });
@@ -269,6 +534,8 @@ router.patch("/admin/owners/:phone", requireAdmin, async (req: Request, res: Res
       }
       await supabase.from("customers").update({ shop_id: cleanedNewPhone }).eq("shop_id", phone);
       await supabase.from("reminder_logs").update({ owner_phone: cleanedNewPhone }).eq("owner_phone", phone);
+      await supabase.from("payments").update({ shop_id: cleanedNewPhone }).eq("shop_id", phone);
+      await supabase.from("owner_notices").update({ shop_id: cleanedNewPhone }).eq("shop_id", phone);
     }
   }
 
@@ -286,11 +553,12 @@ router.patch("/admin/owners/:phone", requireAdmin, async (req: Request, res: Res
     }
   }
 
+  overviewCache = null;
   res.json({ ok: true });
 });
 
 // POST /api/admin/owners/:phone/deactivate
-// Blocks the owner from using ShopBrain (isOwner() must check is_active too — see note below).
+// Blocks the owner from using ShopBrain (isOwner() checks is_active too).
 router.post("/admin/owners/:phone/deactivate", requireAdmin, async (req: Request, res: Response) => {
   const { phone } = req.params;
   const { error } = await supabase.from("owners").update({ is_active: false }).eq("phone", phone);
@@ -298,6 +566,8 @@ router.post("/admin/owners/:phone/deactivate", requireAdmin, async (req: Request
     res.status(500).json({ ok: false, message: "Failed to deactivate owner." });
     return;
   }
+  overviewCache = null;
+  publicCache = null;
   res.json({ ok: true });
 });
 
@@ -309,6 +579,8 @@ router.post("/admin/owners/:phone/activate", requireAdmin, async (req: Request, 
     res.status(500).json({ ok: false, message: "Failed to activate owner." });
     return;
   }
+  overviewCache = null;
+  publicCache = null;
   res.json({ ok: true });
 });
 
@@ -323,6 +595,8 @@ router.delete("/admin/owners/:phone", requireAdmin, async (req: Request, res: Re
     res.status(500).json({ ok: false, message: "Failed to remove owner." });
     return;
   }
+  overviewCache = null;
+  publicCache = null;
   res.json({ ok: true });
 });
 
