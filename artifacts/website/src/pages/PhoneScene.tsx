@@ -224,6 +224,9 @@ const CSS = `
 .sbn-rc strong{display:block;margin-top:.25em;font-size:.95em;font-variant-numeric:tabular-nums}
 .sbn-rc em{display:inline-block;margin-top:.5em;padding:.1em .5em;border-radius:.3em;background:${GREEN};color:#fff;font-style:normal;font-size:.72em;font-weight:700}
 
+.sbn-coin{position:absolute;left:50%;top:50%;margin:-1.1em 0 0 -3em;opacity:0;visibility:hidden;pointer-events:none;will-change:transform}
+.sbn-coin span{display:inline-block;padding:.35em .8em;border-radius:999px;font-weight:800;font-size:1.05em;color:#1B2559;background:linear-gradient(160deg,#ffe58a,${SUN});box-shadow:0 .7em 1.4em rgba(0,0,0,.35),inset 0 0 0 .12em rgba(160,100,0,.4)}
+.sbn-ghost{position:absolute;left:-.5rem;top:-3.5rem;font-family:'Bricolage Grotesque',system-ui,sans-serif;font-weight:800;font-size:clamp(7rem,18vw,15rem);line-height:1;letter-spacing:-.05em;color:rgba(255,255,255,.07);pointer-events:none;user-select:none}
 .sbn-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:${SUN};transform-origin:0 50%;transform:scaleX(0)}
 
 /* frozen mode (a very slow device): no movement, just cross-fade the objects by chapter */
@@ -265,6 +268,8 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
     const strike = root.querySelector<HTMLElement>("[data-strike]");
     const stain = root.querySelector<HTMLElement>("[data-stain]");
     const torn = root.querySelector<HTMLElement>("[data-torn]");
+    const coinEls = q("[data-coin]");
+    const ghost = root.querySelector<HTMLElement>("[data-ghost]");
     const fmt = (n: number) => {
       const s = n.toLocaleString("en-US");
       return lang === "fr" ? s.replace(/,/g, "\u202f") : s;
@@ -288,7 +293,7 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
 
       if (needClear) {
         needClear = false;
-        for (const el of [nb, ph, rc, gl]) {
+        for (const el of [nb, ph, rc, gl, ...coinEls]) {
           el.style.transform = "";
           el.style.opacity = "";
           el.style.visibility = "";
@@ -332,6 +337,20 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
         br.style.transform = `scaleX(${p.toFixed(4)})`;
       }
 
+      // money flies from the notebook into the phone's total
+      if (!frozen) {
+        coinEls.forEach((el, i) => {
+          const c = clamp((p - (0.5 + i * 0.045)) / 0.2, 0, 1);
+          const live = c > 0 && c < 1;
+          el.style.visibility = live ? "visible" : "hidden";
+          if (!live) return;
+          const e = ease(c);
+          const arc = Math.sin(c * Math.PI);
+          el.style.transform = `translate3d(${(-9 + 9 * e + (i - 1) * 1.2).toFixed(2)}em,${(-4 + 12 * e - 5 * arc).toFixed(2)}em,0) scale(${(0.7 + 0.5 * arc).toFixed(3)})`;
+          el.style.opacity = Math.min(1, arc * 2.2).toFixed(3);
+        });
+      }
+
       // handwriting, one line after another
       for (let i = 0; i < 4; i++) {
         const w = Math.round(clamp((p - (0.012 + i * 0.062)) / 0.055, 0, 1) * 50) / 50;
@@ -371,6 +390,7 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
       if (nextCh !== ch) {
         ch = nextCh;
         root.dataset.ch = String(ch);
+        if (ghost) ghost.textContent = `0${ch + 1}`;
         capEls.forEach((el, i) => (el.dataset.on = i === ch ? "1" : "0"));
         dotEls.forEach((el, i) => (el.dataset.on = i === ch ? "1" : "0"));
       }
@@ -475,7 +495,8 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
       <style>{CSS}</style>
       <div className="sbn-stage">
         <div className="sbn-grid">
-          <div>
+          <div style={{ position: "relative" }}>
+            <span data-ghost aria-hidden className="sbn-ghost">01</span>
             <div className="sbn-caps">
               {c.caps.map((cap, i) => (
                 <div key={i} data-cap data-on={i === 0 ? "1" : "0"} className="sbn-cap">
@@ -565,6 +586,13 @@ export default function PhoneScene({ lang, notebook, note }: Props) {
                   </div>
                 </div>
               </div>
+
+              {/* money flying into the total */}
+              {["+5,000", "+12,000", "+3,500"].map((t) => (
+                <div key={t} data-coin className="sbn-coin">
+                  <span>{t}</span>
+                </div>
+              ))}
 
               {/* the receipt */}
               <div ref={rcp} className="sbn-rc">

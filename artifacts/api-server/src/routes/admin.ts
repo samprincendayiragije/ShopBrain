@@ -133,31 +133,75 @@ router.get("/public/stats", async (_req: Request, res: Response) => {
   }
 
   try {
-    const [shops, customers, payments, unpaid, reminders, firstOwner] = await Promise.all([
-      countRows("owners", activeOwnersFilter),
-      countRows("customers"),
-      fetchAll<{ amount: number }>("payments", "amount"),
+    const now = Date.now();
+    const since30 = new Date(now - 30 * DAY_MS).toISOString();
+
+    const [ownerRows, custRows, payments, unpaid, tx30, rSent, rDelivered, rRead, rFailed] = await Promise.all([
+      fetchAll<{ phone: string; name: string | null; created_at: string; is_active: boolean | null }>("owners", "phone, name, created_at, is_active", undefined, "phone"),
+      fetchAll<{ id: string; shop_id: string }>("customers", "id, shop_id"),
+      fetchAll<{ amount: number; created_at: string; shop_id: string }>("payments", "amount, created_at, shop_id"),
       fetchAll<{ amount: number }>("transactions", "amount", (q) => q.eq("paid", false)),
-      countRows("reminder_logs", (q) => q.in("status", ["sent", "delivered", "read"])),
-      supabase.from("owners").select("created_at").not("name", "is", null).order("created_at", { ascending: true }).limit(1),
+      fetchAll<{ customer_id: string }>("transactions", "customer_id", (q) => q.gte("date", since30)),
+      countRows("reminder_logs", (q) => q.eq("status", "sent")),
+      countRows("reminder_logs", (q) => q.eq("status", "delivered")),
+      countRows("reminder_logs", (q) => q.eq("status", "read")),
+      countRows("reminder_logs", (q) => q.eq("status", "failed")),
     ]);
 
-    const collected = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    // shops that finished onboarding and are not switched off
+    const liveShops = ownerRows.filter((o) => o.name && o.is_active !== false);
+    const liveSet = new Set(liveShops.map((o) => o.phone));
+    const shops30 = liveShops.filter((o) => now - new Date(o.created_at).getTime() <= 30 * DAY_MS).length;
+    const since = liveShops.reduce<string | null>((m, o) => (!m || o.created_at < m ? o.created_at : m), null);
+
+    // money
+    let collected = 0, collected30 = 0;
+    const dayMap = new Map<string, number>();
+    for (let i = 13; i >= 0; i--) dayMap.set(kigaliDay(now - i * DAY_MS), 0);
+    const activeSet = new Set<string>();
+    for (const p of payments) {
+      const amt = Number(p.amount) || 0;
+      const ts = new Date(p.created_at).getTime();
+      collected += amt;
+      if (now - ts <= 30 * DAY_MS) {
+        collected30 += amt;
+        if (liveSet.has(p.shop_id)) activeSet.add(p.shop_id);
+      }
+      const key = kigaliDay(ts);
+      if (dayMap.has(key)) dayMap.set(key, (dayMap.get(key) ?? 0) + amt);
+    }
     const outstanding = unpaid.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+    // a shop is "active" if it recorded a debt or a payment in the last 30 days
+    const shopOf = new Map(custRows.map((c) => [c.id, c.shop_id]));
+    for (const t of tx30) {
+      const shop = shopOf.get(t.customer_id);
+      if (shop && liveSet.has(shop)) activeSet.add(shop);
+    }
+
+    // reminders
+    const attempted = rSent + rDelivered + rRead + rFailed;
+    const reached = rDelivered + rRead;
 
     const body = {
       ok: true,
-      shops,
-      customers,
-      // Debt tracked = what is still owed + what has been paid back. It is slightly
-      // conservative: payments recorded before the payments table existed are not counted.
+      shops: liveShops.length,
+      shops30,
+      activeShops: activeSet.size,
+      customers: custRows.length,
+      // Debt tracked = what is still owed + what has been paid back. Slightly conservative:
+      // payments recorded before the payments table existed are not counted.
       tracked: outstanding + collected,
       collected,
-      reminders,
-      since: firstOwner.data?.[0]?.created_at ?? null,
-      updatedAt: new Date().toISOString(),
+      collected30,
+      daily: [...dayMap.values()],
+      reminders: rSent + rDelivered + rRead,
+      // only published once there is a meaningful sample
+      deliveryRate: attempted >= 20 ? Math.round((reached / attempted) * 100) : null,
+      since,
+      updatedAt: new Date(now).toISOString(),
     };
-    publicCache = { at: Date.now(), body };
+    publicCache = { at: now, body };
     res.json(body);
   } catch (err) {
     console.error("public stats failed:", err);
@@ -184,7 +228,7 @@ router.get("/admin/overview", requireAdmin, async (req: Request, res: Response) 
     const now = Date.now();
     const since30 = new Date(now - 30 * DAY_MS).toISOString();
 
-    const [owners, customers, unpaid, payments30, pending, sent, delivered, read, failed] = await Promise.all([
+    const [owners, customers, unpaid, payments30, tx30, pending, sent, delivered, read, failed] = await Promise.all([
       fetchAll<{ phone: string; name: string | null; created_at: string; trial_ends_at: string | null; is_active: boolean | null }>(
         "owners",
         "phone, name, created_at, trial_ends_at, is_active",
@@ -193,7 +237,8 @@ router.get("/admin/overview", requireAdmin, async (req: Request, res: Response) 
       ),
       fetchAll<{ id: string; shop_id: string }>("customers", "id, shop_id"),
       fetchAll<{ customer_id: string; amount: number }>("transactions", "customer_id, amount", (q) => q.eq("paid", false)),
-      fetchAll<{ amount: number; created_at: string }>("payments", "amount, created_at", (q) => q.gte("created_at", since30)),
+      fetchAll<{ amount: number; created_at: string; shop_id: string }>("payments", "amount, created_at, shop_id", (q) => q.gte("created_at", since30)),
+      fetchAll<{ customer_id: string }>("transactions", "customer_id", (q) => q.gte("date", since30)),
       countRows("reminder_logs", (q) => q.eq("status", "pending")),
       countRows("reminder_logs", (q) => q.eq("status", "sent")),
       countRows("reminder_logs", (q) => q.eq("status", "delivered")),
@@ -264,6 +309,16 @@ router.get("/admin/overview", requireAdmin, async (req: Request, res: Response) 
       weekly.push({ week: kigaliDay(end), count });
     }
 
+    // growth and activity (30 days)
+    const liveOwnerSet = new Set(owners.filter((o) => o.name && o.is_active !== false).map((o) => o.phone));
+    const newShops30 = owners.filter((o) => now - new Date(o.created_at).getTime() <= 30 * DAY_MS).length;
+    const activeSet = new Set<string>();
+    for (const p of payments30) if (liveOwnerSet.has(p.shop_id)) activeSet.add(p.shop_id);
+    for (const t of tx30) {
+      const shop = shopOfCustomer.get(t.customer_id);
+      if (shop && liveOwnerSet.has(shop)) activeSet.add(shop);
+    }
+
     const body = {
       ok: true,
       generatedAt: new Date(now).toISOString(),
@@ -277,6 +332,9 @@ router.get("/admin/overview", requireAdmin, async (req: Request, res: Response) 
         collected7,
         collected30,
         payments30: payments30.length,
+        newShops30,
+        activeShops30: activeSet.size,
+        debts30: tx30.length,
       },
       reminders: { pending, sent, delivered, read, failed },
       daily,
