@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, createContext, useContext } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import {
   LockKeyhole, ArrowLeft, Loader2, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, XCircle, Clock, Pencil, Trash2, Ban,
   PlayCircle, X, UserPlus, Users, Check, Search, Download, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MoreHorizontal, Copy, Activity,
   LayoutGrid, List, Eye, EyeOff, Command, Zap, Bell, Inbox, TrendingUp, Calendar, Send, Sun, Moon,
-  Star, Tag, Printer, Keyboard, Settings, ArrowUp, Upload, WifiOff, FileText, Bookmark, Layers, HelpCircle,
+  Star, Tag, Printer, Keyboard, Settings, ArrowUp, Upload, WifiOff, FileText, Bookmark, Layers, HelpCircle, Filter,
 } from "lucide-react";
 import { EXTRAS_CSS, extrasPointerMove, burst, RefreshBar, FunnelPanel, InactivePanel, RenewalQueue, NotesBox, HealthPill } from "./admin-extras";
 
@@ -17,31 +17,27 @@ import { EXTRAS_CSS, extrasPointerMove, burst, RefreshBar, FunnelPanel, Inactive
 //   POST /admin/owners/:phone/extend | .../activate | .../deactivate
 //   GET /admin/owners/:phone/customers | PATCH /admin/customers/:id
 //
-// 50 additions in this version (all client side, saved in this browser):
-//  SEARCH     1 smart syntax (status: lang: tag: owes> customers> days: joined: is:)  2 search history
-//             3 match highlighting  4 clickable filter tokens  5 quick filter chips  6 saved views
-//  ORGANISE   7 pin shops (pinned first)  8 shop tags + tag filter  9 load-more or pages
-//  LAYOUT    10 grid / rail / wall card layouts  11 table column toggles  12 accent colours
-//            13 corner style  14 sticky section nav with scroll-spy  15 collapsible panels
-//            16 panel toggles  17 layout presets (Overview / Analytics / Focus)  18 scroll progress bar
-//            19 back-to-top button  20 calm mode (no motion)
-//  3D        21 roll intensity (off / soft / strong)  22 mouse tilt + glare on cards
-//            23 parallax background  24 3D spotlight ring carousel  25 KPI sparklines
-//  ANALYTICS 26 renewal forecast  27 expiry heat calendar  28 balance spread  29 language split
-//            30 leaderboard  31 data-quality panel  32 daily digest (copy / WhatsApp)  33 quick stats strip
-//  WORKFLOW  34 message templates + editor  35 template composer in the drawer  36 debt reminders per customer
-//            37 message selected shops (queue)  38 bulk pin / tag / copy phones  39 bulk import owners
-//            40 "add another" in the add dialog  41 per-shop activity tab  42 drawer prev / next
-//            43 keyboard list navigation (j k Enter x p e)  44 shortcuts + search help  45 refresh interval
-//            46 offline banner  47 tab title badge  48 idle warning with "stay signed in"
-//            49 export CSV / JSON / copy as table / print  50 customer tools (copy numbers, export owing)
+// This version
+//   PERFORMANCE  - scroll effects no longer read layout or write CSS variables on the page root
+//                  (positions are measured once, then only transforms are written, only for cards near the screen)
+//                - count-up numbers update the DOM directly instead of re-rendering React every frame
+//                - typing in search no longer re-renders the analytics panels (memoised sections + deferred search)
+//                - pointer glow and card tilt are throttled and use cached sizes; idle cards carry no 3D transform
+//                - lighter shadows, no backdrop blur, a static background, no `transition: all`
+//   NEW          - animated 3D intro with a live-data loader and a door-opening exit (once per sign-in)
+//                - "Business snapshot": a panel whose two doors swing open as you scroll, revealing details
+//                - static 3D pieces: spinning cube mark, floating isometric layer stack, 3D spotlight ring
+//   TIDIER       - fewer header buttons (the rest live in the "More" menu), filters tucked into a Filters panel,
+//                  essential insights shown by default with a "Show all insights" switch
+//   KEPT         - everything from the previous version (search syntax, pins, tags, views, templates, import, exports...)
 // =============================================================================
 
 const ADMIN_API_BASE = import.meta.env.VITE_ADMIN_API_URL as string | undefined;
 const SESSION_KEY = "shopbrain_admin_password";
-const PREFS_KEY = "shopbrain_admin_prefs_v2";
+const PREFS_KEY = "shopbrain_admin_prefs_v3";
 const THEME_KEY = "shopbrain_admin_theme";
 const LOG_KEY = "shopbrain_admin_activity";
+const INTRO_KEY = "shopbrain_admin_intro_seen";
 const PINS_KEY = "shopbrain_admin_pins";
 const TAGS_KEY = "shopbrain_admin_tags";
 const VIEWS_KEY = "shopbrain_admin_views";
@@ -87,21 +83,24 @@ type Accent = "emerald" | "blue" | "violet" | "amber" | "rose";
 type Prefs = {
   density: "comfy" | "compact"; view: "table" | "cards"; pageSize: number; auto: boolean; refreshSec: number;
   layout: "grid" | "rail" | "wall"; accent: Accent; radius: "soft" | "sharp" | "round"; calm: boolean; roll: "off" | "soft" | "strong";
-  hidden: string[]; collapsed: string[]; cols: string[]; pinFirst: boolean; paging: "pages" | "more";
+  hidden: string[]; collapsed: string[]; cols: string[]; pinFirst: boolean; paging: "pages" | "more"; intro: boolean;
 };
 type SavedView = { id: string; name: string; query: string; status: Bucket | "all"; sort: { key: SortKey; dir: 1 | -1 } };
 type Tpl = { id: string; name: string; en: string; rw: string; enEnded?: string; rwEnded?: string };
 
+// the extra analytics are tucked away by default so the page stays calm; "Show all insights" reveals them
+const ESSENTIAL_HIDDEN = ["calendar", "histogram", "people", "quality"];
 const DEFAULT_PREFS: Prefs = {
   density: "comfy", view: "cards", pageSize: 10, auto: false, refreshSec: 30, layout: "grid", accent: "emerald", radius: "soft",
-  calm: false, roll: "soft", hidden: [], collapsed: [], cols: [], pinFirst: true, paging: "pages",
+  calm: false, roll: "soft", hidden: ESSENTIAL_HIDDEN, collapsed: [], cols: [], pinFirst: true, paging: "pages", intro: true,
 };
 
 const PANELS: { id: string; label: string }[] = [
-  { id: "quick", label: "Quick stats" }, { id: "donut", label: "Shops by status" }, { id: "debt", label: "Biggest balances" },
-  { id: "growth", label: "New shops" }, { id: "spotlight", label: "3D spotlight" }, { id: "forecast", label: "Renewal forecast" },
-  { id: "calendar", label: "Expiry calendar" }, { id: "histogram", label: "Balance spread" }, { id: "people", label: "Languages & leaderboard" },
-  { id: "quality", label: "Data quality" }, { id: "attention", label: "Needs attention" }, { id: "funnel", label: "Funnel & inactive shops" },
+  { id: "snapshot", label: "Scroll snapshot" }, { id: "quick", label: "Quick stats" }, { id: "donut", label: "Shops by status" },
+  { id: "debt", label: "Biggest balances" }, { id: "growth", label: "New shops" }, { id: "spotlight", label: "3D spotlight" },
+  { id: "forecast", label: "Renewal forecast" }, { id: "calendar", label: "Expiry calendar" }, { id: "histogram", label: "Balance spread" },
+  { id: "people", label: "Languages & leaderboard" }, { id: "quality", label: "Data quality" }, { id: "attention", label: "Needs attention" },
+  { id: "funnel", label: "Funnel & inactive shops" },
 ];
 const COLS: [string, string][] = [["phone", "Phone"], ["status", "Status"], ["until", "Access until"], ["customers", "Customers"], ["outstanding", "Outstanding"]];
 const ACCENTS: [Accent, string][] = [["emerald", "#047857"], ["blue", "#2563eb"], ["violet", "#7c3aed"], ["amber", "#d97706"], ["rose", "#e11d48"]];
@@ -303,30 +302,6 @@ function useLocal<T>(key: string, init: T): [T, React.Dispatch<React.SetStateAct
   return [v, setV];
 }
 
-function useCountUp(target: number, ms = 900) {
-  const [v, setV] = useState(prefersReduced() ? target : 0);
-  const from = useRef(0);
-  useEffect(() => {
-    if (prefersReduced()) {
-      setV(target);
-      return;
-    }
-    const a = from.current;
-    const t0 = performance.now();
-    let raf = 0;
-    const step = (t: number) => {
-      const p = Math.min(1, (t - t0) / ms);
-      const val = a + (target - a) * (1 - Math.pow(1 - p, 3));
-      from.current = val;
-      setV(val);
-      if (p < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [target, ms]);
-  return Math.round(v);
-}
-
 function useMedia(query: string) {
   const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
   useEffect(() => {
@@ -370,64 +345,175 @@ function useScrollLock() {
   }, []);
 }
 
-// 3D scroll "drum" effect + scroll progress + parallax. Every element marked data-roll is tilted and
-// pushed back while it is near the top or bottom of the screen and sits flat in the middle. It writes
-// straight to the DOM (no React re-renders), runs once per animation frame, and respects reduced motion.
-function useRoll(dep: string, mode: "off" | "soft" | "strong", calm: boolean) {
+// One scroll loop for the whole page, built to stay cheap:
+//  - element positions are measured only on mount / resize / layout change, never while scrolling
+//  - while scrolling it only writes transforms, and only for elements near the screen
+//  - it never writes CSS variables on a shared ancestor (that would restyle the whole tree each frame)
+// It drives: scroll progress bar, background parallax, the "rolling" cards (data-roll) and the opening doors (data-open).
+function useScrollFx(dep: string, mode: "off" | "soft" | "strong", calm: boolean) {
   useEffect(() => {
-    const reduced = prefersReduced();
-    const rootEl = document.querySelector<HTMLElement>(".adm-root");
-    let raf = 0;
+    const animate = !calm && !prefersReduced();
+    const progEl = document.querySelector<HTMLElement>(".adm-prog");
+    const auroraEl = document.querySelector<HTMLElement>(".adm-aurora");
+    type RollItem = { el: HTMLElement; mid: number; on: boolean };
+    type OpenItem = { el: HTMLElement; top: number; span: number; last: number };
+    let rolls: RollItem[] = [];
+    let opens: OpenItem[] = [];
+    let vh = window.innerHeight, docMax = 1, raf = 0, mraf = 0;
+    const strong = mode === "strong";
+
+    const reset = (r: RollItem) => {
+      r.el.style.transform = "";
+      r.el.style.opacity = "";
+      r.el.style.willChange = "";
+      r.on = false;
+    };
     const run = () => {
       raf = 0;
-      const vh = window.innerHeight;
       const y = window.scrollY;
-      rootEl?.style.setProperty("--prog", String(Math.min(1, y / Math.max(1, document.documentElement.scrollHeight - vh))));
-      if (calm || reduced) return;
-      rootEl?.style.setProperty("--sy", String(y));
+      if (progEl) progEl.style.transform = `scaleX(${Math.min(1, y / docMax).toFixed(4)})`;
+      if (!animate) return;
+      if (auroraEl) auroraEl.style.transform = `translate3d(0,${(-y * 0.08).toFixed(1)}px,0)`;
+      for (const o of opens) {
+        const p = clamp((y + 64 - o.top) / o.span, 0, 1);
+        if (p !== o.last && (Math.abs(p - o.last) > 0.002 || p === 0 || p === 1)) {
+          o.el.style.setProperty("--open", p.toFixed(3));
+          o.last = p;
+        }
+      }
       if (mode === "off") return;
-      const strong = mode === "strong";
-      const maxTilt = (window.innerWidth < 760 ? 0.65 : 1) * (strong ? 36 : 22);
-      const depth = strong ? 110 : 55;
-      const reads: [HTMLElement, number][] = [];
-      document.querySelectorAll<HTMLElement>("[data-roll]").forEach((el) => {
-        const r = el.getBoundingClientRect();
-        reads.push([el, (r.top + r.height / 2 - vh / 2) / (vh * 0.62)]);
-      });
-      reads.forEach(([el, d]) => {
-        const e = Math.min(1, Math.max(0, Math.abs(d) - 0.38) / 0.62);
-        if (e < 0.015) {
-          if (el.style.transform) {
-            el.style.transform = "";
-            el.style.opacity = "";
-          }
-          return;
+      const maxTilt = (window.innerWidth < 760 ? 0.65 : 1) * (strong ? 34 : 20);
+      const depth = strong ? 100 : 50;
+      for (const r of rolls) {
+        const d = (r.mid - y - vh / 2) / (vh * 0.62);
+        const a = Math.abs(d);
+        const e = Math.min(1, Math.max(0, a - 0.38) / 0.62);
+        if (a > 1.7 || e < 0.02) {
+          if (r.on) reset(r);
+          continue;
         }
         const s = d < 0 ? -1 : 1;
-        el.style.transform = `perspective(1100px) rotateX(${(-s * e * maxTilt).toFixed(2)}deg) translateZ(${(-e * depth).toFixed(1)}px) scale(${(1 - e * 0.05).toFixed(3)})`;
-        el.style.opacity = String(1 - e * e * 0.55);
-      });
+        r.el.style.willChange = "transform, opacity";
+        r.el.style.transform = `perspective(1100px) rotateX(${(-s * e * maxTilt).toFixed(1)}deg) translate3d(0,0,${(-e * depth).toFixed(0)}px) scale(${(1 - e * 0.05).toFixed(3)})`;
+        r.el.style.opacity = (1 - e * e * 0.5).toFixed(2);
+        r.on = true;
+      }
     };
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(run);
     };
+    const measure = () => {
+      mraf = 0;
+      const y = window.scrollY;
+      vh = window.innerHeight;
+      docMax = Math.max(1, document.documentElement.scrollHeight - vh);
+      rolls = Array.from(document.querySelectorAll<HTMLElement>("[data-roll]")).map((el) => {
+        const r = el.getBoundingClientRect();
+        return { el, mid: r.top + r.height / 2 + y, on: el.style.transform !== "" };
+      });
+      opens = Array.from(document.querySelectorAll<HTMLElement>("[data-open]")).map((el) => {
+        const r = el.getBoundingClientRect();
+        const stage = el.firstElementChild as HTMLElement | null;
+        return { el, top: r.top + y, span: Math.max(1, r.height - (stage ? stage.offsetHeight : vh)), last: -1 };
+      });
+      schedule();
+    };
+    const scheduleMeasure = () => {
+      if (!mraf) mraf = requestAnimationFrame(measure);
+    };
+
     window.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
-    const t = setTimeout(schedule, 60);
-    const t2 = setTimeout(schedule, 700);
-    schedule();
+    window.addEventListener("resize", scheduleMeasure);
+    const wrap = document.querySelector(".adm-wrap");
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleMeasure) : null;
+    if (wrap) ro?.observe(wrap);
+    const t1 = setTimeout(scheduleMeasure, 60);
+    const t2 = setTimeout(scheduleMeasure, 800);
+    measure();
     return () => {
       window.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
-      clearTimeout(t);
+      window.removeEventListener("resize", scheduleMeasure);
+      ro?.disconnect();
+      clearTimeout(t1);
       clearTimeout(t2);
       if (raf) cancelAnimationFrame(raf);
-      document.querySelectorAll<HTMLElement>("[data-roll]").forEach((el) => {
-        el.style.transform = "";
-        el.style.opacity = "";
-      });
+      if (mraf) cancelAnimationFrame(mraf);
+      rolls.forEach(reset);
+      opens.forEach((o) => o.el.style.removeProperty("--open"));
+      if (auroraEl) auroraEl.style.transform = "";
     };
   }, [dep, mode, calm]);
+}
+
+// glow that follows the mouse over cards. One listener, throttled to a frame, sizes cached per hovered card.
+function usePointerFx(rootRef: React.RefObject<HTMLElement>) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    let el: HTMLElement | null = null, rect: DOMRect | null = null, raf = 0, lx = 0, ly = 0, lastT = 0;
+    const apply = () => {
+      raf = 0;
+      if (el && rect) {
+        el.style.setProperty("--mx", `${(lx - rect.left).toFixed(0)}px`);
+        el.style.setProperty("--my", `${(ly - rect.top).toFixed(0)}px`);
+      }
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      const t = e.target as Element;
+      const s = (t.closest?.(".adm-spot") as HTMLElement | null) ?? null;
+      if (s !== el) {
+        el = s;
+        rect = s ? s.getBoundingClientRect() : null;
+      }
+      lx = e.clientX;
+      ly = e.clientY;
+      if (el && !raf) raf = requestAnimationFrame(apply);
+      if (t.closest?.(".adm-tilt") && e.timeStamp - lastT > 24) {
+        lastT = e.timeStamp;
+        extrasPointerMove(e as unknown as React.PointerEvent);
+      }
+    };
+    const drop = () => {
+      el = null;
+      rect = null;
+    };
+    root.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("scroll", drop, { passive: true });
+    return () => {
+      root.removeEventListener("pointermove", onMove);
+      window.removeEventListener("scroll", drop);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [rootRef]);
+}
+
+// number that counts up by writing text straight into the DOM (no React re-render per frame)
+function CountUp({ value, ms = 800 }: { value: number; ms?: number }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const from = useRef(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (prefersReduced()) {
+      el.textContent = value.toLocaleString();
+      from.current = value;
+      return;
+    }
+    const a = from.current;
+    const t0 = performance.now();
+    let raf = 0;
+    const step = (t: number) => {
+      const p = Math.min(1, (t - t0) / ms);
+      const v = a + (value - a) * (1 - Math.pow(1 - p, 3));
+      from.current = v;
+      el.textContent = Math.round(v).toLocaleString();
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value, ms]);
+  return <span ref={ref}>0</span>;
 }
 
 function Roll({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -447,55 +533,60 @@ const ADM_CSS = `
   --bg:#eaeff6;--fg:#0f172a;--card:#ffffff;--bd:#d0d8e4;--mut:#f0f3f8;--mutfg:#516074;
   --pri:#047857;--prifg:#ffffff;--rad:16px;
   --ok:#047857;--warn:#b45309;--amber:#d97706;--bad:#dc2626;--off:#64748b;--viol:#7c3aed;
-  --shadow:0 1px 2px rgba(15,23,42,.06),0 8px 22px -14px rgba(15,23,42,.22);
-  --ease:cubic-bezier(.16,1,.3,1);--spring:cubic-bezier(.34,1.56,.64,1);
+  --shadow:0 1px 2px rgba(15,23,42,.07),0 6px 14px -10px rgba(15,23,42,.22);
+  --ease:cubic-bezier(.16,1,.3,1);--spring:cubic-bezier(.34,1.4,.64,1);
   color-scheme:light}
 .adm-root[data-theme="dark"],.adm-pt[data-theme="dark"]{
   --bg:#0a0f1d;--fg:#e8edf7;--card:#131a2c;--bd:#2b3752;--mut:#1a2338;--mutfg:#9fadc7;
   --pri:#34d399;--prifg:#052e1f;
   --ok:#34d399;--warn:#fbbf24;--amber:#fbbf24;--bad:#f87171;--off:#94a3b8;--viol:#a78bfa;
-  --shadow:0 1px 2px rgba(0,0,0,.45),0 12px 28px -16px rgba(0,0,0,.8);
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 8px 18px -12px rgba(0,0,0,.85);
   color-scheme:dark}
-.adm-root[data-accent="blue"]{--pri:#2563eb}.adm-root[data-accent="violet"]{--pri:#7c3aed}.adm-root[data-accent="amber"]{--pri:#b45309}.adm-root[data-accent="rose"]{--pri:#e11d48}
-.adm-root[data-theme="dark"][data-accent="blue"]{--pri:#60a5fa;--prifg:#07142e}
-.adm-root[data-theme="dark"][data-accent="violet"]{--pri:#a78bfa;--prifg:#1d0b3d}
-.adm-root[data-theme="dark"][data-accent="amber"]{--pri:#fbbf24;--prifg:#2b1a02}
-.adm-root[data-theme="dark"][data-accent="rose"]{--pri:#fb7185;--prifg:#3b0a16}
+.adm-root[data-accent="blue"],.adm-pt[data-accent="blue"]{--pri:#2563eb}
+.adm-root[data-accent="violet"],.adm-pt[data-accent="violet"]{--pri:#7c3aed}
+.adm-root[data-accent="amber"],.adm-pt[data-accent="amber"]{--pri:#b45309}
+.adm-root[data-accent="rose"],.adm-pt[data-accent="rose"]{--pri:#e11d48}
+.adm-root[data-theme="dark"][data-accent="blue"],.adm-pt[data-theme="dark"][data-accent="blue"]{--pri:#60a5fa;--prifg:#07142e}
+.adm-root[data-theme="dark"][data-accent="violet"],.adm-pt[data-theme="dark"][data-accent="violet"]{--pri:#a78bfa;--prifg:#1d0b3d}
+.adm-root[data-theme="dark"][data-accent="amber"],.adm-pt[data-theme="dark"][data-accent="amber"]{--pri:#fbbf24;--prifg:#2b1a02}
+.adm-root[data-theme="dark"][data-accent="rose"],.adm-pt[data-theme="dark"][data-accent="rose"]{--pri:#fb7185;--prifg:#3b0a16}
 .adm-root[data-rad="sharp"]{--rad:6px}.adm-root[data-rad="round"]{--rad:24px}
 .adm-pt{display:contents;color:var(--fg);font-size:14px;line-height:1.45}
-.adm-root{position:relative;min-height:100vh;min-height:100dvh;background:var(--bg);color:var(--fg);font-size:14px;line-height:1.45;overflow-x:clip;transition:background-color .35s,color .35s}
+.adm-root{position:relative;min-height:100vh;min-height:100dvh;background:var(--bg);color:var(--fg);font-size:14px;line-height:1.45;overflow-x:clip}
 .adm-root *,.adm-root *::before,.adm-root *::after,.adm-pt *,.adm-pt *::before,.adm-pt *::after{box-sizing:border-box}
 .adm-root button,.adm-pt button{font:inherit;color:inherit;cursor:pointer}
 .adm-root button:disabled,.adm-pt button:disabled{cursor:not-allowed}
 .adm-root :focus-visible,.adm-pt :focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+.adm-root[data-intro] *{animation-play-state:paused !important}
 .adm-root[data-calm] *:not(.adm-toastbar),.adm-root[data-calm] *::before,.adm-root[data-calm] *::after{animation:none !important;transition:none !important}
 .adm-root[data-calm] .adm-aurora{display:none}
 .adm-root[data-calm] .adm-roll,.adm-root[data-calm] .adm-ocard{transform:none !important;opacity:1 !important}
 
-.adm-aurora{position:fixed;inset:-25vh 0;pointer-events:none;z-index:0;overflow:hidden;transform:translate3d(0,calc(var(--sy,0) * -.1px),0)}
-.adm-aurora::before,.adm-aurora::after{content:"";position:absolute;width:60vmax;height:60vmax;border-radius:50%;animation:adm-drift 30s ease-in-out infinite alternate}
-.adm-aurora::before{top:-6vmax;right:-16vmax;background:radial-gradient(circle,color-mix(in srgb,var(--pri) 16%,transparent),transparent 62%)}
-.adm-aurora::after{bottom:-12vmax;left:-22vmax;background:radial-gradient(circle,rgba(255,201,51,.10),transparent 62%);animation-duration:38s;animation-direction:alternate-reverse}
-@keyframes adm-drift{to{transform:translate3d(-7vmax,5vmax,0) scale(1.12)}}
+/* static background (only its transform changes, on scroll) */
+.adm-aurora{position:fixed;inset:-20vh 0;pointer-events:none;z-index:0;will-change:transform;
+  background:radial-gradient(55vmax 55vmax at 105% 0%,color-mix(in srgb,var(--pri) 15%,transparent),transparent 60%),radial-gradient(50vmax 50vmax at -10% 105%,rgba(255,201,51,.09),transparent 60%)}
 @media (max-width:760px){.adm-aurora{display:none}}
-.adm-prog{position:fixed;top:0;left:0;right:0;height:3px;z-index:36;background:linear-gradient(90deg,var(--pri),color-mix(in srgb,var(--pri) 50%,#facc15));transform-origin:0 50%;transform:scaleX(var(--prog,0));pointer-events:none}
+.adm-prog{position:fixed;top:0;left:0;right:0;height:3px;z-index:36;background:linear-gradient(90deg,var(--pri),color-mix(in srgb,var(--pri) 50%,#facc15));transform-origin:0 50%;transform:scaleX(0);pointer-events:none}
 
-.adm-wrap{position:relative;z-index:1;max-width:1280px;margin:0 auto;padding:28px 20px 120px;min-width:0}
-@keyframes adm-in{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.adm-wrap{position:relative;z-index:1;max-width:1280px;margin:0 auto;padding:24px 20px 120px;min-width:0}
+@keyframes adm-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 @keyframes adm-fadein{from{opacity:0}to{opacity:1}}
-.adm-in{animation:adm-in .65s var(--ease) both;animation-delay:calc(var(--i,0) * 55ms)}
+.adm-in{animation:adm-in .55s var(--ease) both;animation-delay:calc(var(--i,0) * 40ms)}
 [id^="sec-"]{scroll-margin-top:64px}
+.adm-sh{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:22px 0 10px}
+.adm-sh h2{margin:0;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--mutfg)}
 
-/* 3D scroll wrappers */
-.adm-roll{min-width:0;transform-origin:50% 50%;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+/* rolling cards */
+.adm-roll{min-width:0;transform-origin:50% 50%}
 .adm-kpis>.adm-roll>*,.adm-grid>.adm-roll>*,.adm-cards>.adm-roll>*,.adm-duo>.adm-roll>*{height:100%}
 .adm-roll>.adm-kpi{width:100%;display:block}
 .adm-grid>.adm-roll.wide{grid-column:1/-1}
 
 /* header */
-.adm-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
-.adm-title{margin:0;font-size:28px;font-weight:800;letter-spacing:-.02em;color:var(--fg);background:linear-gradient(100deg,var(--fg) 35%,var(--pri));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.adm-sub{margin:4px 0 0;color:var(--mutfg);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.adm-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.adm-brand{display:flex;align-items:center;gap:14px;min-width:0}
+.adm-title{margin:0;font-size:26px;font-weight:800;letter-spacing:-.02em;color:var(--fg);background:linear-gradient(100deg,var(--fg) 35%,var(--pri));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.adm-sub{margin:2px 0 0;color:var(--mutfg);display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
 .adm-live{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--mutfg)}
 .adm-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);position:relative}
 .adm-dot::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--ok);animation:adm-pulse 2s ease-out infinite}
@@ -504,22 +595,22 @@ const ADM_CSS = `
 .adm-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .adm-offline{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb,var(--warn) 16%,var(--card));border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);color:var(--warn);font-weight:600;font-size:13px}
 
-/* sticky section nav + fab */
-.adm-nav{position:sticky;top:0;z-index:30;display:flex;gap:6px;align-items:center;margin:0 -6px 16px;padding:8px 6px;overflow-x:auto;scrollbar-width:none;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);background:color-mix(in srgb,var(--bg) 80%,transparent);border-bottom:1px solid transparent}
+/* sticky section nav + back to top */
+.adm-nav{position:sticky;top:0;z-index:30;display:flex;gap:6px;align-items:center;margin:0 -6px 14px;padding:8px 6px;overflow-x:auto;scrollbar-width:none;background:color-mix(in srgb,var(--bg) 92%,transparent)}
 .adm-nav::-webkit-scrollbar{display:none}
-.adm-nav button{flex:none;height:32px;padding:0 13px;border:1px solid transparent;border-radius:999px;background:transparent;color:var(--mutfg);font-size:12.5px;font-weight:700;transition:all .25s var(--ease)}
+.adm-nav button{flex:none;height:32px;padding:0 13px;border:1px solid transparent;border-radius:999px;background:transparent;color:var(--mutfg);font-size:12.5px;font-weight:700;transition:background-color .2s,color .2s}
 .adm-nav button:hover{color:var(--fg);background:var(--mut)}
 .adm-nav button.on{background:var(--fg);color:var(--bg)}
-.adm-fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:35;width:44px;height:44px;border-radius:50%;border:1px solid var(--bd);background:var(--card);color:var(--fg);display:grid;place-items:center;box-shadow:0 14px 30px -12px rgba(0,0,0,.5);animation:adm-in .4s var(--spring) both}
+.adm-fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:35;width:44px;height:44px;border-radius:50%;border:1px solid var(--bd);background:var(--card);color:var(--fg);display:grid;place-items:center;box-shadow:0 10px 22px -10px rgba(0,0,0,.5);animation:adm-in .35s var(--spring) both}
 .adm-fab:hover{border-color:var(--pri);color:var(--pri)}
 
 /* buttons: one size scale (38 / 32) and one look, for <button> and <a> alike */
-.adm-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 14px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font-size:13px;font-weight:600;line-height:1;white-space:nowrap;text-decoration:none;transition:transform .2s var(--spring),background .2s,border-color .2s,box-shadow .2s}
-.adm-btn:hover:not(:disabled){background:var(--mut);border-color:color-mix(in srgb,var(--fg) 22%,var(--bd));transform:translateY(-1px)}
+.adm-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 14px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font-size:13px;font-weight:600;line-height:1;white-space:nowrap;text-decoration:none;transition:transform .18s var(--ease),background-color .18s,border-color .18s,box-shadow .18s,filter .18s}
+.adm-btn:hover:not(:disabled){background:var(--mut);border-color:color-mix(in srgb,var(--fg) 22%,var(--bd))}
 .adm-btn:active:not(:disabled){transform:scale(.97)}
 .adm-btn:disabled{opacity:.55}
 .adm-btn.pri{background:var(--pri);border-color:var(--pri);color:var(--prifg)}
-.adm-btn.pri:hover:not(:disabled){background:var(--pri);border-color:var(--pri);filter:brightness(1.1);box-shadow:0 8px 22px -8px var(--pri)}
+.adm-btn.pri:hover:not(:disabled){background:var(--pri);border-color:var(--pri);filter:brightness(1.1)}
 .adm-btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,var(--bd))}
 .adm-btn.danger:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 10%,var(--card))}
 .adm-btn.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--bd))}
@@ -538,21 +629,20 @@ const ADM_CSS = `
 .adm-ringsvg circle{fill:none;stroke-width:3}
 .adm-ringsvg .bg{stroke:var(--bd)}.adm-ringsvg .fg{stroke:var(--pri);stroke-dasharray:44;animation:adm-ring linear infinite}
 @keyframes adm-ring{from{stroke-dashoffset:44}to{stroke-dashoffset:0}}
-.adm-themebtn svg{transition:transform .5s var(--spring)}
+.adm-themebtn svg{transition:transform .4s var(--spring)}
 .adm-themebtn:hover svg{transform:rotate(25deg) scale(1.12)}
 
-/* cards + spotlight */
+/* cards */
 .adm-card{position:relative;background:var(--card);border:1px solid var(--bd);border-radius:var(--rad);box-shadow:var(--shadow)}
-.adm-spot::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .4s;background:radial-gradient(360px circle at var(--mx,50%) var(--my,50%),color-mix(in srgb,var(--pri) 12%,transparent),transparent 60%)}
+.adm-spot::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .3s;background:radial-gradient(320px circle at var(--mx,50%) var(--my,50%),color-mix(in srgb,var(--pri) 12%,transparent),transparent 60%)}
 .adm-spot:hover::after{opacity:1}
 
-.adm-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:12px;margin-bottom:14px}
-.adm-kpi{padding:16px 16px 14px;text-align:left;overflow:hidden;color:var(--fg);transition:transform .35s var(--spring),border-color .25s,box-shadow .25s}
+.adm-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:12px;margin-bottom:6px}
+.adm-kpi{padding:16px 16px 14px;text-align:left;overflow:hidden;color:var(--fg);transition:transform .25s var(--ease),border-color .2s,box-shadow .2s}
 .adm-kpi:hover{transform:translateY(-3px)}
 .adm-kpi.is-on{border-color:var(--pri);box-shadow:0 0 0 1px var(--pri),var(--shadow)}
 .adm-kpi .top{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--mutfg);font-size:12px;font-weight:600}
-.adm-kpi .ico{width:28px;height:28px;flex:none;border-radius:9px;display:grid;place-items:center;background:color-mix(in srgb,var(--c,var(--pri)) 15%,transparent);color:var(--c,var(--pri));transition:transform .4s var(--spring)}
-.adm-kpi:hover .ico{transform:rotate(-8deg) scale(1.12)}
+.adm-kpi .ico{width:28px;height:28px;flex:none;border-radius:9px;display:grid;place-items:center;background:color-mix(in srgb,var(--c,var(--pri)) 15%,transparent);color:var(--c,var(--pri))}
 .adm-kpi .val{margin-top:10px;font-size:26px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .adm-kpi .val small{font-size:13px;font-weight:600;color:var(--mutfg);margin-left:4px}
 .adm-kpi .hint{margin-top:2px;font-size:11.5px;color:var(--mutfg)}
@@ -560,21 +650,21 @@ const ADM_CSS = `
 .adm-spark path.l{fill:none;stroke:currentColor;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}
 .adm-spark path.a{fill:currentColor;opacity:.13}
 
-.adm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;margin-bottom:22px}
-.adm-duo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:22px}
+.adm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;margin-bottom:8px}
+.adm-duo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:8px}
 .adm-panel{padding:16px 18px;overflow:hidden;min-width:0}
 .adm-panel h3{margin:0 0 12px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
 .adm-panel h3>.ico{display:inline-flex;color:var(--pri);flex:none}
 .adm-panel h3 .adm-collapse{margin-left:auto;flex:none;width:26px;height:26px}
-.adm-collapse svg{transition:transform .3s var(--spring)}
+.adm-collapse svg{transition:transform .25s var(--ease)}
 .adm-collapsed h3{margin-bottom:0}.adm-collapsed .adm-collapse svg{transform:rotate(180deg)}.adm-collapsed .adm-pbody{display:none}
 .adm-donutwrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .adm-donut{width:132px;height:132px;flex:none}
-.adm-seg{fill:none;stroke-linecap:butt;cursor:pointer;transform-origin:60px 60px;animation:adm-seg 1.1s var(--ease) both;animation-delay:calc(var(--i,0) * 90ms);transition:stroke-width .25s}
+.adm-seg{fill:none;stroke-linecap:butt;cursor:pointer;transform-origin:60px 60px;animation:adm-seg 1s var(--ease) both;animation-delay:calc(var(--i,0) * 70ms);transition:stroke-width .2s}
 @keyframes adm-seg{from{stroke-dasharray:0 var(--C)}}
 .adm-donut text{text-anchor:middle;fill:var(--fg);font-weight:800}
 .adm-legend{display:grid;gap:5px;flex:1;min-width:130px}
-.adm-legend button{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:4px 6px;border-radius:7px;text-align:left;font-size:12.5px;color:var(--fg);transition:background .2s}
+.adm-legend button{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:4px 6px;border-radius:7px;text-align:left;font-size:12.5px;color:var(--fg);transition:background-color .15s}
 .adm-legend button:hover,.adm-legend button.on{background:var(--mut)}
 .adm-legend i{width:9px;height:9px;border-radius:3px;flex:none}
 .adm-legend b{margin-left:auto;font-variant-numeric:tabular-nums}
@@ -583,12 +673,12 @@ const ADM_CSS = `
 .adm-brow span.n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .adm-brow:hover span.n{color:var(--pri)}
 .adm-btrack{height:9px;border-radius:5px;background:var(--mut);box-shadow:inset 0 0 0 1px var(--bd);overflow:hidden}
-.adm-btrack i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--pri),color-mix(in srgb,var(--pri) 55%,#facc15));transform-origin:0 50%;animation:adm-growx .9s var(--ease) both;animation-delay:calc(var(--i,0) * 70ms + 200ms)}
+.adm-btrack i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--pri),color-mix(in srgb,var(--pri) 55%,#facc15));transform-origin:0 50%;animation:adm-growx .8s var(--ease) both;animation-delay:calc(var(--i,0) * 60ms + 150ms)}
 @keyframes adm-growx{from{transform:scaleX(0)}}
 .adm-brow b{font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
 .adm-sign{display:flex;align-items:flex-end;gap:6px;height:104px}
 .adm-sign>*{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%;border:0;background:transparent;padding:0}
-.adm-sign i{display:block;width:100%;min-height:3px;border-radius:5px 5px 2px 2px;background:linear-gradient(0deg,var(--pri),color-mix(in srgb,var(--pri) 50%,#a7f3d0));transform-origin:50% 100%;animation:adm-growy .8s var(--ease) both;animation-delay:calc(var(--i,0) * 60ms + 250ms)}
+.adm-sign i{display:block;width:100%;min-height:3px;border-radius:5px 5px 2px 2px;background:linear-gradient(0deg,var(--pri),color-mix(in srgb,var(--pri) 50%,#a7f3d0));transform-origin:50% 100%;animation:adm-growy .7s var(--ease) both;animation-delay:calc(var(--i,0) * 50ms + 200ms)}
 .adm-sign i.bad{background:linear-gradient(0deg,var(--bad),color-mix(in srgb,var(--bad) 55%,#fecaca))}
 @keyframes adm-growy{from{transform:scaleY(0)}}
 .adm-sign span{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--fg)}
@@ -604,8 +694,8 @@ const ADM_CSS = `
 /* heat calendar */
 .adm-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
 .adm-cal em{font-style:normal;text-align:center;font-size:10px;color:var(--mutfg);font-weight:700}
-.adm-cal button{aspect-ratio:1;min-height:30px;border:1px solid var(--bd);border-radius:8px;background:color-mix(in srgb,var(--pri) calc(var(--h,0) * 22%),var(--mut));color:var(--fg);font-size:10.5px;font-weight:700;display:grid;place-items:center;line-height:1;transition:transform .2s var(--spring)}
-.adm-cal button:hover{transform:scale(1.12);border-color:var(--pri)}
+.adm-cal button{aspect-ratio:1;min-height:30px;border:1px solid var(--bd);border-radius:8px;background:color-mix(in srgb,var(--pri) calc(var(--h,0) * 22%),var(--mut));color:var(--fg);font-size:10.5px;font-weight:700;display:grid;place-items:center;line-height:1;transition:transform .15s var(--ease)}
+.adm-cal button:hover{transform:scale(1.1);border-color:var(--pri)}
 .adm-cal button.today{outline:2px solid var(--pri);outline-offset:1px}
 .adm-cal button.empty{visibility:hidden}
 .adm-cal button small{display:block;font-size:9px;color:var(--mutfg);margin-top:2px}
@@ -613,54 +703,120 @@ const ADM_CSS = `
 .adm-qrow:last-child{border-bottom:0}
 .adm-qrow b{margin-left:auto;font-variant-numeric:tabular-nums}
 
-/* 3D spotlight ring */
+/* 3D spotlight ring (static 3D) */
 .adm-ring{height:210px;perspective:900px;display:grid;place-items:center}
 .adm-ringin{position:relative;width:190px;height:158px;transform-style:preserve-3d;transition:transform .9s var(--ease)}
-.adm-ringcard{position:absolute;inset:0;padding:14px;border:1px solid var(--bd);border-radius:calc(var(--rad) - 2px);background:var(--card);box-shadow:var(--shadow);backface-visibility:hidden;-webkit-backface-visibility:hidden;display:grid;gap:8px;align-content:center;justify-items:start;transition:opacity .6s}
+.adm-ringcard{position:absolute;inset:0;padding:14px;border:1px solid var(--bd);border-radius:calc(var(--rad) - 2px);background:var(--card);box-shadow:var(--shadow);backface-visibility:hidden;-webkit-backface-visibility:hidden;display:grid;gap:8px;align-content:center;justify-items:start;transition:opacity .5s}
 .adm-ringcard b{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 .adm-ringctl{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:6px}
-.adm-dots{display:flex;gap:5px}.adm-dots i{width:7px;height:7px;border-radius:50%;background:var(--bd);transition:all .3s}.adm-dots i.on{background:var(--pri);width:18px;border-radius:4px}
+.adm-dots{display:flex;gap:5px}.adm-dots i{width:7px;height:7px;border-radius:50%;background:var(--bd);transition:width .25s,background-color .25s}.adm-dots i.on{background:var(--pri);width:18px;border-radius:4px}
+
+/* 3D cube mark (static 3D, spins by itself) */
+.adm-cubewrap{display:inline-block;width:var(--s);height:var(--s);perspective:600px;flex:none}
+.adm-cube{display:block;position:relative;width:100%;height:100%;transform-style:preserve-3d;animation:adm-cube 16s linear infinite}
+.adm-cubewrap.mini .adm-cube{animation-duration:11s}
+.adm-cube i{position:absolute;inset:0;display:grid;place-items:center;color:var(--pri);border:1px solid color-mix(in srgb,var(--pri) 55%,transparent);border-radius:calc(var(--s) * .14);background:linear-gradient(145deg,color-mix(in srgb,var(--pri) 32%,var(--card)),color-mix(in srgb,var(--pri) 8%,var(--card)))}
+.adm-cube i:nth-child(1){transform:translateZ(calc(var(--s) / 2))}
+.adm-cube i:nth-child(2){transform:rotateY(180deg) translateZ(calc(var(--s) / 2))}
+.adm-cube i:nth-child(3){transform:rotateY(90deg) translateZ(calc(var(--s) / 2))}
+.adm-cube i:nth-child(4){transform:rotateY(-90deg) translateZ(calc(var(--s) / 2))}
+.adm-cube i:nth-child(5){transform:rotateX(90deg) translateZ(calc(var(--s) / 2))}
+.adm-cube i:nth-child(6){transform:rotateX(-90deg) translateZ(calc(var(--s) / 2))}
+@keyframes adm-cube{from{transform:rotateX(-22deg) rotateY(0)}to{transform:rotateX(-22deg) rotateY(360deg)}}
+
+/* intro */
+.adm-intro{position:fixed;inset:0;z-index:200;perspective:1800px;overflow:hidden;color:var(--fg);animation:adm-fadein .35s ease both}
+.adm-idoor{position:absolute;top:0;bottom:0;width:50.3%;background:radial-gradient(120vmax 90vmax at var(--ox) 42%,color-mix(in srgb,var(--pri) 20%,var(--bg)),var(--bg) 62%);transition:transform 1s var(--ease);box-shadow:0 0 60px rgba(0,0,0,.25)}
+.adm-idoor.l{left:0;--ox:100%;transform-origin:0 50%}
+.adm-idoor.r{right:0;--ox:0%;transform-origin:100% 50%}
+.adm-intro.out .adm-idoor.l{transform:rotateY(-104deg)}
+.adm-intro.out .adm-idoor.r{transform:rotateY(104deg)}
+.adm-iface{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:16px;text-align:center;padding:24px}
+.adm-intro.out .adm-iface{opacity:0;transform:scale(1.1);transition:opacity .4s,transform .6s var(--ease)}
+.adm-stage3d{position:relative;width:260px;height:190px;display:grid;place-items:center}
+.adm-orbit{position:absolute;left:50%;top:50%;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--pri) 45%,transparent);animation:adm-orb 9s linear infinite}
+.adm-orbit.a{width:210px;height:210px;--t:70deg}
+.adm-orbit.b{width:160px;height:160px;--t:62deg;animation-duration:6s;animation-direction:reverse;border-style:dashed}
+@keyframes adm-orb{from{transform:perspective(700px) translate(-50%,-50%) rotateX(var(--t)) rotateZ(0)}to{transform:perspective(700px) translate(-50%,-50%) rotateX(var(--t)) rotateZ(360deg)}}
+.adm-ititle{margin:0;font-size:clamp(34px,7vw,56px);font-weight:800;letter-spacing:-.03em;perspective:600px}
+.adm-letter{display:inline-block;opacity:0;transform:translateY(22px) rotateX(-80deg);animation:adm-letter .8s var(--ease) forwards;animation-delay:calc(var(--d) * 45ms + 450ms)}
+@keyframes adm-letter{to{opacity:1;transform:none}}
+.adm-isub{margin:0;color:var(--mutfg);font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:12px;opacity:0;animation:adm-fadein .6s ease 1.1s forwards}
+.adm-iprog{width:min(260px,70vw);height:4px;border-radius:2px;background:var(--bd);overflow:hidden}
+.adm-iprog i{display:block;height:100%;background:linear-gradient(90deg,var(--pri),color-mix(in srgb,var(--pri) 50%,#facc15));transform-origin:0 50%;transition:transform 1.8s var(--ease)}
+.adm-istats{display:flex;gap:26px;flex-wrap:wrap;justify-content:center;min-height:42px;opacity:0;transform:translateY(8px);transition:opacity .5s,transform .5s var(--ease)}
+.adm-istats.on{opacity:1;transform:none}
+.adm-istats div{display:grid;gap:2px}.adm-istats b{font-size:20px;font-variant-numeric:tabular-nums}.adm-istats small{color:var(--mutfg);font-size:11px;font-weight:600}
+.adm-ienter{min-width:210px;height:44px;opacity:0;animation:adm-fadein .5s ease 1.3s forwards}
+.adm-iskip{position:absolute;top:14px;right:14px}
+
+/* business snapshot: two doors swing open as you scroll (--open goes 0 to 1) */
+.adm-open{--open:0;position:relative;height:190vh;margin:6px 0 4px}
+.adm-stage{position:sticky;top:64px;height:min(540px,calc(100vh - 88px));perspective:1500px}
+.adm-back{position:absolute;inset:0;padding:22px;border:1px solid var(--bd);border-radius:var(--rad);background:var(--card);box-shadow:var(--shadow);overflow:hidden;opacity:calc(.25 + var(--open) * .75);transform:scale(calc(.93 + var(--open) * .07))}
+.adm-door{position:absolute;top:0;bottom:0;width:50%;display:flex;align-items:center;padding:0 clamp(14px,3vw,40px);border:1px solid var(--bd);background:linear-gradient(160deg,color-mix(in srgb,var(--pri) 26%,var(--card)),var(--card) 72%);box-shadow:var(--shadow);opacity:calc(1.15 - var(--open));backface-visibility:hidden;will-change:transform}
+.adm-door span{font-size:clamp(26px,5vw,52px);font-weight:800;letter-spacing:-.03em;line-height:1}
+.adm-door.l{left:0;justify-content:flex-end;border-radius:var(--rad) 0 0 var(--rad);transform-origin:0 50%;transform:rotateY(calc(var(--open) * -112deg))}
+.adm-door.r{right:0;justify-content:flex-start;border-radius:0 var(--rad) var(--rad) 0;transform-origin:100% 50%;transform:rotateY(calc(var(--open) * 112deg))}
+.adm-hint{position:absolute;left:0;right:0;bottom:16px;text-align:center;font-size:12px;font-weight:700;color:var(--mutfg);opacity:calc(1 - var(--open) * 4);pointer-events:none}
+.adm-snap{display:grid;grid-template-columns:1.15fr 1fr 170px;gap:20px;height:100%}
+.adm-snap h4{margin:0 0 10px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--mutfg)}
+.adm-tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start}
+.adm-tile{padding:14px;border:1px solid var(--bd);border-radius:14px;background:var(--mut)}
+.adm-tile small{display:block;color:var(--mutfg);font-size:11px;font-weight:600}
+.adm-tile b{display:block;margin-top:4px;font-size:22px;font-variant-numeric:tabular-nums;letter-spacing:-.02em;overflow-wrap:anywhere}
+.adm-lists{display:grid;gap:16px;align-content:start;min-width:0}
+.adm-li{display:flex;align-items:center;gap:10px;width:100%;padding:8px 0;border:0;border-bottom:1px dashed var(--bd);background:transparent;text-align:left;font-size:13px;color:var(--fg)}
+.adm-li:last-child{border-bottom:0}
+.adm-li span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.adm-li small{color:var(--mutfg);font-weight:600;white-space:nowrap}
+.adm-li:hover span{color:var(--pri)}
+/* floating isometric layers (static 3D) */
+.adm-iso{perspective:900px;display:grid;place-items:center}
+.adm-isoin{position:relative;width:118px;height:118px;transform-style:preserve-3d;transform:rotateX(58deg) rotateZ(-38deg);animation:adm-iso 6s ease-in-out infinite}
+.adm-isoin i{position:absolute;inset:0;display:grid;place-items:center;color:var(--pri);border-radius:18px;border:1px solid color-mix(in srgb,var(--pri) 50%,transparent);background:color-mix(in srgb,var(--pri) 16%,var(--card))}
+.adm-isoin i:nth-child(1){transform:translateZ(0)}
+.adm-isoin i:nth-child(2){transform:translateZ(34px);opacity:.88}
+.adm-isoin i:nth-child(3){transform:translateZ(68px);opacity:.75}
+@keyframes adm-iso{0%,100%{transform:rotateX(58deg) rotateZ(-38deg) translateZ(0)}50%{transform:rotateX(58deg) rotateZ(-30deg) translateZ(16px)}}
 
 /* attention */
-.adm-attn{margin-bottom:22px;padding:16px 18px}
+.adm-attn{margin-bottom:8px;padding:16px 18px}
 .adm-attn h3{margin:0 0 12px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.adm-attn h3 svg{color:var(--warn);animation:adm-ring-bell 3s ease-in-out infinite;transform-origin:50% 0}
-@keyframes adm-ring-bell{0%,88%,100%{transform:rotate(0)}91%{transform:rotate(14deg)}94%{transform:rotate(-12deg)}97%{transform:rotate(8deg)}}
+.adm-attn h3 svg{color:var(--warn)}
 .adm-attnlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr));gap:10px}
-.adm-attnitem{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--mut);transition:transform .3s var(--spring),border-color .2s}
+.adm-attnitem{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--mut);transition:transform .2s var(--ease),border-color .2s}
 .adm-attnitem:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--warn) 55%,var(--bd))}
 .adm-attnitem .who{min-width:0;flex:1}
 .adm-attnitem .who b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .adm-attnitem .who span{font-size:11.5px}
 .adm-allclear{display:flex;align-items:center;gap:10px;color:var(--mutfg)}
 .adm-allclear svg{color:var(--ok);flex:none}
-.adm-allclear path{stroke-dasharray:30;animation:adm-draw .9s .3s var(--ease) both}
-@keyframes adm-draw{from{stroke-dashoffset:30}to{stroke-dashoffset:0}}
 
-/* toolbar */
+/* toolbar + filters */
 .adm-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
 .adm-search{position:relative;flex:1 1 240px;min-width:0;max-width:420px}
 .adm-search>svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mutfg);pointer-events:none}
-.adm-search input{width:100%;height:38px;padding:0 64px 0 36px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;transition:border-color .2s,box-shadow .25s}
+.adm-search input{width:100%;height:38px;padding:0 64px 0 36px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;transition:border-color .2s,box-shadow .2s}
 .adm-search input::placeholder{color:var(--mutfg)}
 .adm-search input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 18%,transparent)}
 .adm-search .r{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:4px;align-items:center}
-.adm-hist{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:40;padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);box-shadow:0 22px 50px -14px rgba(0,0,0,.45)}
+.adm-hist{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:40;padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);box-shadow:0 18px 40px -14px rgba(0,0,0,.45)}
 .adm-hist p{margin:4px 8px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mutfg);display:flex;justify-content:space-between}
 .adm-hist button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 10px;border:0;border-radius:8px;background:transparent;font-size:13px;text-align:left}
 .adm-hist button:hover{background:var(--mut)}
+.adm-filters{padding:14px 16px;margin-bottom:12px;display:grid;gap:10px}
 .adm-chips{display:flex;gap:6px;flex-wrap:wrap}
-.adm-chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--bd);border-radius:999px;background:var(--card);color:var(--fg);font-size:12.5px;font-weight:600;transition:all .25s var(--ease)}
+.adm-chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--bd);border-radius:999px;background:var(--card);color:var(--fg);font-size:12.5px;font-weight:600;transition:background-color .18s,color .18s,border-color .18s}
 .adm-chip:hover{border-color:color-mix(in srgb,var(--pri) 55%,var(--bd))}
 .adm-chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .adm-chip.tok{background:color-mix(in srgb,var(--pri) 14%,var(--card));border-color:color-mix(in srgb,var(--pri) 45%,var(--bd));font-family:ui-monospace,Menlo,monospace;font-size:12px;height:28px;padding:0 6px 0 10px}
-.adm-chip.tok svg{opacity:.7}
 .adm-chip.sw{padding:0;width:34px;justify-content:center;border-width:2px}
 .adm-chip em{font-style:normal;font-size:11px;opacity:.7;font-variant-numeric:tabular-nums}
 .adm-chip.sm2{height:26px;padding:0 10px;font-size:11.5px}
 .adm-select{height:38px;padding:0 28px 0 11px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;font-size:13px;font-weight:600;max-width:100%}
 .adm-segbtn{display:inline-flex;padding:3px;border:1px solid var(--bd);border-radius:11px;background:var(--card);gap:2px}
-.adm-segbtn button{display:grid;place-items:center;width:32px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--mutfg);transition:all .25s var(--ease)}
+.adm-segbtn button{display:grid;place-items:center;width:32px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--mutfg);transition:background-color .18s,color .18s}
 .adm-segbtn button.on{background:var(--fg);color:var(--bg)}
 .adm-meta{margin:0 0 10px;color:var(--mutfg);font-size:12.5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .adm-meta b{color:var(--fg);font-variant-numeric:tabular-nums}
@@ -675,32 +831,31 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .adm-table th{position:relative;text-align:left;padding:11px 12px;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mutfg);background:var(--mut);border-bottom:1px solid var(--bd);white-space:nowrap;user-select:none}
 .adm-table th.s{cursor:pointer}.adm-table th.s:hover{color:var(--fg)}
-.adm-table th svg{vertical-align:-2px;margin-left:3px;transition:transform .3s var(--spring)}
+.adm-table th svg{vertical-align:-2px;margin-left:3px;transition:transform .25s var(--ease)}
 .adm-table th svg.up{transform:rotate(180deg)}
 .adm-table td{padding:12px;border-bottom:1px solid var(--bd);vertical-align:middle}
 .adm-table.compact td{padding:7px 12px}
 .adm-table tr:last-child td{border-bottom:0}
-.adm-tr{animation:adm-rowin .5s var(--ease) both;animation-delay:calc(var(--i,0) * 28ms);transition:background .2s}
-@keyframes adm-rowin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.adm-tr{animation:adm-rowin .45s var(--ease) both;animation-delay:calc(var(--i,0) * 24ms);transition:background-color .15s}
+@keyframes adm-rowin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .adm-tr:hover{background:var(--mut)}
 .adm-tr.sel{background:color-mix(in srgb,var(--pri) 9%,var(--card))}
 .adm-tr.cur td:first-child{box-shadow:inset 3px 0 0 var(--pri)}
-.adm-tr.flash td{animation:adm-flash 1.6s ease-out}
+.adm-tr.flash td{animation:adm-flash 1.4s ease-out}
 @keyframes adm-flash{0%{background:color-mix(in srgb,var(--pri) 30%,transparent)}100%{background:transparent}}
 .adm-tr.busy{opacity:.55;pointer-events:none}
 .adm-check{width:16px;height:16px;accent-color:var(--pri);cursor:pointer}
 .adm-shop{display:flex;align-items:center;gap:11px;min-width:0}
 .adm-table .adm-shop{min-width:170px}
-.adm-avatar{width:36px;height:36px;border-radius:11px;flex:none;display:grid;place-items:center;font-size:12.5px;font-weight:800;color:#fff;background:linear-gradient(145deg,hsl(var(--h) 70% 44%),hsl(calc(var(--h) + 40) 70% 34%));transition:transform .35s var(--spring)}
+.adm-avatar{width:36px;height:36px;border-radius:11px;flex:none;display:grid;place-items:center;font-size:12.5px;font-weight:800;color:#fff;background:linear-gradient(145deg,hsl(var(--h) 70% 44%),hsl(calc(var(--h) + 40) 70% 34%))}
 .adm-avatar.adm-mini{width:26px;height:26px;border-radius:8px;font-size:10px}
-.adm-tr:hover .adm-avatar,.adm-ocard:hover .adm-avatar{transform:rotate(-6deg) scale(1.08)}
 .adm-shop .t{min-width:0}
 .adm-namebtn{border:0;background:transparent;padding:0;font-weight:700;font-size:13.5px;text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;color:var(--fg)}
 .adm-table .adm-namebtn{max-width:190px}
 .adm-namebtn:hover{color:var(--pri);text-decoration:underline;text-underline-offset:3px}
 .adm-shop small{display:block;color:var(--mutfg);font-size:11.5px}
 .adm-phone{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums;color:var(--mutfg);max-width:100%}
-.adm-copy{border:0;background:transparent;padding:3px;border-radius:6px;color:var(--mutfg);opacity:0;transition:opacity .2s,color .2s}
+.adm-copy{border:0;background:transparent;padding:3px;border-radius:6px;color:var(--mutfg);opacity:0;transition:opacity .15s,color .15s}
 .adm-tr:hover .adm-copy,.adm-copy:focus-visible,.adm-copy.done,.adm-ocard .adm-copy,.adm-dh .adm-copy{opacity:1}
 .adm-copy.done{color:var(--ok)}
 .adm-badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap}
@@ -712,7 +867,7 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-until{display:grid;gap:5px;min-width:112px}
 .adm-until small{color:var(--mutfg);font-size:11.5px}
 .adm-meter{height:5px;border-radius:3px;background:var(--mut);box-shadow:inset 0 0 0 1px var(--bd);overflow:hidden}
-.adm-meter i{display:block;height:100%;border-radius:3px;background:var(--c,var(--ok));transform-origin:0 50%;animation:adm-growx .9s var(--ease) both;animation-delay:.2s}
+.adm-meter i{display:block;height:100%;border-radius:3px;background:var(--c,var(--ok));transform-origin:0 50%;animation:adm-growx .8s var(--ease) both;animation-delay:.15s}
 .adm-num{font-variant-numeric:tabular-nums;font-weight:700}
 .adm-out{display:grid;gap:5px;min-width:100px}
 .adm-actions{display:flex;align-items:center;gap:6px;justify-content:flex-end}
@@ -724,12 +879,11 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-linkbtn:disabled{color:var(--mutfg)}
 .adm-lang{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:5px;background:var(--mut);border:1px solid var(--bd);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mutfg)}
 
-/* cards view: layouts grid / rail / wall, with mouse tilt */
+/* cards view: grid / rail / wall. Idle cards carry no 3D transform; the tilt is applied on hover from script */
 .adm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));gap:14px}
 .adm-cards.lay-rail{grid-template-columns:minmax(0,1fr);max-width:780px;margin-inline:auto}
 .adm-cards.lay-wall{grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:10px}
-.adm-ocard{padding:16px;display:grid;gap:12px;min-width:0;animation:adm-fadein .55s var(--ease) both;animation-delay:calc(var(--i,0) * 40ms);transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translateY(var(--ty,0px));transition:transform .25s var(--ease),border-color .2s,box-shadow .3s}
-.adm-ocard:hover{--ty:-3px}
+.adm-ocard{padding:16px;display:grid;gap:12px;min-width:0;animation:adm-fadein .45s var(--ease) both;animation-delay:calc(var(--i,0) * 35ms);transition:transform .22s var(--ease),border-color .2s,box-shadow .25s}
 .adm-ocard.sel{border-color:var(--pri);box-shadow:0 0 0 1px var(--pri),var(--shadow)}
 .adm-ocard.cur{outline:2px solid var(--pri);outline-offset:2px}
 .adm-ocard.adm-flashcard{border-color:var(--pri);box-shadow:0 0 0 3px color-mix(in srgb,var(--pri) 35%,transparent),var(--shadow)}
@@ -747,14 +901,14 @@ button.adm-tag:hover{filter:brightness(1.15)}
 /* pager */
 .adm-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px 4px 0;color:var(--mutfg);font-size:12.5px}
 .adm-pages{display:flex;gap:4px;align-items:center}
-.adm-pages button{min-width:34px;height:34px;padding:0 8px;border:1px solid var(--bd);border-radius:9px;background:var(--card);color:var(--fg);font-weight:600;transition:all .2s var(--ease)}
+.adm-pages button{min-width:34px;height:34px;padding:0 8px;border:1px solid var(--bd);border-radius:9px;background:var(--card);color:var(--fg);font-weight:600;transition:background-color .15s,color .15s}
 .adm-pages button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .adm-pages button:disabled{opacity:.4}
 .adm-more{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 0 0;color:var(--mutfg);font-size:12.5px}
 
 /* bulk bar */
-.adm-bulk{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 24px);padding:10px 12px 12px;border-radius:16px;background:var(--fg);color:var(--bg);box-shadow:0 24px 60px -16px rgba(0,0,0,.55);transform:translateX(-50%);animation:adm-bulkin .5s var(--spring) both}
-@keyframes adm-bulkin{from{opacity:0;transform:translate(-50%,30px) scale(.94)}to{opacity:1;transform:translate(-50%,0)}}
+.adm-bulk{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 24px);padding:10px 12px 12px;border-radius:16px;background:var(--fg);color:var(--bg);box-shadow:0 18px 44px -14px rgba(0,0,0,.55);transform:translateX(-50%);animation:adm-bulkin .4s var(--spring) both}
+@keyframes adm-bulkin{from{opacity:0;transform:translate(-50%,26px) scale(.95)}to{opacity:1;transform:translate(-50%,0)}}
 .adm-bulk .adm-btn{background:transparent;color:var(--bg);border-color:color-mix(in srgb,var(--bg) 32%,transparent)}
 .adm-bulk .adm-btn:hover:not(:disabled){background:color-mix(in srgb,var(--bg) 18%,transparent);border-color:color-mix(in srgb,var(--bg) 45%,transparent)}
 .adm-bulk b{font-variant-numeric:tabular-nums;padding:0 8px}
@@ -762,19 +916,19 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-bulkprog i{display:block;height:100%;background:var(--bg);transition:width .3s var(--ease)}
 
 /* menu (rendered in a portal on <body>, so it always opens at the button) */
-.adm-menu{position:fixed;z-index:120;width:208px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 24px);overflow:auto;padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg);box-shadow:0 22px 50px -14px rgba(0,0,0,.5);animation:adm-pop .22s var(--spring) both;transform-origin:top right}
-@keyframes adm-pop{from{opacity:0;transform:scale(.92) translateY(-4px)}to{opacity:1;transform:none}}
+.adm-menu{position:fixed;z-index:120;width:208px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 24px);overflow:auto;padding:6px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg);box-shadow:0 18px 40px -14px rgba(0,0,0,.5);animation:adm-pop .18s var(--ease) both;transform-origin:top right}
+@keyframes adm-pop{from{opacity:0;transform:scale(.94) translateY(-4px)}to{opacity:1;transform:none}}
 .adm-menu button{display:flex;align-items:center;gap:9px;width:100%;height:36px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--fg);font-size:13px;font-weight:600;text-align:left}
 .adm-menu button:hover:not(:disabled){background:var(--mut)}
 .adm-menu button.danger{color:var(--bad)}
 .adm-menu button:disabled{opacity:.45}
 .adm-menu hr{border:0;border-top:1px solid var(--bd);margin:5px 4px}
 
-/* overlays: toasts 130 > menu 120 > palette 90 > modals 70 > drawer 51 > page */
-.adm-overlay{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(8,12,28,.55);animation:adm-fade .25s ease both}
+/* overlays: intro 200 > toasts 130 > menu 120 > palette 90 > modals 70 > drawer 51 > page */
+.adm-overlay{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(8,12,28,.55);animation:adm-fade .2s ease both}
 @keyframes adm-fade{from{opacity:0}to{opacity:1}}
-.adm-modal{width:100%;max-height:calc(100dvh - 32px);overflow:auto;padding:22px;border:1px solid var(--bd);border-radius:20px;background:var(--card);color:var(--fg);box-shadow:0 40px 90px -24px rgba(0,0,0,.6);animation:adm-modal .45s var(--spring) both}
-@keyframes adm-modal{from{opacity:0;transform:translateY(24px) scale(.94)}to{opacity:1;transform:none}}
+.adm-modal{width:100%;max-height:calc(100dvh - 32px);overflow:auto;padding:22px;border:1px solid var(--bd);border-radius:20px;background:var(--card);color:var(--fg);box-shadow:0 30px 70px -24px rgba(0,0,0,.6);animation:adm-modal .35s var(--ease) both}
+@keyframes adm-modal{from{opacity:0;transform:translateY(20px) scale(.96)}to{opacity:1;transform:none}}
 .adm-mh{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}
 .adm-mh h2{margin:0;font-size:18px;font-weight:800;min-width:0;overflow-wrap:anywhere}
 .adm-field{display:grid;gap:6px;margin-bottom:14px}
@@ -782,7 +936,7 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-field label small{font-weight:500;color:var(--mutfg)}
 .adm-field .help{font-size:11.5px;color:var(--mutfg)}
 .adm-field .err{font-size:11.5px;color:var(--bad)}
-.adm-input{width:100%;height:40px;padding:0 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--fg);font:inherit;transition:border-color .2s,box-shadow .25s}
+.adm-input{width:100%;height:40px;padding:0 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--fg);font:inherit;transition:border-color .2s,box-shadow .2s}
 .adm-input::placeholder{color:var(--mutfg)}
 .adm-input:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 18%,transparent)}
 .adm-input.bad{border-color:var(--bad)}
@@ -802,8 +956,8 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-tpl{padding:12px;border:1px solid var(--bd);border-radius:12px;margin-bottom:10px;background:var(--mut)}
 
 /* drawer */
-.adm-drawerov{position:fixed;inset:0;z-index:50;background:rgba(8,12,28,.5);animation:adm-fade .25s both}
-.adm-drawer{position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);z-index:51;display:flex;flex-direction:column;background:var(--card);color:var(--fg);border-left:1px solid var(--bd);box-shadow:-30px 0 80px -30px rgba(0,0,0,.55);animation:adm-slide .5s var(--ease) both}
+.adm-drawerov{position:fixed;inset:0;z-index:50;background:rgba(8,12,28,.5);animation:adm-fade .2s both}
+.adm-drawer{position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);z-index:51;display:flex;flex-direction:column;background:var(--card);color:var(--fg);border-left:1px solid var(--bd);box-shadow:-24px 0 60px -30px rgba(0,0,0,.55);animation:adm-slide .4s var(--ease) both}
 @keyframes adm-slide{from{transform:translateX(100%)}to{transform:none}}
 .adm-dh{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--bd)}
 .adm-dh .t{flex:1;min-width:0}
@@ -813,21 +967,21 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-tabs{display:flex;gap:4px;padding:6px 18px 0;border-bottom:1px solid var(--bd);position:relative;overflow:hidden}
 .adm-tabs button{position:relative;border:0;background:transparent;padding:9px 12px 12px;font-weight:700;font-size:13px;color:var(--mutfg)}
 .adm-tabs button.on{color:var(--fg)}
-.adm-tabs button.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:var(--pri);animation:adm-growx .35s var(--ease)}
+.adm-tabs button.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:var(--pri);animation:adm-growx .3s var(--ease)}
 .adm-db{flex:1;overflow:auto;overflow-x:hidden;padding:18px 18px 28px;min-width:0}
-.adm-db > *{animation:adm-in .5s var(--ease) both;animation-delay:calc(var(--i,0) * 50ms)}
+.adm-db > *{animation:adm-in .4s var(--ease) both;animation-delay:calc(var(--i,0) * 40ms)}
 .adm-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,110px),1fr));gap:10px;margin-bottom:16px}
 .adm-stat{padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--mut);min-width:0}
 .adm-stat small{display:block;color:var(--mutfg);font-size:11px;font-weight:600}
 .adm-stat b{font-size:16px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .adm-timeline{padding:14px;border:1px solid var(--bd);border-radius:14px;margin-bottom:16px;background:var(--card)}
 .adm-track{position:relative;height:8px;border-radius:5px;background:var(--mut);box-shadow:inset 0 0 0 1px var(--bd);margin:14px 0 10px}
-.adm-track i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--c,var(--ok));transform-origin:0 50%;animation:adm-growx 1.1s var(--ease) .15s both}
-.adm-track u{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--card);border:3px solid var(--c,var(--ok));animation:adm-in .6s var(--spring) .9s both}
+.adm-track i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--c,var(--ok));transform-origin:0 50%;animation:adm-growx 1s var(--ease) .1s both}
+.adm-track u{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--card);border:3px solid var(--c,var(--ok));animation:adm-in .5s var(--spring) .8s both}
 .adm-tl{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--mutfg)}
 .adm-sec{margin:0 0 8px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mutfg)}
 .adm-cust{display:grid;gap:8px}
-.adm-crow{padding:11px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--card);animation:adm-rowin .45s var(--ease) both;animation-delay:calc(var(--i,0) * 30ms);transition:border-color .2s,transform .25s var(--spring)}
+.adm-crow{padding:11px 12px;border:1px solid var(--bd);border-radius:12px;background:var(--card);animation:adm-rowin .4s var(--ease) both;animation-delay:calc(var(--i,0) * 25ms);transition:border-color .2s,transform .2s var(--ease)}
 .adm-crow:hover{border-color:color-mix(in srgb,var(--pri) 50%,var(--bd));transform:translateX(2px)}
 .adm-crow .l{display:flex;align-items:center;justify-content:space-between;gap:10px 12px;flex-wrap:wrap}
 .adm-crow p{margin:0}.adm-crow .m{color:var(--mutfg);font-size:11.5px}
@@ -835,8 +989,8 @@ button.adm-tag:hover{filter:brightness(1.15)}
 
 /* toasts */
 .adm-toasts{position:fixed;right:16px;bottom:16px;z-index:130;display:grid;gap:10px;width:min(380px,calc(100vw - 32px))}
-.adm-toast{position:relative;display:flex;align-items:flex-start;gap:10px;padding:12px 12px 14px;border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--fg);box-shadow:0 20px 44px -16px rgba(0,0,0,.5);overflow:hidden;animation:adm-toast .5s var(--spring) both}
-@keyframes adm-toast{from{opacity:0;transform:translateX(40px) scale(.95)}to{opacity:1;transform:none}}
+.adm-toast{position:relative;display:flex;align-items:flex-start;gap:10px;padding:12px 12px 14px;border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--fg);box-shadow:0 16px 36px -16px rgba(0,0,0,.5);overflow:hidden;animation:adm-toast .4s var(--ease) both}
+@keyframes adm-toast{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:none}}
 .adm-toast .ic{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:var(--prifg)}
 .adm-t-success .ic{background:var(--ok)}.adm-t-error .ic{background:#dc2626;color:#fff}.adm-t-info .ic{background:var(--pri)}
 .adm-toast b{display:block;font-size:13px;overflow-wrap:anywhere}.adm-toast p{margin:2px 0 0;font-size:12px;color:var(--mutfg);overflow-wrap:anywhere}
@@ -848,7 +1002,7 @@ button.adm-tag:hover{filter:brightness(1.15)}
 
 /* palette */
 .adm-overlay.adm-palov{align-items:flex-start;padding-top:12vh;z-index:90}
-.adm-pal{width:min(600px,100%);overflow:hidden;border:1px solid var(--bd);border-radius:18px;background:var(--card);color:var(--fg);box-shadow:0 40px 90px -24px rgba(0,0,0,.65);animation:adm-modal .35s var(--spring) both}
+.adm-pal{width:min(600px,100%);overflow:hidden;border:1px solid var(--bd);border-radius:18px;background:var(--card);color:var(--fg);box-shadow:0 30px 70px -24px rgba(0,0,0,.65);animation:adm-modal .3s var(--ease) both}
 .adm-pal input{width:100%;height:54px;padding:0 18px;border:0;border-bottom:1px solid var(--bd);background:transparent;color:var(--fg);font:inherit;font-size:15px}
 .adm-pal input::placeholder{color:var(--mutfg)}
 .adm-pal input:focus{outline:0}
@@ -860,7 +1014,7 @@ button.adm-tag:hover{filter:brightness(1.15)}
 
 /* activity */
 .adm-log{display:grid;gap:0}
-.adm-log div{display:flex;gap:12px;padding:11px 0;border-bottom:1px dashed var(--bd);animation:adm-rowin .4s var(--ease) both;animation-delay:calc(var(--i,0) * 25ms)}
+.adm-log div{display:flex;gap:12px;padding:11px 0;border-bottom:1px dashed var(--bd);animation:adm-rowin .35s var(--ease) both;animation-delay:calc(var(--i,0) * 20ms)}
 .adm-log i{flex:none;width:9px;height:9px;margin-top:5px;border-radius:50%;background:var(--ok)}
 .adm-log i.bad{background:var(--bad)}
 .adm-log small{display:block;color:var(--mutfg);font-size:11.5px}
@@ -870,14 +1024,13 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-skel{border-radius:10px;background:linear-gradient(100deg,var(--mut) 30%,color-mix(in srgb,var(--bd) 70%,var(--mut)) 50%,var(--mut) 70%);background-size:220% 100%;animation:adm-shimmer 1.4s linear infinite}
 @keyframes adm-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
 .adm-empty{display:grid;place-items:center;gap:10px;padding:56px 16px;text-align:center;color:var(--mutfg)}
-.adm-empty svg{color:var(--pri);animation:adm-float 4s ease-in-out infinite}
-@keyframes adm-float{50%{transform:translateY(-8px)}}
-.adm-err{margin-bottom:14px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--bad) 12%,var(--card));border:1px solid color-mix(in srgb,var(--bad) 35%,transparent);color:var(--bad);font-size:13px;display:flex;align-items:center;gap:10px;animation:adm-in .4s var(--ease)}
+.adm-empty svg{color:var(--pri)}
+.adm-err{margin-bottom:14px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--bad) 12%,var(--card));border:1px solid color-mix(in srgb,var(--bad) 35%,transparent);color:var(--bad);font-size:13px;display:flex;align-items:center;gap:10px;animation:adm-in .35s var(--ease)}
 
 /* login */
 .adm-login{position:relative;min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:var(--bg);color:var(--fg);overflow:hidden}
 .adm-logintheme{position:fixed;top:14px;right:14px;z-index:5}
-.adm-lcard{position:relative;z-index:1;width:100%;max-width:392px;padding:32px;border:1px solid var(--bd);border-radius:24px;background:var(--card);box-shadow:0 40px 90px -30px rgba(0,0,0,.5);animation:adm-modal .7s var(--spring) both}
+.adm-lcard{position:relative;z-index:1;width:100%;max-width:392px;padding:32px;border:1px solid var(--bd);border-radius:24px;background:var(--card);box-shadow:0 30px 70px -30px rgba(0,0,0,.5);animation:adm-modal .6s var(--ease) both}
 .adm-lock{position:relative;width:54px;height:54px;margin-bottom:20px;border-radius:16px;display:grid;place-items:center;background:color-mix(in srgb,var(--pri) 14%,transparent);color:var(--pri)}
 .adm-lock::after{content:"";position:absolute;inset:0;border-radius:16px;border:2px solid var(--pri);animation:adm-pulse 2.4s ease-out infinite}
 .adm-lcard h1{margin:0 0 4px;font-size:22px;font-weight:800}
@@ -885,14 +1038,15 @@ button.adm-tag:hover{filter:brightness(1.15)}
 .adm-lcard .adm-pw .adm-input{padding-right:44px}
 .adm-lcard .adm-pw button{position:absolute;right:6px;top:5px;width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--mutfg)}
 .adm-notice{margin-bottom:14px;padding:10px 12px;border-radius:10px;font-size:12.5px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
-.adm-back{display:inline-flex;align-items:center;gap:8px;margin-bottom:18px;color:var(--mutfg);font-size:13px;text-decoration:none;transition:color .2s,transform .25s var(--spring)}
-.adm-back:hover{color:var(--pri);transform:translateX(-3px)}
+.adm-back-link{display:inline-flex;align-items:center;gap:8px;margin-bottom:18px;color:var(--mutfg);font-size:13px;text-decoration:none;transition:color .2s,transform .2s var(--ease)}
+.adm-back-link:hover{color:var(--pri);transform:translateX(-3px)}
 
 /* tablet and phone */
+@media (max-width:1000px){.adm-snap{grid-template-columns:1.1fr 1fr}.adm-iso{display:none}}
 @media (max-width:900px){.adm-duo{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:760px){
-  .adm-wrap{padding:16px 12px 130px}
-  .adm-title{font-size:23px}
+  .adm-wrap{padding:14px 12px 130px}
+  .adm-title{font-size:22px}
   .adm-head{align-items:stretch}
   .adm-tools{width:100%}
   .adm-tools .adm-btn:not(.sq){flex:1 1 calc(50% - 8px)}
@@ -907,6 +1061,12 @@ button.adm-tag:hover{filter:brightness(1.15)}
   .adm-pager{justify-content:center}
   .adm-attn,.adm-panel{padding:14px}
   .adm-nav{margin:0 -12px 12px;padding:8px 12px}
+  .adm-open{height:170vh}
+  .adm-snap{grid-template-columns:1fr;gap:14px;overflow:auto}
+  .adm-lists .adm-lst2{display:none}
+  .adm-door{align-items:center}
+  .adm-door.l{top:0;bottom:50%;left:0;right:0;width:auto;justify-content:center;border-radius:var(--rad) var(--rad) 0 0;transform-origin:50% 0;transform:rotateX(calc(var(--open) * 112deg))}
+  .adm-door.r{top:50%;bottom:0;left:0;right:0;width:auto;justify-content:center;border-radius:0 0 var(--rad) var(--rad);transform-origin:50% 100%;transform:rotateX(calc(var(--open) * -112deg))}
 }
 @media (max-width:480px){
   .adm-dh{flex-wrap:wrap}
@@ -917,17 +1077,27 @@ button.adm-tag:hover{filter:brightness(1.15)}
   .adm-mf{flex-direction:column-reverse}
   .adm-kpi .val{font-size:22px}
 }
+/* calm mode and reduced motion: the doors are shown already open */
+.adm-root[data-calm] .adm-open{--open:1;height:auto}
+.adm-root[data-calm] .adm-stage{position:relative;height:auto}
+.adm-root[data-calm] .adm-door,.adm-root[data-calm] .adm-hint{display:none}
+.adm-root[data-calm] .adm-back{position:relative;opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){
   .adm-root *,.adm-root *::before,.adm-root *::after,.adm-pt *,.adm-pt *::before,.adm-pt *::after{animation-duration:.01ms !important;animation-delay:0ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
   .adm-toastbar{animation-duration:var(--ttl) !important;animation-iteration-count:1 !important}
   .adm-aurora{display:none}
   .adm-roll,.adm-ocard{transform:none !important;opacity:1 !important}
+  .adm-open{--open:1;height:auto}
+  .adm-stage{position:relative;height:auto}
+  .adm-door,.adm-hint{display:none}
+  .adm-back{position:relative;opacity:1;transform:none}
 }
 @media print{
-  .adm-aurora,.adm-tools,.adm-nav,.adm-bulk,.adm-toasts,.adm-fab,.adm-prog,.adm-toolbar,.adm-chips,.adm-pager,.adm-more,.adm-actions,.adm-offline{display:none !important}
+  .adm-aurora,.adm-tools,.adm-nav,.adm-bulk,.adm-toasts,.adm-fab,.adm-prog,.adm-toolbar,.adm-chips,.adm-pager,.adm-more,.adm-actions,.adm-offline,.adm-filters{display:none !important}
   .adm-root{background:#fff;color:#000}
   .adm-roll,.adm-ocard{transform:none !important;opacity:1 !important}
   .adm-card{box-shadow:none}
+  .adm-open{--open:1;height:auto}.adm-stage{position:relative;height:auto}.adm-door,.adm-hint{display:none}.adm-back{position:relative;opacity:1;transform:none}
 }
 `;
 
@@ -941,7 +1111,7 @@ const FIX_CSS = `
 `;
 
 // ---------------------------------------------------------------------------
-// Reusable UI pieces
+// Small UI pieces
 // ---------------------------------------------------------------------------
 
 function StatusBadge({ bucket }: { bucket: Bucket }) {
@@ -993,6 +1163,22 @@ function Spark({ data }: { data: number[] }) {
       <path className="a" d={`M0,26 L${pts.join(" L")} L100,26 Z`} />
       <path className="l" d={`M${pts.join(" L")}`} />
     </svg>
+  );
+}
+
+// spinning 3D cube (pure CSS, compositor-only)
+function Cube({ size = 84, mini = false }: { size?: number; mini?: boolean }) {
+  const icons = [Users, TrendingUp, Bell, MessageCircle, Zap, Layers];
+  return (
+    <span className={`adm-cubewrap ${mini ? "mini" : ""}`} style={{ ["--s" as string]: `${size}px` } as React.CSSProperties} aria-hidden>
+      <span className="adm-cube">
+        {icons.map((Ic, i) => (
+          <i key={i}>
+            <Ic size={Math.round(size * 0.42)} />
+          </i>
+        ))}
+      </span>
+    </span>
   );
 }
 
@@ -1137,7 +1323,7 @@ function Toasts({ items, dismiss }: { items: ToastItem[]; dismiss: (id: number) 
 function LastUpdated({ at, refreshing, auto, sec }: { at: number | null; refreshing: boolean; auto: boolean; sec: number }) {
   const [, tick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => tick((n) => n + 1), 1000);
+    const id = setInterval(() => tick((n) => n + 1), 5000);
     return () => clearInterval(id);
   }, []);
   return (
@@ -1164,7 +1350,7 @@ function ThemeToggle({ className = "adm-btn sq adm-themebtn" }: { className?: st
   );
 }
 
-// sticky section nav with scroll-spy
+// sticky section nav with scroll-spy (reads positions only on animation frames, bails out when nothing changed)
 function SectionNav({ items }: { items: { id: string; label: string }[] }) {
   const [active, setActive] = useState(items[0]?.id ?? "");
   useEffect(() => {
@@ -1228,11 +1414,172 @@ function Seg<T extends string | number | boolean>({ value, options, onChange }: 
 }
 
 // ---------------------------------------------------------------------------
+// Intro: 3D cube, orbit rings, live numbers, and doors that swing open into the dashboard
+// ---------------------------------------------------------------------------
+
+function Intro({ ready, stats, accent, onEnter }: { ready: boolean; stats: { shops: number; customers: number; outstanding: number }; accent: Accent; onEnter: () => void }) {
+  const { theme } = useTheme();
+  const [minDone, setMinDone] = useState(false);
+  const [out, setOut] = useState(false);
+  const [pct, setPct] = useState(0.06);
+  const done = useRef(false);
+  useScrollLock();
+
+  useEffect(() => {
+    const a = setTimeout(() => setPct(0.88), 40);
+    const b = setTimeout(() => setMinDone(true), 2300);
+    return () => {
+      clearTimeout(a);
+      clearTimeout(b);
+    };
+  }, []);
+  const ok = ready && minDone;
+  useEffect(() => {
+    if (ok) setPct(1);
+  }, [ok]);
+
+  const go = useCallback(() => {
+    if (done.current) return;
+    done.current = true;
+    setOut(true);
+    setTimeout(onEnter, 1000);
+  }, [onEnter]);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || (ok && (e.key === "Enter" || e.key === " "))) {
+        e.preventDefault();
+        go();
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [ok, go]);
+
+  return createPortal(
+    <div className="adm-pt" data-theme={theme} data-accent={accent}>
+      <div className={`adm-intro ${out ? "out" : ""}`} role="dialog" aria-label="Welcome to Shop Brain">
+        <div className="adm-idoor l" />
+        <div className="adm-idoor r" />
+        <div className="adm-iface">
+          <div className="adm-stage3d">
+            <span className="adm-orbit a" />
+            <span className="adm-orbit b" />
+            <Cube size={84} />
+          </div>
+          <h1 className="adm-ititle" aria-label="Shop Brain">
+            {"Shop Brain".split("").map((c, i) => (
+              <span key={i} className="adm-letter" style={{ ["--d" as string]: i } as React.CSSProperties} aria-hidden>
+                {c === " " ? "\u00A0" : c}
+              </span>
+            ))}
+          </h1>
+          <p className="adm-isub">Admin dashboard</p>
+          <div className="adm-iprog">
+            <i style={{ transform: `scaleX(${pct})` }} />
+          </div>
+          <div className={`adm-istats ${ready ? "on" : ""}`}>
+            <div>
+              <b>{ready ? <CountUp value={stats.shops} /> : "–"}</b>
+              <small>shops</small>
+            </div>
+            <div>
+              <b>{ready ? <CountUp value={stats.customers} /> : "–"}</b>
+              <small>customers</small>
+            </div>
+            <div>
+              <b>{ready ? <CountUp value={stats.outstanding} /> : "–"}</b>
+              <small>Frw outstanding</small>
+            </div>
+          </div>
+          <button className="adm-btn pri adm-ienter" disabled={!ok} onClick={go}>
+            {ok ? "Enter dashboard" : "Loading your shops…"} <ChevronRight size={16} />
+          </button>
+        </div>
+        <button className="adm-btn sm ghost adm-iskip" onClick={go}>
+          Skip
+        </button>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Business snapshot: the two doors open as you scroll through this section
+// ---------------------------------------------------------------------------
+
+interface SnapData { outstanding: number; activeRate: number; avgCust: string; renewals: number; expired: number; topDebt: EOwner[]; next: EOwner[] }
+
+const Snapshot = React.memo(function Snapshot({ s, onOpen }: { s: SnapData; onOpen: (phone: string, tab: DrawerTab) => void }) {
+  return (
+    <section className="adm-open" data-open id="sec-snapshot" aria-label="Business snapshot">
+      <div className="adm-stage">
+        <div className="adm-back">
+          <div className="adm-snap">
+            <div>
+              <h4>At a glance</h4>
+              <div className="adm-tiles">
+                <div className="adm-tile"><small>Outstanding</small><b>{money(s.outstanding)}</b></div>
+                <div className="adm-tile"><small>Active rate</small><b>{s.activeRate}%</b></div>
+                <div className="adm-tile"><small>Need renewal</small><b>{s.renewals}</b></div>
+                <div className="adm-tile"><small>Customers / shop</small><b>{s.avgCust}</b></div>
+              </div>
+            </div>
+            <div className="adm-lists">
+              <div>
+                <h4>Biggest balances</h4>
+                {s.topDebt.length === 0 ? (
+                  <p style={{ margin: 0, color: "var(--mutfg)" }}>No balances yet.</p>
+                ) : (
+                  s.topDebt.map((o) => (
+                    <button key={o.phone} className="adm-li" onClick={() => onOpen(o.phone, "overview")}>
+                      <span>{label(o)}</span>
+                      <small>{money(o.totalOutstanding)}</small>
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="adm-lst2">
+                <h4>Next to expire</h4>
+                {s.next.length === 0 ? (
+                  <p style={{ margin: 0, color: "var(--mutfg)" }}>Nothing expiring soon.</p>
+                ) : (
+                  s.next.map((o) => (
+                    <button key={o.phone} className="adm-li" onClick={() => onOpen(o.phone, "overview")}>
+                      <span>{label(o)}</span>
+                      <small>{relDays(o.daysLeft)}</small>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="adm-iso" aria-hidden>
+              <div className="adm-isoin">
+                <i><Users size={26} /></i>
+                <i><TrendingUp size={26} /></i>
+                <i><Zap size={26} /></i>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="adm-door l" aria-hidden>
+          <span>Business</span>
+        </div>
+        <div className="adm-door r" aria-hidden>
+          <span>snapshot</span>
+        </div>
+        <div className="adm-hint" aria-hidden>Scroll to open</div>
+      </div>
+    </section>
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Insight widgets
 // ---------------------------------------------------------------------------
 
 function Kpi({ i, label: text, value, suffix, hint, icon, color, on, onClick, spark }: { i: number; label: string; value: number; suffix?: string; hint?: string; icon: React.ReactNode; color?: string; on?: boolean; onClick?: () => void; spark?: number[] }) {
-  const v = useCountUp(value);
   const Tag = onClick ? "button" : "div";
   return (
     <Tag
@@ -1246,7 +1593,7 @@ function Kpi({ i, label: text, value, suffix, hint, icon, color, on, onClick, sp
         <span className="ico">{icon}</span>
       </div>
       <div className="val">
-        {v.toLocaleString()}
+        <CountUp value={value} />
         {suffix && <small>{suffix}</small>}
       </div>
       {hint && <div className="hint">{hint}</div>}
@@ -1254,6 +1601,27 @@ function Kpi({ i, label: text, value, suffix, hint, icon, color, on, onClick, sp
     </Tag>
   );
 }
+
+const KpiRow = React.memo(function KpiRow({ loading, counts, total, customers, outstanding, weeks, cumulative, filter, onPick }: { loading: boolean; counts: Record<Bucket, number>; total: number; customers: number; outstanding: number; weeks: number[]; cumulative: number[]; filter: Bucket | "all"; onPick: (b: Bucket) => void }) {
+  const thisWeek = weeks[7];
+  return (
+    <div className="adm-kpis" id="sec-overview">
+      {loading && total === 0 ? (
+        [0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="adm-card adm-skel" style={{ height: 108 }} />)
+      ) : (
+        <>
+          <Roll><Kpi i={0} label="Total shops" value={total} icon={<Users size={15} />} hint={`${thisWeek} new this week`} spark={cumulative} /></Roll>
+          <Roll><Kpi i={1} label="Active" value={counts.active} icon={<CheckCircle2 size={15} />} color="var(--ok)" on={filter === "active"} onClick={() => onPick("active")} hint="Click to filter" /></Roll>
+          <Roll><Kpi i={2} label="Expiring soon" value={counts.expiring} icon={<Clock size={15} />} color="var(--amber)" on={filter === "expiring"} onClick={() => onPick("expiring")} hint="Needs a renewal" /></Roll>
+          <Roll><Kpi i={3} label="Expired" value={counts.expired} icon={<XCircle size={15} />} color="var(--bad)" on={filter === "expired"} onClick={() => onPick("expired")} hint="Access has ended" /></Roll>
+          <Roll><Kpi i={4} label="Customers (all shops)" value={customers} icon={<TrendingUp size={15} />} hint={total ? `${(customers / total).toFixed(1)} per shop` : undefined} /></Roll>
+          <Roll><Kpi i={5} label="Total outstanding" value={outstanding} suffix="Frw" icon={<Zap size={15} />} color="var(--viol)" hint="Owed to shops" /></Roll>
+          <Roll><Kpi i={6} label="New shops, 8 weeks" value={weeks.reduce((s, x) => s + x, 0)} icon={<UserPlus size={15} />} color="var(--ok)" hint={`${thisWeek} this week`} spark={weeks} /></Roll>
+        </>
+      )}
+    </div>
+  );
+});
 
 function Donut({ counts, total, filter, onPick }: { counts: Record<Bucket, number>; total: number; filter: Bucket | "all"; onPick: (b: Bucket) => void }) {
   const R = 44;
@@ -1267,7 +1635,6 @@ function Donut({ counts, total, filter, onPick }: { counts: Record<Bucket, numbe
     acc += len;
     return seg;
   });
-  const center = useCountUp(shown ? counts[shown.key] : total);
   return (
     <div className="adm-donutwrap">
       <svg className="adm-donut" viewBox="0 0 120 120" role="img" aria-label="Shops by status">
@@ -1294,7 +1661,7 @@ function Donut({ counts, total, filter, onPick }: { counts: Record<Bucket, numbe
           )}
         </g>
         <text x="60" y="61" fontSize="22">
-          {center}
+          {shown ? counts[shown.key] : total}
         </text>
         <text x="60" y="76" fontSize="8" style={{ fontWeight: 600, fill: "var(--mutfg)" }}>
           {shown ? shown.label : "shops"}
@@ -1314,7 +1681,7 @@ function Donut({ counts, total, filter, onPick }: { counts: Record<Bucket, numbe
 }
 
 // 3D ring of the top shops that slowly rotates; hover pauses it
-function Ring({ owners, still, onOpen }: { owners: EOwner[]; still: boolean; onOpen: (phone: string) => void }) {
+function Ring({ owners, still, onOpen }: { owners: EOwner[]; still: boolean; onOpen: (phone: string, tab: DrawerTab) => void }) {
   const n = owners.length;
   const [turn, setTurn] = useState(0);
   const [hold, setHold] = useState(false);
@@ -1337,7 +1704,7 @@ function Ring({ owners, still, onOpen }: { owners: EOwner[]; still: boolean; onO
               <b>{label(o)}</b>
               <StatusBadge bucket={o.bucket} />
               <span className="adm-num">{money(o.totalOutstanding)}</span>
-              <button className="adm-btn sm" tabIndex={i === active ? 0 : -1} onClick={() => onOpen(o.phone)}>
+              <button className="adm-btn sm" tabIndex={i === active ? 0 : -1} onClick={() => onOpen(o.phone, "overview")}>
                 <Eye size={13} /> Open
               </button>
             </div>
@@ -1360,6 +1727,252 @@ function Ring({ owners, still, onOpen }: { owners: EOwner[]; still: boolean; onO
     </div>
   );
 }
+
+// all analytics panels live in one memoised component, so typing in the search box never re-renders them
+interface InsightData {
+  total: number; counts: Record<Bucket, number>; weeks: number[]; topDebt: EOwner[]; spot: EOwner[]; topCust: EOwner[];
+  forecast: { w: number[]; overdue: number }; calendar: number[]; spread: { l: string; q: string; n: number }[];
+  langs: { rw: number; en: number; none: number }; quality: { label: string; q: string; n: number }[];
+  quick: { avgCust: string; avgOut: number; activeRate: number; owingRate: number; avgDays: number };
+}
+
+const Insights = React.memo(function Insights({ d, hidden, collapsed, filter, still, onToggle, onPick, onApply, onOpen }: { d: InsightData; hidden: string[]; collapsed: string[]; filter: Bucket | "all"; still: boolean; onToggle: (id: string) => void; onPick: (b: Bucket) => void; onApply: (q: string) => void; onOpen: (phone: string, tab: DrawerTab) => void }) {
+  const shown = (id: string) => !hidden.includes(id);
+  const thisWeek = d.weeks[7], lastWeek = d.weeks[6];
+  const dayLabel = (n: number) => new Date(Date.now() + n * DAY).getDate();
+  const weekdayOffset = (new Date().getDay() + 6) % 7;
+  const panel = (id: string, title: string, icon: React.ReactNode, body: React.ReactNode, i: number, cls = "") => {
+    if (!shown(id)) return null;
+    const col = collapsed.includes(id);
+    return (
+      <Roll key={id} className={cls}>
+        <div className={`adm-card adm-spot adm-panel adm-in ${col ? "adm-collapsed" : ""}`} style={{ ["--i" as string]: Math.min(i, 8) } as React.CSSProperties}>
+          <h3>
+            <span className="ico">{icon}</span> {title}
+            <button className="adm-btn sm icon ghost adm-collapse" onClick={() => onToggle(id)} aria-label={col ? `Expand ${title}` : `Collapse ${title}`} aria-expanded={!col}>
+              <ChevronUp size={14} />
+            </button>
+          </h3>
+          <div className="adm-pbody">{body}</div>
+        </div>
+      </Roll>
+    );
+  };
+  const fmax = Math.max(1, d.forecast.overdue, ...d.forecast.w);
+
+  return (
+    <div className="adm-grid">
+      {panel(
+        "quick", "Quick stats", <Activity size={15} />,
+        <div className="adm-qs">
+          <div><small>Customers per shop</small><b>{d.quick.avgCust}</b></div>
+          <div><small>Outstanding per shop</small><b>{money(d.quick.avgOut)}</b></div>
+          <div><small>Active rate</small><b>{d.quick.activeRate}%</b></div>
+          <div><small>Shops with debts</small><b>{d.quick.owingRate}%</b></div>
+          <div><small>Avg days left (active)</small><b>{d.quick.avgDays}</b></div>
+        </div>,
+        0, "wide"
+      )}
+      {panel("donut", "Shops by status", <Activity size={15} />, <Donut counts={d.counts} total={d.total} filter={filter} onPick={onPick} />, 1)}
+      {panel(
+        "debt", "Biggest outstanding balances", <TrendingUp size={15} />,
+        d.topDebt.length === 0 ? (
+          <p style={{ color: "var(--mutfg)", margin: 0 }}>No outstanding balances.</p>
+        ) : (
+          <div className="adm-bars">
+            {d.topDebt.map((o, i) => (
+              <button key={o.phone} className="adm-brow" onClick={() => onOpen(o.phone, "overview")} style={{ ["--i" as string]: i } as React.CSSProperties}>
+                <span className="n">{label(o)}</span>
+                <span className="adm-btrack">
+                  <i style={{ width: `${(o.totalOutstanding / d.topDebt[0].totalOutstanding) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+                </span>
+                <b>{money(o.totalOutstanding)}</b>
+              </button>
+            ))}
+          </div>
+        ),
+        2
+      )}
+      {panel(
+        "growth", "New shops, last 8 weeks", <UserPlus size={15} />,
+        <>
+          <div className="adm-sign">
+            {d.weeks.map((n, i) => (
+              <div key={i} title={`${n} new shop${n === 1 ? "" : "s"}`}>
+                <span>{n || ""}</span>
+                <i style={{ height: `${Math.max(4, (n / Math.max(1, ...d.weeks)) * 100)}%`, ["--i" as string]: i, opacity: n ? 1 : 0.25 } as React.CSSProperties} />
+              </div>
+            ))}
+          </div>
+          <p className="adm-trend">
+            {thisWeek} this week vs {lastWeek} last week {thisWeek > lastWeek && <b>▲</b>}
+          </p>
+        </>,
+        3
+      )}
+      {panel("spotlight", "3D spotlight: top shops", <Layers size={15} />, <Ring owners={d.spot} still={still} onOpen={onOpen} />, 4)}
+      {panel(
+        "forecast", "Renewal forecast", <TrendingUp size={15} />,
+        <>
+          <div className="adm-sign">
+            <button onClick={() => onApply("days<0 is:active")} title={`${d.forecast.overdue} already ended`}>
+              <span>{d.forecast.overdue || ""}</span>
+              <i className="bad" style={{ height: `${Math.max(4, (d.forecast.overdue / fmax) * 100)}%`, opacity: d.forecast.overdue ? 1 : 0.25 }} />
+              <small>Late</small>
+            </button>
+            {d.forecast.w.map((n, i) => (
+              <button key={i} onClick={() => onApply(`days>=${i * 7} days<=${i * 7 + 6} is:active`)} title={`${n} ending in week ${i + 1}`}>
+                <span>{n || ""}</span>
+                <i style={{ height: `${Math.max(4, (n / fmax) * 100)}%`, ["--i" as string]: i, opacity: n ? 1 : 0.25 } as React.CSSProperties} />
+                <small>W{i + 1}</small>
+              </button>
+            ))}
+          </div>
+          <p className="adm-trend">Active shops by the week their access ends. Click a bar to list them.</p>
+        </>,
+        5
+      )}
+      {panel(
+        "calendar", "Expiry calendar, next 28 days", <Calendar size={15} />,
+        <div className="adm-cal">
+          {["M", "T", "W", "T", "F", "S", "S"].map((x, i) => (
+            <em key={i}>{x}</em>
+          ))}
+          {Array.from({ length: weekdayOffset }).map((_, i) => (
+            <button key={`e${i}`} className="empty" tabIndex={-1} aria-hidden />
+          ))}
+          {d.calendar.map((n, i) => (
+            <button key={i} className={i === 0 ? "today" : ""} style={{ ["--h" as string]: Math.min(4, n) } as React.CSSProperties} title={`${n} shop${n === 1 ? "" : "s"} ending ${relDays(i)}`} onClick={() => onApply(`days:${i} is:active`)}>
+              <span>
+                {dayLabel(i)}
+                {n > 0 && <small>{n}</small>}
+              </span>
+            </button>
+          ))}
+        </div>,
+        6
+      )}
+      {panel(
+        "histogram", "Balance spread", <TrendingUp size={15} />,
+        <div className="adm-bars">
+          {d.spread.map((b, i) => (
+            <button key={b.l} className="adm-brow" onClick={() => onApply(b.q)} style={{ ["--i" as string]: i } as React.CSSProperties}>
+              <span className="n">{b.l}</span>
+              <span className="adm-btrack">
+                <i style={{ width: `${(b.n / Math.max(1, ...d.spread.map((x) => x.n))) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+              </span>
+              <b>{b.n}</b>
+            </button>
+          ))}
+        </div>,
+        7
+      )}
+      {panel(
+        "people", "Languages & leaderboard", <Users size={15} />,
+        <>
+          <div className="adm-bars" style={{ marginBottom: 14 }}>
+            {([["Kinyarwanda", d.langs.rw, "lang:rw"], ["English", d.langs.en, "lang:en"], ["Not set", d.langs.none, "lang:none"]] as [string, number, string][]).map(([l, n, q], i) => (
+              <button key={l} className="adm-brow" onClick={() => onApply(q)} style={{ ["--i" as string]: i } as React.CSSProperties}>
+                <span className="n">{l}</span>
+                <span className="adm-btrack">
+                  <i style={{ width: `${(n / Math.max(1, d.total)) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+                </span>
+                <b>{n}</b>
+              </button>
+            ))}
+          </div>
+          <p className="adm-sec">Most customers</p>
+          {d.topCust.length === 0 ? (
+            <p style={{ color: "var(--mutfg)", margin: 0 }}>No customers yet.</p>
+          ) : (
+            <div className="adm-bars">
+              {d.topCust.map((o, i) => (
+                <button key={o.phone} className="adm-brow" onClick={() => onOpen(o.phone, "customers")} style={{ ["--i" as string]: i } as React.CSSProperties}>
+                  <span className="n">{label(o)}</span>
+                  <span className="adm-btrack">
+                    <i style={{ width: `${(o.customerCount / d.topCust[0].customerCount) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
+                  </span>
+                  <b>{o.customerCount}</b>
+                </button>
+              ))}
+            </div>
+          )}
+        </>,
+        8
+      )}
+      {panel(
+        "quality", "Data quality", <CheckCircle2 size={15} />,
+        d.quality.every((x) => x.n === 0) ? (
+          <div className="adm-allclear">
+            <CheckCircle2 size={20} /> Everything looks clean.
+          </div>
+        ) : (
+          <div>
+            {d.quality.map((x) => (
+              <div key={x.q} className="adm-qrow">
+                <span>{x.label}</span>
+                <b>{x.n}</b>
+                <button className="adm-btn sm" disabled={x.n === 0} onClick={() => onApply(x.q)}>
+                  Show
+                </button>
+              </div>
+            ))}
+          </div>
+        ),
+        8
+      )}
+    </div>
+  );
+});
+
+const AttentionPanel = React.memo(function AttentionPanel({ list, busy, onExtend }: { list: EOwner[]; busy: Record<string, boolean>; onExtend: (o: EOwner, d: number) => void }) {
+  return (
+    <Roll>
+      <div id="sec-attention" className="adm-card adm-attn adm-in">
+        <h3>
+          <Bell size={15} /> Needs attention <small style={{ color: "var(--mutfg)", fontWeight: 500 }}>expiring within 7 days, or ended in the last 14</small>
+        </h3>
+        {list.length === 0 ? (
+          <div className="adm-allclear">
+            <CheckCircle2 size={22} />
+            All clear. Nobody needs a renewal right now.
+          </div>
+        ) : (
+          <div className="adm-attnlist">
+            {list.map((o) => (
+              <div key={o.phone} className="adm-attnitem">
+                <Avatar o={o} />
+                <div className="who">
+                  <b>{label(o)}</b>
+                  <span style={{ color: (o.daysLeft ?? 0) < 0 ? "var(--bad)" : "var(--warn)" }}>{(o.daysLeft ?? 0) < 0 ? `Ended ${relDays(o.daysLeft)}` : `Ends ${relDays(o.daysLeft)}`}</span>
+                </div>
+                <button className="adm-btn sm pri" disabled={!!busy[o.phone]} onClick={() => onExtend(o, 30)}>
+                  {busy[o.phone] ? <Loader2 size={13} className="adm-spin" /> : "+30d"}
+                </button>
+                <a className="adm-btn sm icon" href={waLink(o.phone, renewalMessage(o))} target="_blank" rel="noopener noreferrer" aria-label={`Remind ${label(o)} on WhatsApp`}>
+                  <MessageCircle size={13} />
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Roll>
+  );
+});
+
+const FunnelRow = React.memo(function FunnelRow({ owners }: { owners: EOwner[] }) {
+  return (
+    <div className="adm-duo">
+      <Roll>
+        <FunnelPanel owners={owners} />
+      </Roll>
+      <Roll>
+        <InactivePanel owners={owners} waLink={waLink} />
+      </Roll>
+    </div>
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Rows
@@ -1440,7 +2053,7 @@ const OwnerRow = React.memo(function OwnerRow({ o, i, selected, busy, flash, cur
   const color = bucketColor(o.bucket);
   const show = (c: string) => !hide.includes(c);
   return (
-    <tr className={`adm-tr ${selected ? "sel" : ""} ${busy ? "busy" : ""} ${flash ? "flash" : ""} ${cur ? "cur" : ""}`} style={{ ["--i" as string]: Math.min(i, 14) } as React.CSSProperties} data-testid={`row-owner-${o.phone}`} data-phone={o.phone}>
+    <tr className={`adm-tr ${selected ? "sel" : ""} ${busy ? "busy" : ""} ${flash ? "flash" : ""} ${cur ? "cur" : ""}`} style={{ ["--i" as string]: Math.min(i, 10) } as React.CSSProperties} data-testid={`row-owner-${o.phone}`} data-phone={o.phone}>
       <td>
         <input type="checkbox" className="adm-check" checked={selected} onChange={() => h.onSel(o.phone)} aria-label={`Select ${label(o)}`} />
       </td>
@@ -1529,26 +2142,42 @@ const OwnerRow = React.memo(function OwnerRow({ o, i, selected, busy, flash, cur
 const OwnerCard = React.memo(function OwnerCard({ o, i, selected, busy, flash, cur, pinned, tags, maxOut, hq, h }: RowProps) {
   const color = bucketColor(o.bucket);
   const ref = useRef<HTMLDivElement | null>(null);
-  // mouse tilt: the card leans toward the pointer (the glare comes from .adm-spot)
+  const rect = useRef<DOMRect | null>(null);
+  const raf = useRef(0);
+  const pt = useRef({ x: 0, y: 0 });
+  // mouse tilt: sizes are cached on enter, updates are limited to one per frame, and it is only a transform write
+  const onEnter = (e: React.PointerEvent) => {
+    if (e.pointerType === "mouse" && ref.current) rect.current = ref.current.getBoundingClientRect();
+  };
+  const apply = () => {
+    raf.current = 0;
+    const r = rect.current, el = ref.current;
+    if (!r || !el) return;
+    const x = (pt.current.x - r.left) / r.width - 0.5;
+    const y = (pt.current.y - r.top) / r.height - 0.5;
+    el.style.transform = `perspective(900px) rotateX(${(-y * 6).toFixed(2)}deg) rotateY(${(x * 8).toFixed(2)}deg) translateY(-3px)`;
+  };
   const onMove = (e: React.PointerEvent) => {
-    if (e.pointerType !== "mouse" || !ref.current) return;
-    const r = ref.current.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width - 0.5;
-    const y = (e.clientY - r.top) / r.height - 0.5;
-    ref.current.style.setProperty("--rx", `${(-y * 7).toFixed(2)}deg`);
-    ref.current.style.setProperty("--ry", `${(x * 9).toFixed(2)}deg`);
+    if (!rect.current) return;
+    pt.current = { x: e.clientX, y: e.clientY };
+    if (!raf.current) raf.current = requestAnimationFrame(apply);
   };
   const onLeave = () => {
-    ref.current?.style.setProperty("--rx", "0deg");
-    ref.current?.style.setProperty("--ry", "0deg");
+    rect.current = null;
+    if (raf.current) {
+      cancelAnimationFrame(raf.current);
+      raf.current = 0;
+    }
+    if (ref.current) ref.current.style.transform = "";
   };
   return (
     <div
       ref={ref}
+      onPointerEnter={onEnter}
       onPointerMove={onMove}
       onPointerLeave={onLeave}
       className={`adm-card adm-spot adm-ocard ${selected ? "sel" : ""} ${flash ? "adm-flashcard" : ""} ${cur ? "cur" : ""}`}
-      style={{ ["--i" as string]: Math.min(i, 12) } as React.CSSProperties}
+      style={{ ["--i" as string]: Math.min(i, 8) } as React.CSSProperties}
       data-testid={`row-owner-${o.phone}`}
       data-phone={o.phone}
       aria-busy={busy}
@@ -1617,6 +2246,57 @@ const OwnerCard = React.memo(function OwnerCard({ o, i, selected, busy, flash, c
           <Menu aria="More actions" trigger={<MoreHorizontal size={15} />} items={ownerMenu(o, h, pinned)} />
         </span>
       </div>
+    </div>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Search box (own focus state, so focusing it never re-renders the whole dashboard)
+// ---------------------------------------------------------------------------
+
+const SearchBox = React.memo(function SearchBox({ value, onChange, hist, onRemember, onClearHist, inputRef }: { value: string; onChange: (v: string) => void; hist: string[]; onRemember: (q: string) => void; onClearHist: () => void; inputRef: React.RefObject<HTMLInputElement> }) {
+  const [focus, setFocus] = useState(false);
+  return (
+    <div className="adm-search">
+      <Search size={15} />
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocus(true)}
+        onBlur={() => {
+          setFocus(false);
+          onRemember(value);
+        }}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        placeholder="Search name, phone, tag… or status:expired owes>50k"
+        aria-label="Search shops"
+        data-testid="input-search"
+      />
+      <div className="r">
+        {value ? (
+          <button className="adm-btn sm icon ghost" onMouseDown={(e) => e.preventDefault()} onClick={() => onChange("")} aria-label="Clear search" style={{ width: 24, height: 24 }}>
+            <X size={13} />
+          </button>
+        ) : (
+          <span className="adm-kbd">/</span>
+        )}
+      </div>
+      {focus && !value && hist.length > 0 && (
+        <div className="adm-hist">
+          <p>
+            Recent searches
+            <button className="adm-link" style={{ height: "auto", width: "auto", padding: 0, fontSize: 11 }} onMouseDown={(e) => e.preventDefault()} onClick={onClearHist}>
+              Clear
+            </button>
+          </p>
+          {hist.map((h) => (
+            <button key={h} onMouseDown={(e) => e.preventDefault()} onClick={() => onChange(h)}>
+              <Search size={13} /> {h}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 });
@@ -1839,10 +2519,13 @@ function SettingsModal({ prefs, upd, onReset, onClose }: { prefs: Prefs; upd: (p
         <Seg value={prefs.radius} options={[{ v: "sharp", l: "Sharp" }, { v: "soft", l: "Soft" }, { v: "round", l: "Round" }]} onChange={(v) => upd({ radius: v })} />
       </div>
       <div className="adm-setgrp">
-        <p>3D scroll effect</p>
-        <Seg value={prefs.roll} options={[{ v: "off", l: "Off" }, { v: "soft", l: "Soft" }, { v: "strong", l: "Strong" }]} onChange={(v) => upd({ roll: v })} />
+        <p>Motion</p>
+        <Seg value={prefs.roll} options={[{ v: "off", l: "3D scroll off" }, { v: "soft", l: "Soft" }, { v: "strong", l: "Strong" }]} onChange={(v) => upd({ roll: v })} />
         <div style={{ marginTop: 8 }}>
           <Seg value={prefs.calm} options={[{ v: false, l: "Animations on" }, { v: true, l: "Calm mode (no motion)" }]} onChange={(v) => upd({ calm: v })} />
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <Seg value={prefs.intro} options={[{ v: true, l: "Show intro after sign-in" }, { v: false, l: "Skip intro" }]} onChange={(v) => upd({ intro: v })} />
         </div>
       </div>
       <div className="adm-setgrp">
@@ -1876,14 +2559,14 @@ function SettingsModal({ prefs, upd, onReset, onClose }: { prefs: Prefs; upd: (p
       <div className="adm-setgrp">
         <p>Dashboard panels</p>
         <div className="adm-quick" style={{ marginBottom: 8 }}>
-          <button className="adm-btn sm" onClick={() => upd({ hidden: [] })}>
-            Overview (all)
+          <button className="adm-btn sm" onClick={() => upd({ hidden: ESSENTIAL_HIDDEN })}>
+            Essentials
           </button>
-          <button className="adm-btn sm" onClick={() => upd({ hidden: ["attention", "funnel"] })}>
-            Analytics
+          <button className="adm-btn sm" onClick={() => upd({ hidden: [] })}>
+            Everything
           </button>
           <button className="adm-btn sm" onClick={() => upd({ hidden: PANELS.map((p) => p.id).filter((id) => id !== "attention") })}>
-            Focus list
+            Focus on the list
           </button>
         </div>
         <div className="adm-quick">
@@ -2506,7 +3189,7 @@ function OwnerDrawer({
             ) : (
               <div className="adm-cust">
                 {list.map((c, i) => (
-                  <div key={c.id} className="adm-crow" style={{ ["--i" as string]: Math.min(i, 14) } as React.CSSProperties} data-testid={`row-customer-${c.id}`}>
+                  <div key={c.id} className="adm-crow" style={{ ["--i" as string]: Math.min(i, 10) } as React.CSSProperties} data-testid={`row-customer-${c.id}`}>
                     {editingId === c.id ? (
                       <div style={{ display: "grid", gap: 8 }}>
                         <input className="adm-input sm" value={editName} onChange={(e) => setEditName(e.target.value)} aria-label="Name" data-testid={`input-customer-name-${c.id}`} autoFocus />
@@ -2665,10 +3348,6 @@ function Palette({ owners, tags, actions, onOpenOwner, onClose }: { owners: EOwn
   );
 }
 
-// ---------------------------------------------------------------------------
-// Dashboard
-// ---------------------------------------------------------------------------
-
 function Pager({ page, pages, total, size, setPage, setSize, from, to }: { page: number; pages: number; total: number; size: number; setPage: (p: number) => void; setSize: (n: number) => void; from: number; to: number }) {
   const nums: number[] = [];
   for (let p = Math.max(0, page - 2); p <= Math.min(pages - 1, page + 2); p++) nums.push(p);
@@ -2701,8 +3380,13 @@ function Pager({ page, pages, total, size, setPage, setSize, from, to }: { page:
   );
 }
 
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
 function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (reason?: string) => void }) {
   const { theme, toggle: toggleTheme } = useTheme();
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -2720,14 +3404,31 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   ACTIVE_TPLS = tpls;
   const upd = useCallback((p: Partial<Prefs>) => setPrefs((x) => ({ ...x, ...p })), [setPrefs]);
 
+  const [intro, setIntro] = useState(() => {
+    try {
+      return prefs.intro && !sessionStorage.getItem(INTRO_KEY) && !prefersReduced();
+    } catch {
+      return false;
+    }
+  });
+  const enterDash = useCallback(() => {
+    try {
+      sessionStorage.setItem(INTRO_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    setIntro(false);
+  }, []);
+
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [statusFilter, setStatusFilter] = useState<Bucket | "all">("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "default", dir: 1 });
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<{ label: string; done: number; total: number } | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [searchFocus, setSearchFocus] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   const [editingOwner, setEditingOwner] = useState<Owner | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -2757,6 +3458,8 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   const view: "table" | "cards" = wide ? prefs.view : "cards";
   const hidden = prefs.hidden;
   const isShown = (id: string) => !hidden.includes(id);
+
+  usePointerFx(rootRef);
 
   // ---- toasts and activity log
   const push = useCallback((t: Omit<ToastItem, "id" | "ttl"> & { ttl?: number }) => {
@@ -2870,10 +3573,11 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     [setTags]
   );
   const allTags = useMemo(() => [...new Set(Object.values(tags).flat())].sort((a, b) => a.localeCompare(b)), [tags]);
-  const remember = (q: string) => {
+  const remember = useCallback((q: string) => {
     const v = q.trim();
     if (v) setHist((h) => [v, ...h.filter((x) => x !== v)].slice(0, 6));
-  };
+  }, [setHist]);
+  const clearHist = useCallback(() => setHist([]), [setHist]);
 
   // ---- derived data
   const now = useMemo(() => Date.now(), [owners]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2917,8 +3621,6 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   }, [enriched, now]);
   const cumulative = useMemo(() => weeks.map((_, i) => owners.length - weeks.slice(i + 1).reduce((s, x) => s + x, 0)), [weeks, owners.length]);
   const topDebt = useMemo(() => [...enriched].filter((o) => o.totalOutstanding > 0).sort((a, b) => b.totalOutstanding - a.totalOutstanding).slice(0, 7), [enriched]);
-  const spot = useMemo(() => [...enriched].sort((a, b) => b.totalOutstanding - a.totalOutstanding || b.customerCount - a.customerCount).slice(0, 6), [enriched]);
-  const topCust = useMemo(() => [...enriched].filter((o) => o.customerCount > 0).sort((a, b) => b.customerCount - a.customerCount).slice(0, 5), [enriched]);
   const attention = useMemo(
     () => enriched.filter((o) => o.isActive && o.daysLeft !== null && o.daysLeft <= 7 && o.daysLeft >= -14).sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0)).slice(0, 6),
     [enriched]
@@ -2928,63 +3630,70 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     [enriched]
   );
 
-  const forecast = useMemo(() => {
-    const w = new Array(8).fill(0) as number[];
+  // everything the analytics panels need, built once per data refresh
+  const insights = useMemo<InsightData>(() => {
+    const n = Math.max(1, owners.length);
+    const fw = new Array(8).fill(0) as number[];
     let overdue = 0;
-    enriched.forEach((o) => {
-      if (!o.isActive || o.daysLeft === null) return;
-      if (o.daysLeft < 0) overdue++;
-      else if (Math.floor(o.daysLeft / 7) < 8) w[Math.floor(o.daysLeft / 7)]++;
-    });
-    return { w, overdue };
-  }, [enriched]);
-  const calendar = useMemo(() => {
-    const c = new Array(28).fill(0) as number[];
-    enriched.forEach((o) => {
-      if (o.isActive && o.daysLeft !== null && o.daysLeft >= 0 && o.daysLeft < 28) c[o.daysLeft]++;
-    });
-    return c;
-  }, [enriched]);
-  const spread = useMemo(() => {
-    const b = [
+    const cal = new Array(28).fill(0) as number[];
+    const langs = { rw: 0, en: 0, none: 0 };
+    const spread = [
       { l: "No balance", q: "owes:0", n: 0, t: (v: number) => v === 0 },
       { l: "Up to 10k", q: "owes>0 owes<=10k", n: 0, t: (v: number) => v > 0 && v <= 10000 },
       { l: "10k – 50k", q: "owes>10k owes<=50k", n: 0, t: (v: number) => v > 10000 && v <= 50000 },
       { l: "50k – 200k", q: "owes>50k owes<=200k", n: 0, t: (v: number) => v > 50000 && v <= 200000 },
       { l: "Over 200k", q: "owes>200k", n: 0, t: (v: number) => v > 200000 },
     ];
-    enriched.forEach((o) => b.forEach((x) => x.t(o.totalOutstanding) && x.n++));
-    return b;
-  }, [enriched]);
-  const langs = useMemo(() => {
-    const l = { rw: 0, en: 0, none: 0 };
-    enriched.forEach((o) => (o.language === "rw" ? l.rw++ : o.language === "en" ? l.en++ : l.none++));
-    return l;
-  }, [enriched]);
-  const quality = useMemo(
-    () => [
-      { label: "Missing a shop name", q: "is:noname", n: enriched.filter((o) => !o.name).length },
-      { label: "No language chosen", q: "is:nolang", n: enriched.filter((o) => !o.language).length },
-      { label: "No trial date set", q: "status:notrial", n: counts.no_trial },
-      { label: "Duplicate phone numbers", q: "is:dupe", n: dupes.size },
-      { label: "No customers yet", q: "is:nocust", n: enriched.filter((o) => o.customerCount === 0).length },
-    ],
-    [enriched, counts, dupes]
-  );
-  const quick = useMemo(() => {
-    const n = Math.max(1, owners.length);
-    const withDate = enriched.filter((o) => o.isActive && o.daysLeft !== null && o.daysLeft >= 0);
+    let noName = 0, noLang = 0, noCust = 0, owing = 0, dateSum = 0, dateN = 0;
+    enriched.forEach((o) => {
+      if (o.isActive && o.daysLeft !== null) {
+        if (o.daysLeft < 0) overdue++;
+        else {
+          if (Math.floor(o.daysLeft / 7) < 8) fw[Math.floor(o.daysLeft / 7)]++;
+          if (o.daysLeft < 28) cal[o.daysLeft]++;
+          dateSum += o.daysLeft;
+          dateN++;
+        }
+      }
+      o.language === "rw" ? langs.rw++ : o.language === "en" ? langs.en++ : langs.none++;
+      spread.forEach((x) => x.t(o.totalOutstanding) && x.n++);
+      if (!o.name) noName++;
+      if (!o.language) noLang++;
+      if (o.customerCount === 0) noCust++;
+      if (o.totalOutstanding > 0) owing++;
+    });
     return {
-      avgCust: (totalCustomers / n).toFixed(1),
-      avgOut: Math.round(totalOutstandingAll / n),
-      activeRate: Math.round((counts.active / n) * 100),
-      owingRate: Math.round((enriched.filter((o) => o.totalOutstanding > 0).length / n) * 100),
-      avgDays: withDate.length ? Math.round(withDate.reduce((s, o) => s + (o.daysLeft ?? 0), 0) / withDate.length) : 0,
+      total: owners.length, counts, weeks, topDebt,
+      spot: [...enriched].sort((a, b) => b.totalOutstanding - a.totalOutstanding || b.customerCount - a.customerCount).slice(0, 6),
+      topCust: [...enriched].filter((o) => o.customerCount > 0).sort((a, b) => b.customerCount - a.customerCount).slice(0, 5),
+      forecast: { w: fw, overdue }, calendar: cal, spread: spread.map(({ l, q, n: c }) => ({ l, q, n: c })), langs,
+      quality: [
+        { label: "Missing a shop name", q: "is:noname", n: noName },
+        { label: "No language chosen", q: "is:nolang", n: noLang },
+        { label: "No trial date set", q: "status:notrial", n: counts.no_trial },
+        { label: "Duplicate phone numbers", q: "is:dupe", n: dupes.size },
+        { label: "No customers yet", q: "is:nocust", n: noCust },
+      ],
+      quick: { avgCust: (totalCustomers / n).toFixed(1), avgOut: Math.round(totalOutstandingAll / n), activeRate: Math.round((counts.active / n) * 100), owingRate: Math.round((owing / n) * 100), avgDays: dateN ? Math.round(dateSum / dateN) : 0 },
     };
-  }, [owners.length, enriched, totalCustomers, totalOutstandingAll, counts]);
+  }, [owners.length, enriched, counts, weeks, topDebt, dupes, totalCustomers, totalOutstandingAll]);
 
-  // ---- search + filters
-  const parsed = useMemo(() => parseQuery(query), [query]);
+  const snap = useMemo<SnapData>(
+    () => ({
+      outstanding: totalOutstandingAll,
+      activeRate: insights.quick.activeRate,
+      avgCust: insights.quick.avgCust,
+      renewals: attention.length,
+      expired: counts.expired,
+      topDebt: topDebt.slice(0, 3),
+      next: enriched.filter((o) => o.isActive && o.daysLeft !== null && o.daysLeft >= 0).sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0)).slice(0, 3),
+    }),
+    [totalOutstandingAll, insights, attention.length, counts.expired, topDebt, enriched]
+  );
+
+  // ---- search + filters (the list uses the deferred query, so typing never stutters)
+  const parsedLive = useMemo(() => parseQuery(query), [query]);
+  const parsed = useMemo(() => parseQuery(deferredQuery), [deferredQuery]);
   const hq = parsed.text.trim();
 
   const visible = useMemo(() => {
@@ -3032,15 +3741,15 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
 
   const pages = Math.max(1, Math.ceil(visible.length / prefs.pageSize));
   const [moreN, setMoreN] = useState(prefs.pageSize);
-  useEffect(() => setPage(0), [statusFilter, query, sort, prefs.pageSize]);
-  useEffect(() => setMoreN(prefs.pageSize), [statusFilter, query, sort, prefs.pageSize, prefs.paging]);
+  useEffect(() => setPage(0), [statusFilter, deferredQuery, sort, prefs.pageSize]);
+  useEffect(() => setMoreN(prefs.pageSize), [statusFilter, deferredQuery, sort, prefs.pageSize, prefs.paging]);
   useEffect(() => {
     if (page > pages - 1) setPage(pages - 1);
   }, [page, pages]);
   const pageRows = useMemo(() => (prefs.paging === "more" ? visible.slice(0, moreN) : visible.slice(page * prefs.pageSize, (page + 1) * prefs.pageSize)), [visible, page, prefs.pageSize, prefs.paging, moreN]);
 
-  // 3D scroll effect: re-scan whenever the set of rolling elements can change
-  useRoll(`${owners.length}|${pageRows.length}|${view}|${prefs.layout}|${statusFilter}|${page}|${loading ? 1 : 0}|${attention.length}|${hidden.join(",")}|${prefs.collapsed.join(",")}`, prefs.roll, prefs.calm);
+  // one scroll loop: progress bar, parallax, rolling cards and the opening doors
+  useScrollFx(`${owners.length}|${pageRows.length}|${view}|${prefs.layout}|${statusFilter}|${page}|${loading ? 1 : 0}|${attention.length}|${hidden.join(",")}|${prefs.collapsed.join(",")}|${intro ? 1 : 0}`, prefs.roll, prefs.calm);
 
   // drop selections that no longer exist after a refresh
   useEffect(() => {
@@ -3181,13 +3890,17 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     await fetchOwners(true);
   };
 
-  // ---- query helpers
-  const goShops = () => document.getElementById("sec-shops")?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "start" });
-  const applyQuery = (q: string) => {
+  // ---- stable callbacks for the memoised sections
+  const goShops = useCallback(() => document.getElementById("sec-shops")?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "start" }), []);
+  const applyQuery = useCallback((q: string) => {
     setQuery(q);
     setStatusFilter("all");
     goShops();
-  };
+  }, [goShops]);
+  const openOwner = useCallback((phone: string, tab: DrawerTab) => setDrawer({ phone, tab }), []);
+  const pickBucket = useCallback((b: Bucket) => setStatusFilter((cur) => (cur === b ? "all" : b)), []);
+  const togglePanel = useCallback((id: string) => setPrefs((p) => ({ ...p, collapsed: p.collapsed.includes(id) ? p.collapsed.filter((x) => x !== id) : [...p.collapsed, id] })), [setPrefs]);
+  const toggleMore = useCallback(() => setPrefs((p) => ({ ...p, hidden: ESSENTIAL_HIDDEN.some((id) => p.hidden.includes(id)) ? [] : ESSENTIAL_HIDDEN })), [setPrefs]);
   const toggleTok = (tok: string, prefix?: string) => setQuery((q) => toggleToken(q, tok, prefix));
   const removeToken = (tok: string) => setQuery((q) => qTokens(q).filter((t) => t !== tok).join(" "));
 
@@ -3200,7 +3913,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           n.has(phone) ? n.delete(phone) : n.add(phone);
           return n;
         }),
-      onOpen: (phone, tab) => setDrawer({ phone, tab }),
+      onOpen: openOwner,
       onExtend: (o, d) => void extend(o, d),
       onEdit: (o) => setEditingOwner(o),
       onToggle: (o) => void setActive(o, !o.isActive),
@@ -3211,7 +3924,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     }),
     // tpls is a dependency so rows rebuild their WhatsApp links after a template edit
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [extend, setActive, copy, togglePin, tpls]
+    [extend, setActive, copy, togglePin, openOwner, tpls]
   );
 
   // ---- exports
@@ -3239,7 +3952,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
   };
 
   // ---- keyboard shortcuts, auto refresh, idle sign-out, tab title, online status
-  const overlayOpen = !!(showAddModal || editingOwner || removing || drawer || showActivity || palette || queue || showSettings || showViews || showTpls || showImport || showHelp || digest !== null || tagPrompt);
+  const overlayOpen = !!(intro || showAddModal || editingOwner || removing || drawer || showActivity || palette || queue || showSettings || showViews || showTpls || showImport || showHelp || digest !== null || tagPrompt);
   const cursorIdx = cursor ? pageRows.findIndex((o) => o.phone === cursor) : -1;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -3247,7 +3960,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setPalette((p) => !p);
+        if (!intro) setPalette((p) => !p);
         return;
       }
       if (typing || e.ctrlKey || e.metaKey || e.altKey || overlayOpen) return;
@@ -3276,7 +3989,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlayOpen, fetchOwners, cursor, cursorIdx, pageRows, byPhone, toggleTheme, handlers, togglePin, extend, owners, counts, attention, topDebt, weeks]);
+  }, [overlayOpen, intro, fetchOwners, cursor, cursorIdx, pageRows, byPhone, toggleTheme, handlers, togglePin, extend, owners, counts, attention, topDebt, weeks]);
 
   useEffect(() => {
     if (!prefs.auto) return;
@@ -3325,15 +4038,6 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     };
   }, [attention.length]);
 
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    extrasPointerMove(e);
-    const el = (e.target as Element).closest?.(".adm-spot") as HTMLElement | null;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    el.style.setProperty("--mx", `${e.clientX - r.left}px`);
-    el.style.setProperty("--my", `${e.clientY - r.top}px`);
-  }, []);
-
   // ---- derived UI bits
   const drawerOwner = drawer ? byPhone.get(drawer.phone) ?? null : null;
   const drawerIdx = drawer ? visible.findIndex((o) => o.phone === drawer.phone) : -1;
@@ -3356,8 +4060,6 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     setQuery("");
     setStatusFilter("all");
   };
-  const pickBucket = (b: Bucket) => setStatusFilter((cur) => (cur === b ? "all" : b));
-  const togglePanel = (id: string) => upd({ collapsed: prefs.collapsed.includes(id) ? prefs.collapsed.filter((x) => x !== id) : [...prefs.collapsed, id] });
   const currentView = { query, status: statusFilter, sort };
   const applyView = (v: SavedView) => {
     setQuery(v.query);
@@ -3365,6 +4067,14 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     setSort(v.sort);
     setShowViews(false);
     goShops();
+  };
+  const replayIntro = () => {
+    try {
+      sessionStorage.removeItem(INTRO_KEY);
+    } catch {
+      /* ignore */
+    }
+    setIntro(true);
   };
 
   const paletteActions = useMemo<PaletteAction[]>(
@@ -3378,6 +4088,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       { id: "views", label: "Saved views", icon: <Bookmark size={16} />, run: () => setShowViews(true) },
       { id: "settings", label: "Appearance & behaviour", icon: <Settings size={16} />, run: () => setShowSettings(true) },
       { id: "help", label: "Shortcuts & search tips", hint: "?", icon: <HelpCircle size={16} />, run: () => setShowHelp(true) },
+      { id: "intro", label: "Replay the intro", icon: <Layers size={16} />, run: replayIntro },
       { id: "csv", label: "Export all shops to CSV", icon: <Download size={16} />, run: () => exportOwners(enriched, "shopbrain-owners") },
       { id: "json", label: "Export all shops to JSON", icon: <Download size={16} />, run: () => exportJson(enriched, "shopbrain-owners") },
       { id: "print", label: "Print this page", icon: <Printer size={16} />, run: () => window.print() },
@@ -3397,7 +4108,7 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       { id: "out", label: "Log out", icon: <LockKeyhole size={16} />, run: () => onLogout() },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prefs.view, prefs.auto, prefs.calm, enriched, fetchOwners, onLogout, theme, toggleTheme, renewalList, upd, tags, pins, owners, counts, attention, topDebt, weeks]
+    [prefs.view, prefs.auto, prefs.calm, enriched, fetchOwners, onLogout, theme, toggleTheme, renewalList, upd, tags, pins, owners, counts, attention, topDebt, weeks, applyQuery]
   );
 
   const chips: { k: Bucket | "all"; l: string; n: number }[] = [
@@ -3415,40 +4126,23 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
     { l: "Joined 30d", tok: "joined:30", prefix: "joined:" },
     { l: "Ends within 7d", tok: "days<=7" },
   ];
-  const thisWeek = weeks[7], lastWeek = weeks[6];
   const hide = prefs.cols;
-
-  // ---- panels (collapsible, hideable, rolling)
-  const panel = (id: string, title: string, icon: React.ReactNode, body: React.ReactNode, i: number, cls = "") => {
-    if (!isShown(id)) return null;
-    const col = prefs.collapsed.includes(id);
-    return (
-      <Roll key={id} className={cls}>
-        <div className={`adm-card adm-spot adm-panel adm-in ${col ? "adm-collapsed" : ""}`} style={{ ["--i" as string]: i } as React.CSSProperties}>
-          <h3>
-            <span className="ico">{icon}</span> {title}
-            <button className="adm-btn sm icon ghost adm-collapse" onClick={() => togglePanel(id)} aria-label={col ? `Expand ${title}` : `Collapse ${title}`} aria-expanded={!col}>
-              <ChevronUp size={14} />
-            </button>
-          </h3>
-          <div className="adm-pbody">{body}</div>
-        </div>
-      </Roll>
-    );
-  };
-  const gridIds = ["quick", "donut", "debt", "growth", "spotlight", "forecast", "calendar", "histogram", "people", "quality"];
-  const anyGrid = gridIds.some(isShown);
-  const navItems = [
-    { id: "sec-overview", label: "Overview" },
-    ...(anyGrid ? [{ id: "sec-insights", label: "Insights" }] : []),
-    ...(isShown("attention") ? [{ id: "sec-attention", label: "Attention" }] : []),
-    { id: "sec-shops", label: `Shops (${visible.length})` },
-  ];
-  const dayLabel = (d: number) => new Date(Date.now() + d * DAY).getDate();
-  const weekdayOffset = (new Date().getDay() + 6) % 7;
+  const anyInsight = ["quick", "donut", "debt", "growth", "spotlight", "forecast", "calendar", "histogram", "people", "quality"].some(isShown);
+  const moreOpen = ESSENTIAL_HIDDEN.every((id) => !hidden.includes(id));
+  const navItems = useMemo(
+    () => [
+      { id: "sec-overview", label: "Overview" },
+      ...(isShown("snapshot") ? [{ id: "sec-snapshot", label: "Snapshot" }] : []),
+      ...(anyInsight ? [{ id: "sec-insights", label: "Insights" }] : []),
+      ...(isShown("attention") ? [{ id: "sec-attention", label: "Attention" }] : []),
+      { id: "sec-shops", label: `Shops (${visible.length})` },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hidden, anyInsight, visible.length]
+  );
 
   return (
-    <div className="adm-root" data-theme={theme} data-accent={prefs.accent} data-rad={prefs.radius} data-calm={prefs.calm ? "1" : undefined} onPointerMove={onPointerMove}>
+    <div ref={rootRef} className="adm-root" data-theme={theme} data-accent={prefs.accent} data-rad={prefs.radius} data-calm={prefs.calm ? "1" : undefined} data-intro={intro ? "1" : undefined}>
       <style>{ADM_CSS + EXTRAS_CSS + FIX_CSS}</style>
       <div className="adm-aurora" aria-hidden />
       <div className="adm-prog" aria-hidden />
@@ -3462,16 +4156,19 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
 
         {/* header */}
         <div className="adm-head adm-in">
-          <div>
-            <h1 className="adm-title">Shop Brain Admin</h1>
-            <p className="adm-sub">
-              {owners.length} registered shop{owners.length === 1 ? "" : "s"}
-              <LastUpdated at={lastFetched} refreshing={refreshing} auto={prefs.auto} sec={prefs.refreshSec} />
-            </p>
+          <div className="adm-brand">
+            <Cube size={34} mini />
+            <div>
+              <h1 className="adm-title">Shop Brain Admin</h1>
+              <p className="adm-sub">
+                {owners.length} registered shop{owners.length === 1 ? "" : "s"}
+                <LastUpdated at={lastFetched} refreshing={refreshing} auto={prefs.auto} sec={prefs.refreshSec} />
+              </p>
+            </div>
           </div>
           <div className="adm-tools">
             <button onClick={() => setPalette(true)} className="adm-btn" title="Command palette">
-              <Command size={14} /> Search anything <span className="adm-kbd">⌘K</span>
+              <Command size={14} /> Search <span className="adm-kbd">⌘K</span>
             </button>
             <button onClick={() => setShowAddModal(true)} className="adm-btn pri" data-testid="button-add-owner">
               <UserPlus size={14} /> Add Owner
@@ -3479,33 +4176,28 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             <button onClick={() => setQueue({ owners: renewalList, tplId: "renew" })} className="adm-btn" title="Step through renewal reminders">
               <Send size={14} /> Renewals {renewalList.length > 0 && <b>{renewalList.length}</b>}
             </button>
-            <button onClick={() => upd({ auto: !prefs.auto })} className={`adm-btn ${prefs.auto ? "ok" : ""}`} aria-pressed={prefs.auto} title={`Refresh every ${prefs.refreshSec} seconds`}>
-              <Zap size={14} /> Live
-            </button>
-            <button onClick={() => fetchOwners(true)} disabled={loading || refreshing} className="adm-btn" data-testid="button-refresh">
-              <RefreshCw size={14} className={loading || refreshing ? "adm-spin" : ""} /> Refresh
-            </button>
-            <button onClick={() => onLogout()} className="adm-btn" data-testid="button-admin-logout">
-              Log out
+            <button onClick={() => fetchOwners(true)} disabled={loading || refreshing} className="adm-btn sq" aria-label="Refresh" title="Refresh (R)" data-testid="button-refresh">
+              <RefreshCw size={15} className={loading || refreshing ? "adm-spin" : ""} />
             </button>
             <Menu
-              aria="More tools"
+              aria="More"
               className="adm-btn sq"
               trigger={<MoreHorizontal size={16} />}
               items={[
+                { key: "live", label: prefs.auto ? "Turn live refresh off" : "Turn live refresh on", icon: <Zap size={14} />, onClick: () => upd({ auto: !prefs.auto }) },
                 { key: "digest", label: "Daily digest", icon: <FileText size={14} />, onClick: () => setDigest(buildDigest()) },
                 { key: "views", label: "Saved views", icon: <Bookmark size={14} />, onClick: () => setShowViews(true) },
                 { key: "tpls", label: "Message templates", icon: <FileText size={14} />, onClick: () => setShowTpls(true) },
                 { key: "import", label: "Import owners", icon: <Upload size={14} />, onClick: () => setShowImport(true) },
                 { key: "act", label: `Activity log${activity.length ? ` (${activity.length})` : ""}`, icon: <Activity size={14} />, onClick: () => setShowActivity(true) },
                 "sep",
+                { key: "settings", label: "Appearance & behaviour", icon: <Settings size={14} />, onClick: () => setShowSettings(true) },
                 { key: "help", label: "Shortcuts & tips", icon: <Keyboard size={14} />, onClick: () => setShowHelp(true) },
                 { key: "print", label: "Print", icon: <Printer size={14} />, onClick: () => window.print() },
+                "sep",
+                { key: "out", label: "Log out", icon: <LockKeyhole size={14} />, onClick: () => onLogout(), testid: "button-admin-logout" },
               ]}
             />
-            <button onClick={() => setShowSettings(true)} className="adm-btn sq" aria-label="Appearance and behaviour" title="Appearance & behaviour">
-              <Settings size={16} />
-            </button>
             <ThemeToggle />
           </div>
         </div>
@@ -3521,295 +4213,31 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
           </div>
         )}
 
-        {/* KPIs */}
-        <div className="adm-kpis" id="sec-overview">
-          {loading && owners.length === 0 ? (
-            [0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="adm-card adm-skel" style={{ height: 108 }} />)
-          ) : (
-            <>
-              <Roll>
-                <Kpi i={0} label="Total shops" value={owners.length} icon={<Users size={15} />} hint={`${thisWeek} new this week`} spark={cumulative} />
-              </Roll>
-              <Roll>
-                <Kpi i={1} label="Active" value={counts.active} icon={<CheckCircle2 size={15} />} color="var(--ok)" on={statusFilter === "active"} onClick={() => pickBucket("active")} hint="Click to filter" />
-              </Roll>
-              <Roll>
-                <Kpi i={2} label="Expiring soon" value={counts.expiring} icon={<Clock size={15} />} color="var(--amber)" on={statusFilter === "expiring"} onClick={() => pickBucket("expiring")} hint="Needs a renewal" />
-              </Roll>
-              <Roll>
-                <Kpi i={3} label="Expired" value={counts.expired} icon={<XCircle size={15} />} color="var(--bad)" on={statusFilter === "expired"} onClick={() => pickBucket("expired")} hint="Access has ended" />
-              </Roll>
-              <Roll>
-                <Kpi i={4} label="Customers (all shops)" value={totalCustomers} icon={<TrendingUp size={15} />} hint={owners.length ? `${(totalCustomers / owners.length).toFixed(1)} per shop` : undefined} />
-              </Roll>
-              <Roll>
-                <Kpi i={5} label="Total outstanding" value={totalOutstandingAll} suffix="Frw" icon={<Zap size={15} />} color="var(--viol)" hint="Owed to shops" />
-              </Roll>
-              <Roll>
-                <Kpi i={6} label="New shops, 8 weeks" value={weeks.reduce((s, x) => s + x, 0)} icon={<UserPlus size={15} />} color="var(--ok)" hint={`${thisWeek} this week`} spark={weeks} />
-              </Roll>
-            </>
-          )}
+        <KpiRow loading={loading} counts={counts} total={owners.length} customers={totalCustomers} outstanding={totalOutstandingAll} weeks={weeks} cumulative={cumulative} filter={statusFilter} onPick={pickBucket} />
+
+        {owners.length > 0 && isShown("snapshot") && <Snapshot s={snap} onOpen={openOwner} />}
+
+        {owners.length > 0 && anyInsight && (
+          <>
+            <div className="adm-sh" id="sec-insights">
+              <h2>Insights</h2>
+              <button className="adm-btn sm" onClick={toggleMore}>
+                {moreOpen ? "Show fewer" : "Show all insights"}
+              </button>
+            </div>
+            <Insights d={insights} hidden={hidden} collapsed={prefs.collapsed} filter={statusFilter} still={prefs.calm} onToggle={togglePanel} onPick={pickBucket} onApply={applyQuery} onOpen={openOwner} />
+          </>
+        )}
+
+        {owners.length > 0 && isShown("attention") && <AttentionPanel list={attention} busy={busy} onExtend={extend} />}
+        {owners.length > 0 && isShown("funnel") && <FunnelRow owners={enriched} />}
+
+        {/* shops */}
+        <div className="adm-sh" id="sec-shops">
+          <h2>Shops</h2>
         </div>
-
-        {/* analytics panels */}
-        {owners.length > 0 && anyGrid && (
-          <div className="adm-grid" id="sec-insights">
-            {panel(
-              "quick", "Quick stats", <Activity size={15} />,
-              <div className="adm-qs">
-                <div><small>Customers per shop</small><b>{quick.avgCust}</b></div>
-                <div><small>Outstanding per shop</small><b>{money(quick.avgOut)}</b></div>
-                <div><small>Active rate</small><b>{quick.activeRate}%</b></div>
-                <div><small>Shops with debts</small><b>{quick.owingRate}%</b></div>
-                <div><small>Avg days left (active)</small><b>{quick.avgDays}</b></div>
-              </div>,
-              5, "wide"
-            )}
-            {panel("donut", "Shops by status", <Activity size={15} />, <Donut counts={counts} total={owners.length} filter={statusFilter} onPick={pickBucket} />, 6)}
-            {panel(
-              "debt", "Biggest outstanding balances", <TrendingUp size={15} />,
-              topDebt.length === 0 ? (
-                <p style={{ color: "var(--mutfg)", margin: 0 }}>No outstanding balances.</p>
-              ) : (
-                <div className="adm-bars">
-                  {topDebt.map((o, i) => (
-                    <button key={o.phone} className="adm-brow" onClick={() => setDrawer({ phone: o.phone, tab: "overview" })} style={{ ["--i" as string]: i } as React.CSSProperties}>
-                      <span className="n">{label(o)}</span>
-                      <span className="adm-btrack">
-                        <i style={{ width: `${(o.totalOutstanding / topDebt[0].totalOutstanding) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
-                      </span>
-                      <b>{money(o.totalOutstanding)}</b>
-                    </button>
-                  ))}
-                </div>
-              ),
-              7
-            )}
-            {panel(
-              "growth", "New shops, last 8 weeks", <UserPlus size={15} />,
-              <>
-                <div className="adm-sign">
-                  {weeks.map((n, i) => (
-                    <div key={i} title={`${n} new shop${n === 1 ? "" : "s"}`}>
-                      <span>{n || ""}</span>
-                      <i style={{ height: `${Math.max(4, (n / Math.max(1, ...weeks)) * 100)}%`, ["--i" as string]: i, opacity: n ? 1 : 0.25 } as React.CSSProperties} />
-                    </div>
-                  ))}
-                </div>
-                <p className="adm-trend">
-                  {thisWeek} this week vs {lastWeek} last week {thisWeek > lastWeek && <b>▲</b>}
-                </p>
-              </>,
-              8
-            )}
-            {panel("spotlight", "3D spotlight: top shops", <Layers size={15} />, <Ring owners={spot} still={prefs.calm} onOpen={(phone) => setDrawer({ phone, tab: "overview" })} />, 9)}
-            {panel(
-              "forecast", "Renewal forecast", <TrendingUp size={15} />,
-              <>
-                <div className="adm-sign">
-                  <button onClick={() => applyQuery("days<0 is:active")} title={`${forecast.overdue} already ended`}>
-                    <span>{forecast.overdue || ""}</span>
-                    <i className="bad" style={{ height: `${Math.max(4, (forecast.overdue / Math.max(1, forecast.overdue, ...forecast.w)) * 100)}%`, opacity: forecast.overdue ? 1 : 0.25 }} />
-                    <small>Late</small>
-                  </button>
-                  {forecast.w.map((n, i) => (
-                    <button key={i} onClick={() => applyQuery(`days>=${i * 7} days<=${i * 7 + 6} is:active`)} title={`${n} ending in week ${i + 1}`}>
-                      <span>{n || ""}</span>
-                      <i style={{ height: `${Math.max(4, (n / Math.max(1, forecast.overdue, ...forecast.w)) * 100)}%`, ["--i" as string]: i, opacity: n ? 1 : 0.25 } as React.CSSProperties} />
-                      <small>W{i + 1}</small>
-                    </button>
-                  ))}
-                </div>
-                <p className="adm-trend">Active shops by the week their access ends. Click a bar to list them.</p>
-              </>,
-              10
-            )}
-            {panel(
-              "calendar", "Expiry calendar, next 28 days", <Calendar size={15} />,
-              <div className="adm-cal">
-                {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-                  <em key={i}>{d}</em>
-                ))}
-                {Array.from({ length: weekdayOffset }).map((_, i) => (
-                  <button key={`e${i}`} className="empty" tabIndex={-1} aria-hidden />
-                ))}
-                {calendar.map((n, d) => (
-                  <button key={d} className={d === 0 ? "today" : ""} style={{ ["--h" as string]: Math.min(4, n) } as React.CSSProperties} title={`${n} shop${n === 1 ? "" : "s"} ending ${relDays(d)}`} onClick={() => applyQuery(`days:${d} is:active`)}>
-                    <span>
-                      {dayLabel(d)}
-                      {n > 0 && <small>{n}</small>}
-                    </span>
-                  </button>
-                ))}
-              </div>,
-              11
-            )}
-            {panel(
-              "histogram", "Balance spread", <TrendingUp size={15} />,
-              <div className="adm-bars">
-                {spread.map((b, i) => (
-                  <button key={b.l} className="adm-brow" onClick={() => applyQuery(b.q)} style={{ ["--i" as string]: i } as React.CSSProperties}>
-                    <span className="n">{b.l}</span>
-                    <span className="adm-btrack">
-                      <i style={{ width: `${(b.n / Math.max(1, ...spread.map((x) => x.n))) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
-                    </span>
-                    <b>{b.n}</b>
-                  </button>
-                ))}
-              </div>,
-              12
-            )}
-            {panel(
-              "people", "Languages & leaderboard", <Users size={15} />,
-              <>
-                <div className="adm-bars" style={{ marginBottom: 14 }}>
-                  {([["Kinyarwanda", langs.rw, "lang:rw"], ["English", langs.en, "lang:en"], ["Not set", langs.none, "lang:none"]] as [string, number, string][]).map(([l, n, q], i) => (
-                    <button key={l} className="adm-brow" onClick={() => applyQuery(q)} style={{ ["--i" as string]: i } as React.CSSProperties}>
-                      <span className="n">{l}</span>
-                      <span className="adm-btrack">
-                        <i style={{ width: `${(n / Math.max(1, owners.length)) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
-                      </span>
-                      <b>{n}</b>
-                    </button>
-                  ))}
-                </div>
-                <p className="adm-sec">Most customers</p>
-                {topCust.length === 0 ? (
-                  <p style={{ color: "var(--mutfg)", margin: 0 }}>No customers yet.</p>
-                ) : (
-                  <div className="adm-bars">
-                    {topCust.map((o, i) => (
-                      <button key={o.phone} className="adm-brow" onClick={() => setDrawer({ phone: o.phone, tab: "customers" })} style={{ ["--i" as string]: i } as React.CSSProperties}>
-                        <span className="n">{label(o)}</span>
-                        <span className="adm-btrack">
-                          <i style={{ width: `${(o.customerCount / topCust[0].customerCount) * 100}%`, ["--i" as string]: i } as React.CSSProperties} />
-                        </span>
-                        <b>{o.customerCount}</b>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>,
-              13
-            )}
-            {panel(
-              "quality", "Data quality", <CheckCircle2 size={15} />,
-              quality.every((x) => x.n === 0) ? (
-                <div className="adm-allclear">
-                  <CheckCircle2 size={20} /> Everything looks clean.
-                </div>
-              ) : (
-                <div>
-                  {quality.map((x) => (
-                    <div key={x.q} className="adm-qrow">
-                      <span>{x.label}</span>
-                      <b>{x.n}</b>
-                      <button className="adm-btn sm" disabled={x.n === 0} onClick={() => applyQuery(x.q)}>
-                        Show
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ),
-              14
-            )}
-          </div>
-        )}
-
-        {/* needs attention */}
-        {owners.length > 0 && isShown("attention") && (
-          <Roll>
-            <div id="sec-attention" className={`adm-card adm-attn adm-in ${attention.length > 0 ? "adm-glowborder" : ""}`} style={{ ["--i" as string]: 15 } as React.CSSProperties}>
-              <h3>
-                <Bell size={15} /> Needs attention <small style={{ color: "var(--mutfg)", fontWeight: 500 }}>expiring within 7 days, or ended in the last 14</small>
-              </h3>
-              {attention.length === 0 ? (
-                <div className="adm-allclear">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" strokeWidth="2" />
-                    <path d="M7 12.5l3.2 3.2L17 9" />
-                  </svg>
-                  All clear. Nobody needs a renewal right now.
-                </div>
-              ) : (
-                <div className="adm-attnlist">
-                  {attention.map((o) => (
-                    <div key={o.phone} className="adm-attnitem">
-                      <Avatar o={o} />
-                      <div className="who">
-                        <b>{label(o)}</b>
-                        <span style={{ color: (o.daysLeft ?? 0) < 0 ? "var(--bad)" : "var(--warn)" }}>{(o.daysLeft ?? 0) < 0 ? `Ended ${relDays(o.daysLeft)}` : `Ends ${relDays(o.daysLeft)}`}</span>
-                      </div>
-                      <button className="adm-btn sm pri" disabled={!!busy[o.phone]} onClick={() => extend(o, 30)}>
-                        {busy[o.phone] ? <Loader2 size={13} className="adm-spin" /> : "+30d"}
-                      </button>
-                      <a className="adm-btn sm icon" href={waLink(o.phone, renewalMessage(o))} target="_blank" rel="noopener noreferrer" aria-label={`Remind ${label(o)} on WhatsApp`}>
-                        <MessageCircle size={13} />
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Roll>
-        )}
-
-        {/* activation funnel + inactive shops */}
-        {owners.length > 0 && isShown("funnel") && (
-          <div className="adm-duo">
-            <Roll>
-              <FunnelPanel owners={enriched} />
-            </Roll>
-            <Roll>
-              <InactivePanel owners={enriched} waLink={waLink} />
-            </Roll>
-          </div>
-        )}
-
-        {/* toolbar */}
-        <div className="adm-toolbar adm-in" id="sec-shops" style={{ ["--i" as string]: 10 } as React.CSSProperties}>
-          <div className="adm-search">
-            <Search size={15} />
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setSearchFocus(true)}
-              onBlur={() => {
-                setSearchFocus(false);
-                remember(query);
-              }}
-              onKeyDown={(e) => e.key === "Enter" && (remember(query), e.currentTarget.blur())}
-              placeholder="Search name, phone, tag… or status:expired owes>50k"
-              aria-label="Search shops"
-              data-testid="input-search"
-            />
-            <div className="r">
-              {query ? (
-                <button className="adm-btn sm icon ghost" onMouseDown={(e) => e.preventDefault()} onClick={() => setQuery("")} aria-label="Clear search" style={{ width: 24, height: 24 }}>
-                  <X size={13} />
-                </button>
-              ) : (
-                <span className="adm-kbd">/</span>
-              )}
-            </div>
-            {searchFocus && !query && hist.length > 0 && (
-              <div className="adm-hist">
-                <p>
-                  Recent searches
-                  <button className="adm-link" style={{ height: "auto", width: "auto", padding: 0, fontSize: 11 }} onMouseDown={(e) => e.preventDefault()} onClick={() => setHist([])}>
-                    Clear
-                  </button>
-                </p>
-                {hist.map((h) => (
-                  <button key={h} onMouseDown={(e) => e.preventDefault()} onClick={() => setQuery(h)}>
-                    <Search size={13} /> {h}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+        <div className="adm-toolbar">
+          <SearchBox value={query} onChange={setQuery} hist={hist} onRemember={remember} onClearHist={clearHist} inputRef={searchRef} />
           <select className="adm-select" value={sort.key} onChange={(e) => setSort({ key: e.target.value as SortKey, dir: e.target.value === "name" || e.target.value === "expiry" || e.target.value === "default" ? 1 : -1 })} aria-label="Sort shops">
             <option value="default">Sort: default</option>
             <option value="name">Name A–Z</option>
@@ -3842,16 +4270,9 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
               {prefs.density === "comfy" ? "Comfortable" : "Compact"}
             </button>
           )}
-          <Menu
-            aria="Saved views"
-            className="adm-btn"
-            trigger={<><Bookmark size={14} /> Views</>}
-            items={[
-              ...views.slice(0, 6).map((v) => ({ key: v.id, label: v.name, icon: <Bookmark size={14} />, onClick: () => applyView(v) })),
-              ...(views.length ? (["sep"] as const) : []),
-              { key: "manage", label: "Save or manage views…", icon: <Settings size={14} />, onClick: () => setShowViews(true) },
-            ]}
-          />
+          <button className={`adm-btn ${showFilters ? "ok" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+            <Filter size={14} /> Filters {parsedLive.tokens.length > 0 && <b>{parsedLive.tokens.length}</b>}
+          </button>
           <Menu
             aria="Export"
             className="adm-btn"
@@ -3865,28 +4286,49 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
             ]}
           />
         </div>
-        <div className="adm-chips adm-in" style={{ marginBottom: 10, ["--i" as string]: 11 } as React.CSSProperties} role="group" aria-label="Filter by status">
+
+        {showFilters && (
+          <div className="adm-card adm-filters">
+            <div className="adm-chips" role="group" aria-label="Quick filters">
+              {quickChips.map((c) => (
+                <button key={c.tok} className={`adm-chip sm2 ${hasToken(query, c.tok) ? "on" : ""}`} onClick={() => toggleTok(c.tok, c.prefix)}>
+                  {c.l}
+                </button>
+              ))}
+              {allTags.slice(0, 8).map((t) => (
+                <button key={t} className={`adm-chip sm2 ${hasToken(query, `tag:${t}`) ? "on" : ""}`} onClick={() => toggleTok(`tag:${t}`)}>
+                  <Tag size={11} /> {t}
+                </button>
+              ))}
+            </div>
+            <div className="adm-quick">
+              <Menu
+                aria="Saved views"
+                className="adm-btn sm"
+                trigger={<><Bookmark size={13} /> Views</>}
+                items={[
+                  ...views.slice(0, 6).map((v) => ({ key: v.id, label: v.name, icon: <Bookmark size={14} />, onClick: () => applyView(v) })),
+                  ...(views.length ? (["sep"] as const) : []),
+                  { key: "manage", label: "Save or manage views…", icon: <Settings size={14} />, onClick: () => setShowViews(true) },
+                ]}
+              />
+              <button className="adm-link" onClick={() => setShowHelp(true)}>
+                Search syntax
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="adm-chips" style={{ marginBottom: 10 }} role="group" aria-label="Filter by status">
           {chips.map((c) => (
             <button key={c.k} className={`adm-chip ${statusFilter === c.k ? "on" : ""}`} onClick={() => setStatusFilter(c.k)}>
               {c.l} <em>{c.n}</em>
             </button>
           ))}
         </div>
-        <div className="adm-chips" style={{ marginBottom: 10 }} role="group" aria-label="Quick filters">
-          {quickChips.map((c) => (
-            <button key={c.tok} className={`adm-chip sm2 ${hasToken(query, c.tok) ? "on" : ""}`} onClick={() => toggleTok(c.tok, c.prefix)}>
-              {c.l}
-            </button>
-          ))}
-          {allTags.slice(0, 8).map((t) => (
-            <button key={t} className={`adm-chip sm2 ${hasToken(query, `tag:${t}`) ? "on" : ""}`} onClick={() => toggleTok(`tag:${t}`)}>
-              <Tag size={11} /> {t}
-            </button>
-          ))}
-        </div>
-        {parsed.tokens.length > 0 && (
+        {parsedLive.tokens.length > 0 && (
           <div className="adm-chips" style={{ marginBottom: 10 }} aria-label="Active search filters">
-            {parsed.tokens.map((t) => (
+            {parsedLive.tokens.map((t) => (
               <span key={t} className="adm-chip tok">
                 {t}
                 <button className="adm-btn sm icon ghost" style={{ width: 22, height: 22 }} onClick={() => removeToken(t)} aria-label={`Remove ${t}`}>
@@ -3910,9 +4352,6 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
               · <b>{selected.size}</b> selected
             </span>
           )}
-          <button className="adm-link" onClick={() => setShowHelp(true)} style={{ marginLeft: "auto" }}>
-            Search tips
-          </button>
         </p>
 
         {/* list */}
@@ -4152,6 +4591,8 @@ function OwnersDashboard({ password, onLogout }: { password: string; onLogout: (
       )}
       {palette && <Palette owners={enriched} tags={tags} actions={paletteActions} onOpenOwner={(phone) => setDrawer({ phone, tab: "overview" })} onClose={() => setPalette(false)} />}
       <Toasts items={toasts} dismiss={dismiss} />
+
+      {intro && <Intro ready={!loading} stats={{ shops: owners.length, customers: totalCustomers, outstanding: totalOutstandingAll }} accent={prefs.accent} onEnter={enterDash} />}
     </div>
   );
 
@@ -4216,6 +4657,7 @@ export default function Admin() {
         throw new Error(body?.message || "Invalid password.");
       }
       sessionStorage.setItem(SESSION_KEY, passwordInput);
+      sessionStorage.removeItem(INTRO_KEY); // a fresh sign-in plays the intro
       setPassword(passwordInput);
     } catch (err) {
       setLoginError(errMsg(err, "Login failed."));
@@ -4228,6 +4670,7 @@ export default function Admin() {
   const handleLogout = useCallback((reason?: string) => {
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(LOG_KEY);
+    sessionStorage.removeItem(INTRO_KEY);
     setPassword(null);
     setPasswordInput("");
     setNotice(typeof reason === "string" ? reason : null);
@@ -4238,12 +4681,11 @@ export default function Admin() {
       <ThemeCtx.Provider value={themeValue}>
         <div className="adm-root adm-login" data-theme={theme}>
           <style>{ADM_CSS + EXTRAS_CSS + FIX_CSS}</style>
-          <div className="adm-aurora" aria-hidden />
           <div className="adm-logintheme">
             <ThemeToggle />
           </div>
           <div style={{ width: "100%", maxWidth: 392, position: "relative", zIndex: 1 }}>
-            <Link href="/" className="adm-back">
+            <Link href="/" className="adm-back-link">
               <ArrowLeft size={16} /> Back to site
             </Link>
             <div className="adm-lcard">
