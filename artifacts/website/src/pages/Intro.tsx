@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MessageCircle } from "lucide-react";
+import { getPrefs } from "@/fx/prefs";
 
 // Cinematic opening, about 4 seconds, pure CSS 3D, no images, no libraries.
 //
@@ -28,6 +29,7 @@ const PLAY_MS = 3600; // when the iris starts closing
 const EXIT_MS = 750; // iris duration
 const REMEMBER = false;
 const KEY = "sb-intro-seen";
+const SKIPKEY = "sb-intro-skipped"; // tapping Skip hides the intro for the rest of the visit
 
 const SKIP: Record<string, string> = { en: "Skip", rw: "Simbuka", fr: "Passer" };
 const PAID: Record<string, string> = { en: "PAID", rw: "YISHYUYE", fr: "PAYÉ" };
@@ -41,6 +43,12 @@ const PILLS: Record<string, string[]> = {
   rw: ["Kuri WhatsApp", "Nta porogaramu", "Ukwezi kwa mbere ni ubuntu"],
   fr: ["Sur WhatsApp", "Aucune appli", "Premier mois gratuit"],
 };
+const GHOSTS = [
+  { x: "-9em", y: "-3em", z: "-260px", r: "-8deg" },
+  { x: "10em", y: "3em", z: "-420px", r: "6deg" },
+  { x: "7em", y: "-6.5em", z: "-160px", r: "10deg" },
+  { x: "-8em", y: "6em", z: "-340px", r: "5deg" },
+];
 const DEBTS = ["Jean · 5,000 RWF", "Mama K · 12,000 RWF", "Eric · 3,500 RWF"];
 
 function shouldPlay() {
@@ -50,6 +58,8 @@ function shouldPlay() {
     const f = new URLSearchParams(window.location.search).get("intro");
     if (f === "0") return false;
     if (f === "1") return true;
+    if (!getPrefs().enabled) return false; // the dashboard "All animations" switch
+    if (sessionStorage.getItem(SKIPKEY)) return false;
     if (REMEMBER && sessionStorage.getItem(KEY)) return false;
   } catch {
     /* storage can be blocked: just play */
@@ -134,6 +144,23 @@ html.sb-intro .sb-rise, html.sb-intro .sb-word, html.sb-intro .sb-pop{animation-
 .sbi-rail{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(255,255,255,.08)}
 .sbi-rail i{display:block;height:100%;background:${SUN};transform-origin:0 50%;transform:scaleX(0);animation:sbi-str ${PLAY_MS}ms linear forwards}
 
+/* depth upgrade: tilt follows the pointer, camera dollies in, ledger pages float behind, shine, shockwave, push-through exit */
+.sbi-tilt{perspective:1300px;transform-style:preserve-3d;transform:rotateX(var(--ty,0deg)) rotateY(var(--tx,0deg));transition:transform .35s ease-out}
+.sbi-stage{transform-style:preserve-3d;animation:sbi-dolly ${PLAY_MS}ms cubic-bezier(.3,.1,.2,1) both}
+@keyframes sbi-dolly{from{transform:translateZ(-180px) scale(.94)}to{transform:translateZ(50px) scale(1.04)}}
+.sbi-exit .sbi-stage{animation:sbi-push ${EXIT_MS}ms cubic-bezier(.7,0,.2,1) forwards}
+@keyframes sbi-push{from{transform:translateZ(50px) scale(1.04);opacity:1}to{transform:translateZ(340px) scale(1.25);opacity:0}}
+.sbi-ghost{width:20em;height:15em;border-radius:.5em;opacity:0;pointer-events:none;border:1px solid rgba(255,255,255,.16);
+  background:linear-gradient(160deg,rgba(255,255,255,.12),rgba(255,255,255,.02)),repeating-linear-gradient(to bottom,transparent 0,transparent 2.4em,rgba(160,180,255,.18) 2.4em,rgba(160,180,255,.18) calc(2.4em + 1px));
+  transform:translate3d(var(--x),var(--y),var(--z)) rotate(var(--r));animation:sbi-gh 1.1s ease .2s forwards,sbi-bob 3.6s ease-in-out .2s infinite alternate}
+@keyframes sbi-gh{to{opacity:.85}}
+@keyframes sbi-bob{from{transform:translate3d(var(--x),var(--y),var(--z)) rotate(var(--r))}to{transform:translate3d(var(--x),calc(var(--y) - 1.2em),var(--z)) rotate(calc(var(--r) + 3deg))}}
+.sbi-card::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.65) 50%,transparent 60%);background-size:250% 100%;background-position:150% 0;animation:sbi-shine 1s ease .95s forwards}
+@keyframes sbi-shine{to{background-position:-50% 0}}
+.sbi-mark{position:relative}
+.sbi-mark::after{content:"";position:absolute;inset:-.2em;border-radius:2em;border:.15em solid rgba(255,201,51,.85);opacity:0;animation:sbi-wave 1s ease-out 2.55s forwards}
+@keyframes sbi-wave{from{opacity:.9;transform:scale(1)}to{opacity:0;transform:scale(2.7)}}
+
 .sbi-skip{opacity:0;animation:sbi-fade .5s ease .5s forwards}
 @media (prefers-reduced-motion:reduce){.sbi-root *{animation-duration:.01s !important;animation-delay:0s !important}}
 `;
@@ -141,6 +168,7 @@ html.sb-intro .sb-rise, html.sb-intro .sb-word, html.sb-intro .sb-pop{animation-
 export default function Intro({ lang, onDone }: { lang: string; onDone: () => void }) {
   const [phase, setPhase] = useState<"play" | "exit" | "gone">(() => (shouldPlay() ? "play" : "gone"));
   const doneRef = useRef(onDone);
+  const tiltRef = useRef<HTMLDivElement>(null);
   doneRef.current = onDone;
 
   // load the two fonts right away so the handwriting is ready on the first frame
@@ -205,20 +233,41 @@ export default function Intro({ lang, onDone }: { lang: string; onDone: () => vo
   const pills = PILLS[lang] ?? PILLS.en;
 
   return (
-    <div className={`sbi-root fixed inset-0 z-[100] overflow-hidden flex items-center justify-center ${phase === "exit" ? "sbi-exit" : ""}`} role="presentation">
+    <div
+      className={`sbi-root fixed inset-0 z-[100] overflow-hidden flex items-center justify-center ${phase === "exit" ? "sbi-exit" : ""}`}
+      role="presentation"
+      onPointerMove={(e) => {
+        const el = tiltRef.current;
+        if (!el) return;
+        el.style.setProperty("--tx", `${((e.clientX / window.innerWidth - 0.5) * 12).toFixed(2)}deg`);
+        el.style.setProperty("--ty", `${(-(e.clientY / window.innerHeight - 0.5) * 8).toFixed(2)}deg`);
+      }}
+    >
       <style>{CSS}</style>
       <div className="sbi-lines" aria-hidden />
       <div className="sbi-vig" aria-hidden />
 
       <button
-        onClick={() => setPhase("exit")}
+        onClick={() => {
+          try {
+            sessionStorage.setItem(SKIPKEY, "1");
+          } catch {
+            /* ignore */
+          }
+          setPhase("exit");
+        }}
         className="sbi-skip absolute top-4 right-4 z-10 px-4 py-2 rounded-full text-sm font-semibold text-white/80 border border-white/25 hover:bg-white/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
       >
         {SKIP[lang] ?? SKIP.en}
       </button>
 
-      <div className="sbi-stage" aria-hidden>
+      <div className="sbi-tilt" ref={tiltRef} aria-hidden>
+      <div className="sbi-stage">
         <div className="sbi-glow" />
+
+        {GHOSTS.map((g, i) => (
+          <div key={i} className="sbi-ghost" style={{ ["--x" as any]: g.x, ["--y" as any]: g.y, ["--z" as any]: g.z, ["--r" as any]: g.r }} />
+        ))}
 
         <div className="sbi-fold">
           <div className="sbi-card">
@@ -263,6 +312,7 @@ export default function Intro({ lang, onDone }: { lang: string; onDone: () => vo
             ))}
           </div>
         </div>
+      </div>
       </div>
 
       <div className="sbi-rail" aria-hidden>

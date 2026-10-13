@@ -1342,10 +1342,16 @@ function LastUpdated({ at, refreshing, auto, sec }: { at: number | null; refresh
 
 function ThemeToggle({ className = "adm-btn sq adm-themebtn" }: { className?: string }) {
   const { theme, toggle } = useTheme();
-  const next = theme === "dark" ? "light" : "dark";
+  const dark = theme === "dark";
+  const next = dark ? "light" : "dark";
+  // Sun and moon sit on top of each other and spin / shrink through one another when the theme changes.
+  const icon: React.CSSProperties = { position: "absolute", inset: 0, transition: "transform .6s cubic-bezier(.34,1.56,.64,1), opacity .35s ease" };
   return (
     <button type="button" className={className} onClick={toggle} aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} data-testid="button-theme-toggle">
-      {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+      <span style={{ position: "relative", display: "block", width: 16, height: 16 }}>
+        <Sun size={16} style={{ ...icon, opacity: dark ? 1 : 0, transform: dark ? "rotate(0deg) scale(1)" : "rotate(-140deg) scale(0.2)" }} />
+        <Moon size={16} style={{ ...icon, opacity: dark ? 0 : 1, transform: dark ? "rotate(140deg) scale(0.2)" : "rotate(0deg) scale(1)" }} />
+      </span>
     </button>
   );
 }
