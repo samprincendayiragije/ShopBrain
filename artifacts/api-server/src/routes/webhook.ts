@@ -290,10 +290,10 @@ const T = {
   },
   rw: {
     welcome: "👋 Murakaza neza kuri *ShopBrain*",
-    addDebt: "➕ Ongeraho Umwenda",
+    addDebt: "➕ Ongeraho amafaranga",
     findCustomer: "🔍 Shakisha Umukiriya",
     changeLanguage: "🌐 Guhindura Ururimi",
-    askPhone: "➕ *Ongeraho Umwenda*\n\nAndika nimero y'umukiriya?\n\nUrugero: 0788123456",
+    askPhone: "➕ *Ongeraho amafaranga*\n\nAndika nimero y'umukiriya?\n\nUrugero: 0788123456",
     askName: "Andika izina ry'umukiriya?",
     askItem: "Igicuruzwa atwaye?",
     askAmount: "Amafaranga atarishyurwa? (muri Frw)\n\n✍️ Andika cyangwa ukande hano hasi",
@@ -303,7 +303,7 @@ const T = {
       `✅ *amakuru arabitse ubu\n\n👤 ${name} (${phone})\n📦 Igicuruzwa: ${item}\n💰 Amafaranga: ${amount.toLocaleString()} Frw\n📊 Asigayemo: ${total.toLocaleString()} Frw`,
     noCustomer: (phone: string) => `❌ Uyu mukiriya ntago yanditse muri sisteme ${phone}.`,
     noCustomerText: "❌ Uyu mukiriya ntago yanditse muri sisteme.",
-    allPaid: (name: string) => `✅ Amadeni yose hemejwe ko yishyuwe kuri *${name}*.`,
+    allPaid: (name: string) => `✅ amafaranga yose yemejwe ko yishyuwe kuri *${name}*.`,
     viewHistory: "📋 Raporo y'ideni",
     sendReminder: "🔔 kwibutsa",
     markPaidBtn: "✅ Emeza Kwishyura",
@@ -353,8 +353,8 @@ const T = {
     reminderInvalidNumber: "❌ Nimero si yo.\nIbutsa: REMIND <nimero>\nUrugero: REMIND 0788123456",
     remindAllSummary: (count: number, total: number) => `✅ Ubutumwa bwoherejwe kubakiriya *${count}*:\n\n`,
     remindAllTotal: (total: number) => `\n💰 *Igiteranyo cyamafranga: ${total.toLocaleString()} Frw*`,
-    remindAllNone: "✅ Nta bakiriya bafite amadeni.",
-    totalDebtHeader: "💰 *Igiteranyo cy'amadeni atarishyurwa*",
+    remindAllNone: "✅ Nta bakiriya bafite amafaranga.",
+    totalDebtHeader: "💰 *Igiteranyo cy'amafaranga atarishyurwa*",
     totalDebtCustomerCount: (count: number) => `📊 abakiriya bakurimo amafranga: ${count}`,
     totalDebtGrandTotal: (total: number) => `💵 *Igiteranyo k'ideni ryose: ${total.toLocaleString()} Frw*`,
     totalDebtTopDebtors: "Abafitemo ideni rinini:",
@@ -368,23 +368,23 @@ const T = {
 💡 Inama: andika byose mu butumwa bumwe, urugero 0788123456 Jean isukari 2000
 
 *Uko bikora:*
-➕ Ongeraho Umwenda — andika umwenda mushya
+➕ Ongeraho amafaranga — andika umwenda mushya
 ✅ Emeza Kwishyura — andika nimero, hanyuma uhitemo Igice cyangwa Byose
 📋 Menu — urutonde rwose rw'ibikorwa:
-🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo. Ku makuru ye: Raporo y'ideni, Kwibutsa, Emeza Kwishyura, ↩️ Siba amakuru aheruka (usiba umwenda uheruka niba wibeshye), ✏️ Hindura Umukiriya, 📅 Itariki (andika igihe yasezeranyije kwishyura)
+🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo. Ku makuru ye: Raporo y'ideni, Kwibutsa, Emeza Kwishyura, ↩️ Siba amakuru aheruka (usiba amafaranga uheruka niba wibeshye), ✏️ Hindura Umukiriya, 📅 Itariki (andika igihe yasezeranyije kwishyura)
 🔔 Kwibutsa — wibutsa umukiriya umwe, cyangwa bose icyarimwe
 🚩 Gukurikirana — abakiriya bakeneye guhamagarwa cyangwa gusurwa
 📋 Abakiriya Bose — urutonde rw'abakiriya bawe bose
-💰 Amafaranga & Raporo — Igiteranyo, Raporo y'Amadeni, Uyu Munsi, 🏆 Byagarutse (ibyo ShopBrain yagukuriye), 📤 Kohereza Kopi (amadeni yose muri Excel)
-💼 Amadeni Nkwiye — andika ibyo ugomba abagemura ubyemeze igihe wishyuye
+💰 Amafaranga & Raporo — Igiteranyo, Raporo y'amafaranga, Uyu Munsi, 🏆 Byagarutse (ibyo ShopBrain yagukuriye), 📤 Kohereza Kopi (amafaranga yose muri Excel)
+💼 Amafaranga ntarishyura — andika ibyo ugomba abagemura ubyemeze igihe wishyuye
 ⚙️ Igenamiterere — 💳 MoMo & nimero, ⏰ Kwibutsa Byikora, 🚧 Ikirenga cy'Ideni, 🌐 Ururimi, 🔒 Umutekano
 
 *Amabwiriza wandika (ntibisabwa):*
-- TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amadeni yose
+- TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amafaranga yose
 - UYU MUNSI cyangwa TODAY — ibyongeweho n'ibyishyuwe uyu munsi
 - GUKURIKIRANA — abakiriya bakeneye guhamagarwa cyangwa gusurwa
 - RAPORO — amafaranga asigaye n'ayagarutse
-- REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amadeni
+- REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amafaranga
 - REMIND <nimero> — wibutsa umukiriya umwe
 - @ALL — reba abakiriya bawe bose
 - MOMO — shyiraho amakuru ya MTN MoMo azagaragara ku butumwa
@@ -421,7 +421,7 @@ const T = {
     editKeepPhone: "⏭️ Gumana Nimero",
     editSaved: (name: string, phone: string) => `✅ *Umukiriya yahinduwe!*\n\n👤 ${name}\n📞 ${phone}`,
     // --- Reminder consent / STOP opt-out ---
-    askConsent: "📋 Uyu mukiriya azakira ubutumwa bwo kwibutsa amadeni kuri WhatsApp?\n",
+    askConsent: "📋 Uyu mukiriya azakira ubutumwa bwo kwibutsa amafaranga kuri WhatsApp?\n",
     consentYes: "✅ Yego",
     consentNo: "❌ Oya",
     consentSavedYes: "✅ Byabitswe. Uyu mukiriya ashobora kwibutswa.",
@@ -487,14 +487,14 @@ const T = {
     undoConfirm: (name: string, item: string, amount: number, date: string) =>
       `↩️ Ushaka gusiba uyu mwenda wa *${name}*?\n\n📦 ${item}\n💰 ${amount.toLocaleString()} Frw\n📅 ${date}`,
     undoDone: (name: string, item: string, amount: number, total: number) =>
-      `✅ *Umwenda wasibwe*\n\n👤 ${name}\n📦 ${item} — ${amount.toLocaleString()} Frw\n📊 Asigayemo ubu: ${total.toLocaleString()} Frw`,
-    undoAlreadyPaid: (name: string) => `ℹ️ Umwenda uheruka wa *${name}* wamaze kwishyurwa, ntushobora gusibwa hano.`,
+      `✅ *amafaranga wasibwe*\n\n👤 ${name}\n📦 ${item} — ${amount.toLocaleString()} Frw\n📊 Asigayemo ubu: ${total.toLocaleString()} Frw`,
+    undoAlreadyPaid: (name: string) => `ℹ️ amafaranga uheruka wa *${name}* wamaze kwishyurwa, ntushobora gusibwa hano.`,
     undoNothing: (name: string) => `ℹ️ *${name}* nta mwenda wo gusiba afite.`,
     undoGone: "ℹ️ Uyu mwenda waramaze gusibwa.",
     // --- Today ---
     todayBtn: "📆 Uyu Munsi",
     todayHeader: "📆 *Uyu Munsi*",
-    todayDebts: (total: number, n: number) => `➕ Amadeni yongeweho: *${total.toLocaleString()} Frw* (${n})`,
+    todayDebts: (total: number, n: number) => `➕ amafaranga yongeweho: *${total.toLocaleString()} Frw* (${n})`,
     todayPayments: (total: number, n: number) => `✅ Yishyuwe: *${total.toLocaleString()} Frw* (${n})`,
     todayOwed: (total: number, count: number) => `💰 Asigayemo ubu: *${total.toLocaleString()} Frw* (abakiriya ${count})`,
   },

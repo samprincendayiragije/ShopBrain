@@ -388,7 +388,7 @@ const rw: typeof en = {
   dailySummary: (sent: number, failed: number) =>
     `⏰ Kwibutsa byikora uyu munsi: ${sent} byoherejwe${failed ? ` · ${failed} byanze` : ""}`,
 
-  custMenuBody: "👋 Muraho! Iyi ni *ShopBrain*, ifasha amaduka mugurira gucunga amadeni.\n\nMushaka iki?",
+  custMenuBody: "👋 Muraho! Iyi ni *ShopBrain*, ifasha amaduka mugurira gucunga amafaranga atarishyurwa n'abakiriya.\n\nMushaka iki?",
   custBtnBalance: "💰 Ideni Ryanjye",
   custBtnPay: "💳 Uko Nishyura",
   custBtnStop: "🛑 Hagarika",
