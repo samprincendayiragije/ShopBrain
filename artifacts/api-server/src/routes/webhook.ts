@@ -3,8 +3,13 @@ import { sendWhatsAppMessage, sendWhatsAppInteractiveMessage, sendWhatsAppTempla
 import { supabase } from "../lib/supabase.js";
 import { runWeeklyCheckin } from "../jobs/weeklyCheckin.js";
 import * as features from "../lib/shopFeatures.js";
+import * as extras from "../lib/shopExtras.js";
+import { parseAmountToken } from "../lib/shopParsing.js";
 
 const router: IRouter = Router();
+
+// Shown at the bottom of the Help message so anyone can reach you.
+const SUPPORT_PHONE = process.env["SUPPORT_PHONE"] ?? "+250 795 120 043";
 
 const VERIFY_TOKEN =
   process.env["WHATSAPP_VERIFY_TOKEN"] ?? "ShopBrain_kigali_2026";
@@ -73,7 +78,7 @@ const sessions: Record<string, Session> = {};
 
 const T = {
   en: {
-    welcome: "👋 Welcome to *ShopBrain*\nWhat would you like to do?",
+    welcome: "👋 Welcome to *ShopBrain*",
     addDebt: "➕ Add Debt",
     findCustomer: "🔍 Find Customer",
     changeLanguage: "🌐 Change Language",
@@ -145,19 +150,22 @@ const T = {
     totalDebtNone: "✅ No outstanding debts. All customers have paid!",
     paidHint: "💡 To mark a customer as paid, type:\nPAID 0788123456\nor for partial: PAID 0788123456 2000",
     helpTitle: "📖 *ShopBrain — What I Can Do*",
+    // Only shown when STOCK_FEATURES=on (stock management is held off for now).
+    helpStock: "📦 Stock features:\n💵 Record Sale — sell from stock, cash or on credit; stock goes down automatically\n📦 Stock — add items, restock, see what's running low\n💹 Profit — today / 7 / 30 days (under Money & Reports)\n🧾 Add Expense — record money you spent (under Money & Reports)",
+    helpFooter: (phone: string, link: string) => `💬 Need help with ShopBrain? Message us: ${phone}\n${link}`,
     helpBody: `Here's everything you can do:
+
+💡 Tip: type everything in one message, e.g. 0788123456 Jean sugar 2000
 
 *Using the buttons:*
 ➕ Add Debt — record a new customer debt
 ✅ Mark as Paid — enter their number, then choose Partially or Full Payment
-📋 Menu — opens the full list of actions:
+📋 Menu — the full list of actions:
 🔍 Find Customer — look up a customer's balance. On their card: View History, Send Reminder, Mark as Paid, ↩️ Undo Last Debt (removes their latest debt if you made a mistake), ✏️ Edit Customer, 📅 Promise Date (note when they promised to pay)
 🔔 Send Reminder — remind one customer, or everyone at once
 🚩 Follow-up — customers who need a call or a visit
 📋 All Customers — your full customer list
-💵 Record Sale — sell from stock, cash or on credit; stock goes down automatically
-📦 Stock — add items, restock, see what's running low
-💰 Money & Reports — Total Debt, Debt Report, Today, 💹 Profit (today / 7 / 30 days), 🧾 Add Expense
+💰 Money & Reports — Total Debt, Debt Report, Today, 🏆 Recovered (what ShopBrain won back for you), 📤 Export (all your debts as an Excel file)
 💼 I Owe Suppliers — track what you owe your suppliers and mark it paid
 ⚙️ Settings — 💳 MoMo & contact number, ⏰ Auto Reminders, 🚧 Credit Limit, 🌐 Language, 🔒 Security
 
@@ -226,6 +234,7 @@ const T = {
     multipleCustomersFoundReminder: (name: string) => `🔍 Found a few customers matching "${name}". Tap who to remind:`,
     noNameMatch: (name: string) => `❌ No customer found matching "${name}".`,
     optedOutRowLabel: "🚫 Opted out — STOP",
+    noNumberRowLabel: "📵 No number — can't remind",
     // --- No-number duplicate name warning ---
     duplicateNameWarning: (name: string, item: string, total: number) =>
       `⚠️ You already have another customer named *${name}* with no phone number (owes ${total.toLocaleString()} Frw, last item: ${item}).\n\nTo avoid mixing them up later, you can add a short label (e.g. "${name} (motorbike)"), or continue if you're sure this is a different person.`,
@@ -280,41 +289,41 @@ const T = {
     todayOwed: (total: number, count: number) => `💰 Total owed now: *${total.toLocaleString()} Frw* (${count} customers)`,
   },
   rw: {
-    welcome: "👋 Murakaza neza kuri *ShopBrain*\nUrashaka gukora iki?",
-    addDebt: "➕ Ongeraho Umwenda",
+    welcome: "👋 Murakaza neza kuri *ShopBrain*",
+    addDebt: "➕ Ongeraho amafaranga",
     findCustomer: "🔍 Shakisha Umukiriya",
     changeLanguage: "🌐 Guhindura Ururimi",
-    askPhone: "➕ *Ongeraho Umwenda*\n\nAndika nimero y'umukiriya?\n\nUrugero: 0788123456",
+    askPhone: "➕ *Ongeraho amafaranga*\n\nAndika nimero y'umukiriya?\n\nUrugero: 0788123456",
     askName: "Andika izina ry'umukiriya?",
     askItem: "Igicuruzwa atwaye?",
-    askAmount: "Agusigayemo angahe? (muri Frw)\n\n✍️ Andika cyangwa uhitemo hano hasi (si ngombwa)",
+    askAmount: "Amafaranga atarishyurwa? (muri Frw)\n\n✍️ Andika cyangwa ukande hano hasi",
     invalidPhone: "❌ Nimero si yo. Andika nimero y'umukiriya ikurikira:",
     invalidAmount: "❌ Umubare si wo. Andika umubare urugero 5000",
     debtSaved: (name: string, phone: string, item: string, amount: number, total: number) =>
-      `✅ *Umwenda Wabitswe!*\n\n👤 ${name} (${phone})\n📦 Igicuruzwa: ${item}\n💰 Byongewe: ${amount.toLocaleString()} Frw\n📊 Asigayemo: ${total.toLocaleString()} Frw`,
+      `✅ *amakuru arabitse ubu\n\n👤 ${name} (${phone})\n📦 Igicuruzwa: ${item}\n💰 Amafaranga: ${amount.toLocaleString()} Frw\n📊 Asigayemo: ${total.toLocaleString()} Frw`,
     noCustomer: (phone: string) => `❌ Uyu mukiriya ntago yanditse muri sisteme ${phone}.`,
     noCustomerText: "❌ Uyu mukiriya ntago yanditse muri sisteme.",
-    allPaid: (name: string) => `✅ Amadeni yose yabazwe nkayishyuwe kuri *${name}*.`,
+    allPaid: (name: string) => `✅ amafaranga yose yemejwe ko yishyuwe kuri *${name}*.`,
     viewHistory: "📋 Raporo y'ideni",
     sendReminder: "🔔 kwibutsa",
     markPaidBtn: "✅ Emeza Kwishyura",
-    reminderSent: (name: string) => `⏳ Ubutumwa bwoherejwe kuri *${name}* — tegereza ko bakiriye...`,
+    reminderSent: (name: string) => `⏳ Ubutumwa bwoherejwe kuri *${name}*`,
     reminderDelivered: (name: string, phone: string, amount: number) =>
-      `✅ Umukiriya *${name}* (${phone}) yakiriye ubutumwa bw'ishyura rya *${amount.toLocaleString()} Frw* 🎉`,
+      `✅ Umukiriya *${name}* (${phone}) yakiriye ubutumwa bw'ibutsa kwishyura *${amount.toLocaleString()} Frw* 🎉`,
     reminderRead: (name: string) => `👀 Umukiriya *${name}* yasomye ubutumwa!`,
     reminderSentNotReceived: (name: string, phone: string) =>
       `✅ Ubutumwa bwoherejwe neza kuri *${name}* (${phone}) — ntabwo barakira ubutumwa`,
-    reminderFailed: (phone: string) => `❌ Ubutumwa ntabwo bwoherejwe — *+${phone}* ntago bafite WhatsApp`,
+    reminderFailed: (phone: string) => `❌ Ubutumwa ntabwo bwoherejwe — *+${phone}* nimero ntiba kuri WhatsApp`,
     reminderFailedGeneric: (name: string, code: number) => `❌ Ubutumwa bwanze kuri *${name}* (code: ${code}) — gerageza nanone`,
-    noDebts: (name: string) => `✅ ${name} ntagomba kwishyura. Nta butumwa bwoherejwe.`,
+    noDebts: (name: string) => `✅ ${name} nta mafaranga atarishyurwa yanditse.`,
     findCustomerPrompt: "🔍 *Shakisha Umukiriya*\n\nAndika nimero y'umukiriya:",
     findCustomerPromptSearch: "🔍 *Shakisha Umukiriya*\n\nAndika nimero cyangwa izina ry'umukiriya:",
     findReminderPromptSearch: "🔔 *Kwibutsa*\n\nAndika nimero cyangwa izina ry'umukiriya:",
     markPaidPrompt: "✅ *Emeza Kwishyura*\n\nAndika nimero y'umukiriya:",
-    askPartialAmount: "💰 Umukiriya ariha angahe?",
-    askPartialItem: "📦 Ni iyihe kiguzi cy'iri shyura?",
+    askPartialAmount: "💰 Umukiriya arishyura angahe?",
+    askPartialItem: "📦 Ni ikihe kiguzi ari kwishyura?",
     whatToDo: "Urashaka gukora iki?",
-    existingCustomer: (name: string) => `👤 Umukiriya warahise: *${name}*\n\nIgicuruzwa atwaye?`,
+    existingCustomer: (name: string) => `👤 Umukiriya usanzwe: *${name}*\n\nIgicuruzwa atwaye?`,
     noHistory: (name: string) => `📋 Nta makuru yabonetse kuri ${name}.`,
     historyHeader: (name: string) => `📋 *Raporo y'ideni — ${name}*`,
     totalOwed: (total: number) => `💰 *Asigayemo: ${total.toLocaleString()} Frw*`,
@@ -327,53 +336,55 @@ const T = {
     registered: "Yanditse",
     cleared: "Yishyuye ✅",
     partialPaid: (name: string, paid: number, remaining: number, item: string) =>
-      `✅ *Igice cy'ishyura cyabitswe!*\n\n👤 ${name}\n📦 Kuri: ${item}\n💰 Yishyuye: ${paid.toLocaleString()} Frw\n📊 Asigayemo: ${remaining.toLocaleString()} Frw`,
+      `✅ *Amafaranga yishyuwe yabitswe!*\n\n👤 ${name}\n📦 Kuri: ${item}\n💰 Yishyuye: ${paid.toLocaleString()} Frw\n📊 Asigayemo: ${remaining.toLocaleString()} Frw`,
     fullPaid: (name: string, paid: number) =>
-      `✅ *Yishyuye yose!*\n\n👤 ${name}\n💰 Yishyuye: ${paid.toLocaleString()} Frw\n📊 Asigayemo: 0 Frw`,
-    noUnpaid: (name: string) => `✅ ${name} ntagomba kwishyura.`,
-    askShopName: "👋 Murakaza neza kuri *ShopBrain!*\n\nAndikisha ubucuruzi bwawe:",
+      `✅ *amafaranga yose arishyuwe!*\n\n👤 ${name}\n💰 Yishyuye: ${paid.toLocaleString()} Frw\n📊 Asigayemo: 0 Frw`,
+    noUnpaid: (name: string) => `✅ ${name} nta mafaranga atarishyurwa.`,
+    askShopName: "👋 Murakaza neza kuri *ShopBrain!*\n\nAndika amazina yawe cyangwa izina ry'iduka:",
     shopNameSaved: (name: string) => `✅ Kwiyandikisha byakunze — *${name}*!`,
-    shopNameTooShort: "❌ Izina rifupi cyane. Andikisha ubucuruzi bwawe:",
-    selectLanguage: "🌐 Hitamo ururimi rwawe:",
-    languageSet: "✅ Ururimi rwahinduwe kuri Kinyarwanda!",
-    ownerOnly: "Iyi nimero ni iy'nyir'iduka gusa.",
-    somethingWrong: "Hari ikibazo. Gerageza nanone.",
-    interactiveRetry: "❌ Hari ikibazo cyabaye. Ongera ukande buto:",
-    languageAlreadySetRegistered: "🌐 Ururimi rwarahisemo. Niba ushaka kurihindura, koresha 'Guhindura Ururimi' kuri menu.",
-    languageAlreadySetUnregistered: "🌐 Ururimi rwarahisemo. Ongera wandike izina ry'ubucuruzi bwawe kugira ngo urangize kwiyandikisha. Ushobora guhindura ururimi nyuma.",
-    reminderInvalidNumber: "❌ Nimero si yo.\nUkurikira: REMIND <nimero>\nUrugero: REMIND 0788123456",
-    remindAllSummary: (count: number, total: number) => `✅ Ubutumwa woherejewe kubakiriya *${count}*:\n\n`,
+    shopNameTooShort: "❌ Izina ni rigufi cyane.Ongera w'andike izina ryawe cyangwa iry'ubucuruzi bwawe:",
+    selectLanguage: "🌐 Hitamo ururimi:",
+    languageSet: "✅ Ururimi rwahinduwe mu Kinyarwanda!",
+    ownerOnly: "Iyi sisteme ni iyabacuruzi gusa, twandikire hano tugufashe cyangwa ujye kurubuga rwacu\n\n https://shop-brain-webhook--ndayiragijesamu.replit.app/",
+    somethingWrong: "Habayeho ikibazo. Gerageza nanone.",
+    interactiveRetry: "❌ Hari ikibazo cyabaye. Ongera ukande:",
+    languageAlreadySetRegistered: "🌐 Guhitamo ururimi byagenze neza. Niba ushaka kuruhindura, koresha 'Guhindura Ururimi' kuri menu.",
+    languageAlreadySetUnregistered: "🌐 Guhitamo ururimi byagenze neza. Ongera wandike izina ryawe cyangwa ry'ubucuruzi bwawe kugira ngo urangize kwiyandikisha. Ushobora guhindura ururimi nyuma.",
+    reminderInvalidNumber: "❌ Nimero si yo.\nIbutsa: REMIND <nimero>\nUrugero: REMIND 0788123456",
+    remindAllSummary: (count: number, total: number) => `✅ Ubutumwa bwoherejwe kubakiriya *${count}*:\n\n`,
     remindAllTotal: (total: number) => `\n💰 *Igiteranyo cyamafranga: ${total.toLocaleString()} Frw*`,
-    remindAllNone: "✅ Nta bakiriya bafite amadeni.",
-    totalDebtHeader: "💰 *Igiteranyo cy'amadeni atarishyurwa*",
+    remindAllNone: "✅ Nta bakiriya bafite amafaranga.",
+    totalDebtHeader: "💰 *Igiteranyo cy'amafaranga atarishyurwa*",
     totalDebtCustomerCount: (count: number) => `📊 abakiriya bakurimo amafranga: ${count}`,
     totalDebtGrandTotal: (total: number) => `💵 *Igiteranyo k'ideni ryose: ${total.toLocaleString()} Frw*`,
     totalDebtTopDebtors: "Abafitemo ideni rinini:",
     totalDebtNone: "✅ Nta madeni asigaye. Abakiriya bose barishyuye!",
-    paidHint: "💡 Kwishyura umukiriya, andika:\nPAID 0788123456\ncyangwa igice: PAID 0788123456 2000",
-    helpTitle: "📖 *ShopBrain — Ibyo Nshobora Gukora*",
+    paidHint: "💡 Kwishyura yose k'umukiriya, andika:\nPAID 0788123456\ncyangwa igice: PAID 0788123456 2000",
+    helpTitle: "📖 *ShopBrain — Ibyo ishobora Gukora ubu*",
+    helpStock: "📦 Ububiko:\n💵 Andika Igurisha — gurisha mu bubiko, cash cyangwa ku mwenda; ububiko bugabanuka bwonyine\n📦 Ububiko — ongeramo ibicuruzwa, reba ibigiye gushira\n💹 Inyungu — uyu munsi / iminsi 7 / 30 (muri Amafaranga & Raporo)\n🧾 Andika Ikiguzi — andika amafaranga wakoresheje (muri Amafaranga & Raporo)",
+    helpFooter: (phone: string, link: string) => `💬 Ukeneye ubufasha kuri ShopBrain? Twandikire: ${phone}\n${link}`,
     helpBody: `Dore ibyo wakoresha:
 
-*Gukoresha buto:*
-➕ Ongeraho Umwenda — andika umwenda mushya
+💡 Inama: andika byose mu butumwa bumwe, urugero 0788123456 Jean isukari 2000
+
+*Uko bikora:*
+➕ Ongeraho amafaranga — andika umwenda mushya
 ✅ Emeza Kwishyura — andika nimero, hanyuma uhitemo Igice cyangwa Byose
-📋 Menu — fungura urutonde rwose rw'ibikorwa:
-🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo. Ku makuru ye: Raporo y'ideni, Kwibutsa, Emeza Kwishyura, ↩️ Siba Uheruka (usiba umwenda uheruka niba wibeshye), ✏️ Hindura Umukiriya, 📅 Itariki (andika igihe yasezeranyije kwishyura)
+📋 Menu — urutonde rwose rw'ibikorwa:
+🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo. Ku makuru ye: Raporo y'ideni, Kwibutsa, Emeza Kwishyura, ↩️ Siba amakuru aheruka (usiba amafaranga uheruka niba wibeshye), ✏️ Hindura Umukiriya, 📅 Itariki (andika igihe yasezeranyije kwishyura)
 🔔 Kwibutsa — wibutsa umukiriya umwe, cyangwa bose icyarimwe
 🚩 Gukurikirana — abakiriya bakeneye guhamagarwa cyangwa gusurwa
 📋 Abakiriya Bose — urutonde rw'abakiriya bawe bose
-💵 Andika Igurisha — gurisha mu bubiko, cash cyangwa ku mwenda; ububiko bugabanuka bwonyine
-📦 Ububiko — ongeramo ibicuruzwa, reba ibigiye gushira
-💰 Amafaranga & Raporo — Igiteranyo, Raporo y'Amadeni, Uyu Munsi, 💹 Inyungu (uyu munsi / iminsi 7 / 30), 🧾 Andika Ikiguzi
-💼 Amadeni Nkwiye — andika ibyo ugomba abagemura ubyemeze igihe wishyuye
+💰 Amafaranga & Raporo — Igiteranyo, Raporo y'amafaranga, Uyu Munsi, 🏆 Byagarutse (ibyo ShopBrain yagukuriye), 📤 Kohereza Kopi (amafaranga yose muri Excel)
+💼 Amafaranga ntarishyura — andika ibyo ugomba abagemura ubyemeze igihe wishyuye
 ⚙️ Igenamiterere — 💳 MoMo & nimero, ⏰ Kwibutsa Byikora, 🚧 Ikirenga cy'Ideni, 🌐 Ururimi, 🔒 Umutekano
 
 *Amabwiriza wandika (ntibisabwa):*
-- TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amadeni yose
+- TOTAL cyangwa IGITERANYO — reba igiteranyo cy'amafaranga yose
 - UYU MUNSI cyangwa TODAY — ibyongeweho n'ibyishyuwe uyu munsi
 - GUKURIKIRANA — abakiriya bakeneye guhamagarwa cyangwa gusurwa
 - RAPORO — amafaranga asigaye n'ayagarutse
-- REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amadeni
+- REMIND ALL cyangwa KWIBUTSA BOSE — wibutsa abakiriya bose bafite amafaranga
 - REMIND <nimero> — wibutsa umukiriya umwe
 - @ALL — reba abakiriya bawe bose
 - MOMO — shyiraho amakuru ya MTN MoMo azagaragara ku butumwa
@@ -396,11 +407,11 @@ const T = {
     moreBtn: "➕ Ibindi",
     momoMenuStart: "💳 Shyiraho MoMo",
     momoMenuContact: "📞 Nimero yo Kuvugana",
-    contactNumberPrompt: "Ese abakiriya bazakubona bate?\n\nAndika nimero, cyangwa kanda Nta Nimero niba udashaka gutanga imwe.",
-    contactNumberSaved: "✅ Nimero yabitswe! Abakiriya bazamenyeshwa uko bakuvugana.",
+    contactNumberPrompt: "Ese abakiriya bazakubona bate?\n\nAndika nimero, cyangwa kanda Nta Nimero niba nta nimero.",
+    contactNumberSaved: "✅ Nimero yabitswe! Abakiriya bazamenyeshwa uko bakuvugisha.",
     contactNumberSkip: "⏭️ Nta Nimero",
     allCustomersBtn: "📋 Abakiriya Bose",
-    securityBtn: "🔒 Umutekano",
+    securityBtn: "🔒 Uko warinda amakuru na sisteme yawe",
     // --- Edit Customer ---
     editBtn: "✏️ Hindura Umukiriya",
     editIntro: (name: string) => `✏️ *Uhindura ${name}*\n\nAndika izina rishya, cyangwa ukande Gumana Izina niba udashaka guhindura.`,
@@ -410,54 +421,55 @@ const T = {
     editKeepPhone: "⏭️ Gumana Nimero",
     editSaved: (name: string, phone: string) => `✅ *Umukiriya yahinduwe!*\n\n👤 ${name}\n📞 ${phone}`,
     // --- Reminder consent / STOP opt-out ---
-    askConsent: "📋 Uyu mukiriya yemeye kwakira ubutumwa bwo kwibutsa amadeni kuri WhatsApp?\n\nAbemeye gusa nibo bazabona ubutumwa.",
+    askConsent: "📋 Uyu mukiriya azakira ubutumwa bwo kwibutsa amafaranga kuri WhatsApp?\n",
     consentYes: "✅ Yego",
     consentNo: "❌ Oya",
     consentSavedYes: "✅ Byabitswe. Uyu mukiriya ashobora kwibutswa.",
     consentSavedNo: "✅ Byabitswe. Nta butumwa bwo kwibutsa buzoherezwa kuri uyu mukiriya.",
     reminderSkippedOptedOut: (name: string) =>
-      `🚫 *${name}* yasabye guhagarikirwa ubutumwa bwo kwibutsa. Nta butumwa bwoherejwe.`,
+      `🚫 *${name}* yasabye kurekera kwakira ubu ubutumwa bwo kwibutsa. Nta butumwa bwoherejwe.`,
     reminderSkippedNoConsent: (name: string) =>
-      `⚠️ Nta bwemera bwo kwibutsa bwanditswe kuri *${name}*, ubutumwa ntibwoherejwe.`,
-    remindAllSkippedOptOut: (names: string) => `\n\n🚫 Ntibyoherejwe — basabye guhagarikirwa: ${names}`,
+      `⚠️ Ntiyemera kwakira ubutumwa bwo kwibutsa bwanditswe kuri *${name}*, ubutumwa ntibwoherejwe.`,
+    remindAllSkippedOptOut: (names: string) => `\n\n🚫 Ntibyoherejwe — basabye guhagarika ubu butumwa: ${names}`,
     remindAllSkippedNoConsent: (names: string) =>
-      `\n\n⚠️ Ntibyoherejwe — nta bwemera bwanditswe: ${names}\n(Kanda Shakisha Umukiriya → Kwibutsa kugira ngo wandike ubwemera.)`,
+      `\n\n⚠️ Ntibyoherejwe — ntago buryo bwo kohereza bwanditse: ${names}\n(Kanda Shakisha Umukiriya → Kwibutsa - kugira ngo wandike uburyo bwo kwibutsa.)`,
     remindAllNoneSent: "ℹ️ Nta butumwa bwoherejwe.",
     customerOptedOutNotice: (name: string, phone: string) =>
-      `🚫 *${name}* (${phone}) yanditse STOP. ShopBrain ntizongera kohereza ubutumwa bwo kwibutsa kuri iyi nimero.`,
+      `🚫 *${name}* (${phone}) yakanze *HAGARIKA*. ShopBrain ntizongera kohereza ubutumwa bwo kwibutsa kuri iyi nimero.`,
     customerOptedInNotice: (name: string, phone: string) =>
-      `✅ *${name}* (${phone}) yanditse START. Ubutumwa bwo kwibutsa kuri iyi nimero buzongera koherezwa.`,
-    optedOutLine: "🚫 Yasabye guhagarikirwa ubutumwa bwo kwibutsa (yanditse STOP)",
+      `✅ *${name}* (${phone}) yanditse *START*. Ubutumwa bwo kwibutsa kuri iyi nimero buzongera koherezwa.`,
+    optedOutLine: "🚫 Yasabye guhagarikirwa ubutumwa bwo kwibutsa (yAHISEMO *HAGARIKA*)",
     // --- Name search ---
     multipleCustomersFound: (name: string) => `🔍 Hari abakiriya benshi bahuye na "${name}". Kanda uhitemo:`,
     multipleCustomersFoundReminder: (name: string) => `🔍 Hari abakiriya benshi bahuye na "${name}". Kanda uwo wibutsa:`,
     noNameMatch: (name: string) => `❌ Nta mukiriya ubonetse witwa "${name}".`,
     optedOutRowLabel: "🚫 Yahagaritse — STOP",
+    noNumberRowLabel: "📵 Nta nimero — ntibikunze",
     // --- No-number duplicate name warning ---
     duplicateNameWarning: (name: string, item: string, total: number) =>
-      `⚠️ Ufite undi mukiriya witwa *${name}* udafite nimero (asigayemo ${total.toLocaleString()} Frw, igicuruzwa giherutse: ${item}).\n\nKugira ngo utabatanya, wongeraho ikimenyetso gito (urugero: "${name} (moto)"), cyangwa ukomeze niba uzi ko ari umuntu utandukanye.`,
+      `⚠️ Ufite undi mukiriya witwa *${name}* udafite nimero (asigayemo ${total.toLocaleString()} Frw, igicuruzwa giherutse: ${item}).\n\nKugira ngo ubashe kubatandukanya, wongeraho ikimenyetso gito (urugero: "${name} (moto)"), cyangwa ukomeze niba uzi ko ari umuntu utandukanye.`,
     dupContinueBtn: "✅ Komeza Uko Bimeze",
     dupRelabelBtn: "✏️ Ongeraho Ikimenyetso",
     askRelabel: "Andika izina hamwe n'ikimenyetso gito, urugero \"Jean (moto)\":",
     // --- Week-1 check-in flagging ---
     checkinIssueBtn: "❌ Yego, mfite ikibazo",
-    checkinConfirmed: "Byakiriwe — hari uzagufasha vuba.",
+    checkinConfirmed: "Byakiriwe — hari ugufasha vuba.",
     // --- Reminder cooldown ---
     sendAnywayBtn: "📤 Ohereza Nubundi",
     cancelBtn: "✖️ Reka",
     reminderCooldown: (name: string, daysAgo: number) =>
-      `⏱ *${name}* yibutswe ${daysAgo === 0 ? "uyu munsi" : `hashize iminsi ${daysAgo}`}. Kugira ngo abakiriya batarakara, kwibutsa bikorwa rimwe mu minsi ${REMINDER_COOLDOWN_DAYS}.\n\nUracyashaka kohereza?`,
+      `⏱ *${name}* yibukijwe ${daysAgo === 0 ? "uyu munsi" : `hashize iminsi ${daysAgo}`}. kwibutsa bikorwa rimwe mu minsi ${REMINDER_COOLDOWN_DAYS}.\n\nUracyashaka kohereza?`,
     remindAllSkippedRecent: (names: string) =>
-      `\n\n⏱ Ntibyoherejwe — bibutswe mu minsi ${REMINDER_COOLDOWN_DAYS} ishize: ${names}`,
+      `\n\n⏱ Ntibyoherejwe — bibukijwe mu minsi ${REMINDER_COOLDOWN_DAYS} ishize: ${names}`,
     // --- Follow-up list ---
     followUpBtn: "🚩 Gukurikirana",
-    followUpHeader: (count: number) => `🚩 *Abakeneye Gukurikiranwa (${count})*\n\nAba bakiriya bakeneye guhamagarwa cyangwa gusurwa:\n\n`,
+    followUpHeader: (count: number) => `🚩 *Abakeneye Gukurikiranwa (${count})*\n\nAba bakiriya bakeneye guhamagarwa cyangwa kwegerwa:\n\n`,
     followUpContinued: "🚩 *Gukomeza...*\n\n",
-    followUpMore: (n: number) => `➕ Hari abandi ${n} batagaragaye hano. Banza ukurikirane abo hejuru.`,
+    followUpMore: (n: number) => `➕ Hari abandi ${n} batagaragaye hano.`,
     followUpNone: "✅ Nta muntu ukeneye gukurikiranwa ubu.",
     reasonNoPhone: "nta nimero — ntushobora kumwibutsa",
     reasonOptedOut: "yasabye guhagarikirwa ubutumwa — muhamagare",
-    reasonNoConsent: "nta bwemera bwo kwibutsa bwanditswe",
+    reasonNoConsent: "nta cyemeza kwibutsa cyanditse",
     reasonFailed: "ubutumwa bwa nyuma ntibwagezeyo",
     reasonOld: (days: number) => `ideni rya kera rimaze iminsi ${days}`,
     // --- Report ---
@@ -468,21 +480,21 @@ const T = {
     reportCollected7: (total: number) => `✅ Yishyuwe mu minsi 7 ishize: *${total.toLocaleString()} Frw*`,
     reportOldest: (days: number) => `🕰 Ideni rya kera: iminsi ${days}`,
     reportFollowUp: (n: number) => `🚩 Bakeneye gukurikiranwa: ${n} — andika GUKURIKIRANA ubirebe`,
-    reportNote: "ℹ️ Amafaranga yishyuwe abarwa gusa ku kwishyura kwanditswe muri ShopBrain.",
+    reportNote: "ℹ️ Amafaranga yishyuwe abarwa gusa ku kwishyura kwanditse muri ShopBrain.",
     // --- Undo last debt ---
     undoBtn: "↩️ Siba Uheruka",
     undoYes: "✅ Yego, siba",
     undoConfirm: (name: string, item: string, amount: number, date: string) =>
       `↩️ Ushaka gusiba uyu mwenda wa *${name}*?\n\n📦 ${item}\n💰 ${amount.toLocaleString()} Frw\n📅 ${date}`,
     undoDone: (name: string, item: string, amount: number, total: number) =>
-      `✅ *Umwenda wasibwe*\n\n👤 ${name}\n📦 ${item} — ${amount.toLocaleString()} Frw\n📊 Asigayemo ubu: ${total.toLocaleString()} Frw`,
-    undoAlreadyPaid: (name: string) => `ℹ️ Umwenda uheruka wa *${name}* waramaze kwishyurwa, ntushobora gusibwa hano.`,
+      `✅ *amafaranga wasibwe*\n\n👤 ${name}\n📦 ${item} — ${amount.toLocaleString()} Frw\n📊 Asigayemo ubu: ${total.toLocaleString()} Frw`,
+    undoAlreadyPaid: (name: string) => `ℹ️ amafaranga uheruka wa *${name}* wamaze kwishyurwa, ntushobora gusibwa hano.`,
     undoNothing: (name: string) => `ℹ️ *${name}* nta mwenda wo gusiba afite.`,
     undoGone: "ℹ️ Uyu mwenda waramaze gusibwa.",
     // --- Today ---
     todayBtn: "📆 Uyu Munsi",
     todayHeader: "📆 *Uyu Munsi*",
-    todayDebts: (total: number, n: number) => `➕ Amadeni yongeweho: *${total.toLocaleString()} Frw* (${n})`,
+    todayDebts: (total: number, n: number) => `➕ amafaranga yongeweho: *${total.toLocaleString()} Frw* (${n})`,
     todayPayments: (total: number, n: number) => `✅ Yishyuwe: *${total.toLocaleString()} Frw* (${n})`,
     todayOwed: (total: number, count: number) => `💰 Asigayemo ubu: *${total.toLocaleString()} Frw* (abakiriya ${count})`,
   },
@@ -503,7 +515,7 @@ const STOP_CONFIRMATION =
 
 // Words a debtor can send to opt out. Compared after stripping everything
 // except letters, so "Stop", "stop!" and " STOP " all match.
-const STOP_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "GUHAGARIKA"]);
+const STOP_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "GUHAGARIKA", "HAGARIKA"]);
 
 function isStopKeyword(text: string): boolean {
   return STOP_KEYWORDS.has(text.toUpperCase().replace(/[^A-Z]/g, ""));
@@ -677,6 +689,8 @@ async function handleNonOwnerMessage(from: string, text: string, req: Request): 
     await handleDebtorStart(from, req);
     return;
   }
+  // A customer of some shop: show My Balance / How to Pay / Stop buttons instead of making them type.
+  if (await extras.handleCustomerMessage(from)) return;
   await sendWhatsAppMessage(from, NON_OWNER_REPLY);
 }
 
@@ -829,38 +843,34 @@ async function sendNameSearchResults(
   });
 }
 
-// Reminder-specific name search: every remindable match becomes a tappable
-// list row, INCLUDING customers who opted out (marked with a 🚫 prefix and
-// "Opted out — STOP" instead of their amount owed). This is intentional —
-// the owner should see every customer matching the name they typed, exactly
-// like everywhere else in the app, rather than have some silently vanish.
-// Tapping an opted-out row never sends a message: the handler re-checks
-// opt-out status and replies with the standard "can't receive reminders"
-// message instead of calling sendReminder. No-number customers are dropped
-// entirely since there is no way to send them a WhatsApp reminder at all.
+// Reminder-specific name search. Every match is shown, including customers who
+// opted out (🚫) and customers with no number (📵). Tapping an opted-out row never
+// sends anything; tapping a no-number row shows the warning with an Add Number
+// button, because there is no number to remind.
 async function sendReminderNameSearchResults(
   from: string,
   lang: Lang,
   rows: Array<{ id: string; name: string; phone: string | null; total: number; lastItem: string | null; lastDate: string | null }>,
   searchedName: string
 ): Promise<void> {
-  const withPhone = rows.filter((r) => r.phone);
-
-  if (withPhone.length === 0) {
+  if (rows.length === 0) {
     await sendWhatsAppMessage(from, T[lang].noNameMatch(searchedName));
     await sendPersistentMenu(from, lang);
     return;
   }
 
-  const optedOutSet = await getOptedOutSet(withPhone.map((r) => r.phone!));
-
-  // A single match still goes through sendReminder directly (which already
-  // handles the opted-out / no-consent cases with their own messages), so
-  // we only branch into the list UI when there's real ambiguity to resolve.
-  if (withPhone.length === 1) {
-    await sendReminder(from, withPhone[0]!.phone!, lang);
+  // A single match goes straight through (sendReminder handles opted-out / no-consent itself).
+  if (rows.length === 1) {
+    const only = rows[0]!;
+    if (!only.phone) {
+      await extras.sendNoNumberWarning(from, lang, only.id, only.name);
+      return;
+    }
+    await sendReminder(from, only.phone, lang);
     return;
   }
+
+  const optedOutSet = await getOptedOutSet(rows.filter((r) => r.phone).map((r) => r.phone!));
 
   await sendWhatsAppMessage(from, T[lang].multipleCustomersFoundReminder(searchedName));
   await sendWhatsAppInteractiveMessage(from, {
@@ -871,8 +881,15 @@ async function sendReminderNameSearchResults(
       sections: [
         {
           title: lang === "rw" ? "Abakiriya" : "Customers",
-          rows: withPhone.slice(0, 10).map((r) => {
-            const optedOut = optedOutSet.has(cleanPhone(r.phone!));
+          rows: rows.slice(0, 10).map((r) => {
+            if (!r.phone) {
+              return {
+                id: `remindsearch_${r.id}`,
+                title: `📵 ${r.name}`.slice(0, 24),
+                description: T[lang].noNumberRowLabel.slice(0, 72),
+              };
+            }
+            const optedOut = optedOutSet.has(cleanPhone(r.phone));
             return {
               id: `remindsearch_${r.id}`,
               title: `${optedOut ? "🚫 " : ""}${r.name}`.slice(0, 24),
@@ -913,6 +930,7 @@ async function sendNoNumberCustomerSummary(from: string, lang: Lang, customerId:
     action: {
       buttons: [
         { type: "reply", reply: { id: `undo_last_${customer.id}`, title: T[lang].undoBtn } },
+        { type: "reply", reply: { id: `addnum_${customer.id}`, title: extras.xstrings[lang].addNumberBtn } },
       ],
     },
   });
@@ -931,6 +949,8 @@ interface WhatsAppMessage {
   // Set when the sender taps a quick-reply button on a template message
   // (e.g. the STOP button on a reminder).
   button?: { text?: string; payload?: string };
+  // For a tapped template button: the message it was a reply to (the reminder).
+  context?: { id?: string; from?: string };
   type: string;
 }
 
@@ -971,19 +991,35 @@ router.get("/jobs/weekly-checkin", async (req: Request, res: Response) => {
   res.json(result);
 });
 
-// Daily auto-reminder job. Ping it once a day (e.g. cron-job.org at 09:00
-// Africa/Kigali): https://YOUR-HOST/jobs/auto-reminders?key=YOUR_JOB_SECRET
-// It answers straight away and does the sending in the background. Extra
-// pings are harmless — nobody is reminded more than once per cooldown.
+// Auto-reminders. The app now runs this by itself every couple of minutes (see
+// startSchedulers at the bottom), so you do NOT need an external timer. This
+// link stays available if you ever want to trigger it by hand (or from
+// cron-job.org as a backup):  https://YOUR-HOST/jobs/auto-reminders?key=YOUR_JOB_SECRET
+// It answers straight away and works in the background. Extra pings are
+// harmless: nobody is reminded more than once per cooldown.
 router.get("/jobs/auto-reminders", (req: Request, res: Response) => {
   if (JOB_SECRET && req.query["key"] !== JOB_SECRET) {
     res.sendStatus(403);
     return;
   }
-  features
+  extras
     .runAutoReminders()
     .then((r) => req.log.info(r, "Auto-reminder job complete"))
     .catch((err) => req.log.error({ err }, "Auto-reminder job failed"));
+  res.json({ started: true });
+});
+
+// The Monday "ShopBrain recovered X for you" message. Also runs by itself on
+// Monday mornings; each owner can only get one per week, so extra pings are harmless.
+router.get("/jobs/weekly-recovery", (req: Request, res: Response) => {
+  if (JOB_SECRET && req.query["key"] !== JOB_SECRET) {
+    res.sendStatus(403);
+    return;
+  }
+  extras
+    .runWeeklyRecovery()
+    .then((r) => req.log.info(r, "Weekly recovery job complete"))
+    .catch((err) => req.log.error({ err }, "Weekly recovery job failed"));
   res.json({ started: true });
 });
 
@@ -1026,10 +1062,16 @@ router.post("/webhook", async (req: Request, res: Response) => {
     try {
       if (msg.type === "button") {
         const label = msg.button?.payload || msg.button?.text || "";
-        if (isStopKeyword(label)) {
+        // The "stop" button counts whatever its wording is: English "stop", Kinyarwanda
+        // "hagarika" (the words are listed in templateSettings.ts).
+        if (isStopKeyword(label) || extras.isStopButton(msg.button?.text || label)) {
           await handleDebtorStop(from, req);
         } else if (isStartKeyword(label)) {
           await handleDebtorStart(from, req);
+        } else {
+          // Buttons on the reminder template: "I've paid", "How to Pay", "My Balance".
+          const action = extras.classifyCustomerButton(msg.button?.text || label);
+          if (action) await extras.handleCustomerAction(from, action, msg.context?.id ?? null);
         }
         continue;
       }
@@ -1073,11 +1115,12 @@ router.post("/webhook", async (req: Request, res: Response) => {
           .eq("shop_id", log.owner_phone);
       }
 
-      // Auto-reminders go out when the owner's 24h window is usually closed,
-      // so just record the status instead of messaging the owner about each one.
+      // Auto-reminders: save the status, then tell the owner in one short line
+      // ("Reminder to Jean read"). Big runs (log.quiet) get one summary instead.
       if (log.is_auto) {
         if (["sent", "delivered", "read", "failed"].includes(status.status)) {
           await supabase.from("reminder_logs").update({ status: status.status }).eq("message_id", status.id);
+          if (!log.quiet) await extras.notifyAutoStatus(log, status.status, status.errors?.[0]?.code);
         }
         continue;
       }
@@ -1147,12 +1190,14 @@ async function sendFirstTimeMenu(from: string, lang: Lang): Promise<void> {
 }
 
 async function sendHelp(from: string, lang: Lang): Promise<void> {
-  await sendWhatsAppMessage(from, `${T[lang].helpTitle}\n\n${T[lang].helpBody}`);
+  const supportLink = `https://wa.me/${SUPPORT_PHONE.replace(/\D/g, "")}`;
+  await sendWhatsAppMessage(from, `${T[lang].helpTitle}\n\n${T[lang].helpBody}${features.stockEnabled() ? `\n\n${T[lang].helpStock}` : ""}\n\n${T[lang].helpFooter(SUPPORT_PHONE, supportLink)}`);
   await sendPersistentMenu(from, lang);
 }
 
 async function sendPersistentMenu(from: string, lang: Lang): Promise<void> {
-  await sendMenuButtons(from, lang, T[lang].whatToDo);
+  // Debt-only mode: the first bubble IS the menu, so its text is just "Menu", not a question.
+  await sendMenuButtons(from, lang, features.stockEnabled() ? T[lang].whatToDo : features.strings[lang].menuTitle);
 }
 
 async function sendMomoMenu(from: string, lang: Lang): Promise<void> {
@@ -1239,12 +1284,7 @@ async function askConsent(from: string, lang: Lang): Promise<void> {
   });
 }
 
-// --- MoMo setup flow ---
-async function startMomoSetup(from: string, lang: Lang): Promise<void> {
-  sessions[from] = { step: "momo_number", data: {} };
-  await sendWhatsAppMessage(from, T[lang].momoIntro);
-}
-
+// --- MoMo setup flow (the first prompt is features.startMomo; the questions below are the fallback) ---
 async function askMomoCode(from: string, lang: Lang): Promise<void> {
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -1413,6 +1453,13 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
     return;
   }
 
+  // Customer buttons (My Balance / How to Pay / I've Paid) - answered for anyone, owner or not.
+  if (replyId === "cb_balance" || replyId === "cb_pay" || replyId === "cb_paid") {
+    const action = replyId === "cb_balance" ? "balance" : replyId === "cb_pay" ? "pay" : "paid";
+    await extras.handleCustomerAction(from, action, null);
+    return;
+  }
+
   // Week-1 check-in "Yes, I have an issue" button — handled for any real
   // owner regardless of session state. Flags Sam directly via WhatsApp with
   // shop + phone context, so he knows it's a genuine ShopBrain user and not
@@ -1450,12 +1497,13 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   // Menus, stock, sales, profit, expenses, suppliers, auto-reminders,
   // promise dates and credit limit all live in ../lib/shopFeatures.ts.
   if (await features.handleInteractive(from, replyId, lang)) return;
+  // Auto-reminders, no-number fixes, paid claims, recovered scoreboard, export.
+  if (await extras.handleInteractive(from, replyId, lang)) return;
 
   // Main-menu "Mark as Paid": always ask for the customer, never reuse a
   // stale lookup from earlier in the chat.
   if (replyId === "mark_paid_menu") {
-    sessions[from] = { step: "paid_phone", data: {} };
-    await sendWhatsAppMessage(from, T[lang].markPaidPrompt);
+    await features.startMarkPaid(from, lang);
     return;
   }
 
@@ -1500,9 +1548,14 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   if (replyId.startsWith("remindsearch_")) {
     const customerId = replyId.slice("remindsearch_".length);
     const { data: customer } = await supabase.from("customers").select("id, name, phone").eq("id", customerId).eq("shop_id", from).single();
-    if (!customer?.phone) {
+    if (!customer) {
       await sendWhatsAppMessage(from, T[lang].noCustomerText);
       await sendPersistentMenu(from, lang);
+      return;
+    }
+    if (!customer.phone) {
+      // No number to remind: say so, with the Add Number button in the same bubble.
+      await extras.sendNoNumberWarning(from, lang, String(customer.id), customer.name);
       return;
     }
     if (await isOptedOut(customer.phone)) {
@@ -1568,8 +1621,8 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   }
 
   if (replyId === "add_debt") {
-    sessions[from] = { step: "add_phone", data: {} };
-    await sendAddPhonePrompt(from, lang);
+    // One prompt that explains the one-message way: 0788123456 Jean sugar 2000
+    await features.startAddDebt(from, lang);
     return;
   }
 
@@ -1639,7 +1692,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   }
 
   if (replyId === "momo_start") {
-    await startMomoSetup(from, lang);
+    await features.startMomo(from, lang);
     return;
   }
 
@@ -1746,8 +1799,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
       await startMarkPaidForPhone(from, knownPhone, lang);
       return;
     }
-    sessions[from] = { step: "paid_phone", data: {} };
-    await sendWhatsAppMessage(from, T[lang].markPaidPrompt);
+    await features.startMarkPaid(from, lang);
     return;
   }
   if (replyId === "mark_paid_partial") {
@@ -1766,12 +1818,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
       return;
     }
     sessions[from] = undefined as any;
-    // Work out what is being cleared BEFORE marking paid, so the Report can
-    // count it as money collected.
-    const owedBefore = await getUnpaidTotal(customer.id);
-    await supabase.from("transactions").update({ paid: true }).eq("customer_id", customer.id).eq("paid", false);
-    await recordPayment(from, customer.id, customer.name, owedBefore);
-    await sendWhatsAppMessage(from, T[lang].allPaid(customer.name));
+    await markAllPaid(from, lang, customer);
     await sendPersistentMenu(from, lang);
     return;
   }
@@ -1844,6 +1891,8 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
     }
     sessions[from] = undefined as any;
     await sendWhatsAppMessage(from, T[lang].shopNameSaved(shopName));
+    // Brand-new owners start with auto-reminders ON (existing owners must turn it on themselves).
+    await extras.enableAutoRemindForNewOwner(from, lang);
     setTimeout(async () => { await sendFirstTimeMenu(from, lang); }, 500);
     return;
   }
@@ -1892,7 +1941,7 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
   }
 
   if (upper === "MOMO") {
-    await startMomoSetup(from, lang);
+    await features.startMomo(from, lang);
     return;
   }
 
@@ -1916,6 +1965,7 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
     // Stock, sales, expenses, suppliers, promise date and credit-limit
     // answers are handled by ../lib/shopFeatures.ts first.
     if (await features.handleSession(from, text, session, lang)) return;
+    if (await extras.handleSession(from, text, session, lang)) return;
     await handleSession(from, text, session, lang, req);
     return;
   }
@@ -1967,6 +2017,12 @@ async function continueAfterName(from: string, lang: Lang, session: Session): Pr
   }
   session.step = "add_item";
   await sendWhatsAppMessage(from, T[lang].askItem);
+}
+
+// "2000", "2,000" and "2k" all work; anything else gives NaN.
+function parseAmountOrNaN(text: string): number {
+  const n = parseAmountToken(text.trim());
+  return n === null ? NaN : n;
 }
 
 async function handleSession(from: string, text: string, session: Session, lang: Lang, req: Request): Promise<void> {
@@ -2081,20 +2137,12 @@ async function handleSession(from: string, text: string, session: Session, lang:
     return;
   }
   if (session.step === "partial_amount") {
-    const amount = parseInt(text.replace(/\D/g, ""), 10);
+    const amount = parseAmountOrNaN(text);
     if (isNaN(amount) || amount <= 0) {
       await sendWhatsAppMessage(from, T[lang].invalidAmount);
       return;
     }
-    session.data["partialAmount"] = String(amount);
-    session.step = "partial_item";
-    await sendWhatsAppMessage(from, T[lang].askPartialItem);
-    return;
-  }
-  if (session.step === "partial_item") {
-    const item = text.trim();
     const phone = session.data["markPaidPhone"];
-    const amount = parseInt(session.data["partialAmount"] ?? "0", 10);
     sessions[from] = undefined as any;
     const { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
     if (!customer) {
@@ -2102,7 +2150,7 @@ async function handleSession(from: string, text: string, session: Session, lang:
       await sendPersistentMenu(from, lang);
       return;
     }
-    await applyPartialPayment(from, customer, amount, lang, item);
+    await applyPartialPayment(from, customer, amount, lang, lang === "rw" ? "Kwishyura" : "Payment");
     setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
     return;
   }
@@ -2254,8 +2302,6 @@ async function sendReminder(from: string, phone: string, lang: Lang, force = fal
 
   const itemizedList = await buildItemizedList(customer.id);
 
-  const momoBlock = buildMomoBlock(owner ?? {}, reminderLang);
-
   const { data: insertedLog } = await supabase.from("reminder_logs").insert({
     message_id: `pending_${from}_${Date.now()}`,
     owner_phone: cleanPhone(from),
@@ -2265,20 +2311,17 @@ async function sendReminder(from: string, phone: string, lang: Lang, force = fal
     status: "pending",
   }).select().single();
 
-  // Uses the approved debt reminder template (English or Kinyarwanda,
-  // depending on the owner's language). English (debt_reminder) has 6
-  // variables. Kinyarwanda (debt_reminder_rw_v2) has 7 — {{6}} and {{7}}
-  // are both the contact number, repeated, because the template editor
-  // rejected reusing {{6}} twice in the body.
-  const reminderVars = reminderLang === "rw"
-    ? [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone, contactPhone]
-    : [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone];
-  const messageId = await sendWhatsAppTemplateMessage(
-    phone,
-    reminderTemplateName(reminderLang),
-    metaLanguageCode(reminderLang),
-    reminderVars,
-  );
+  // Which approved template to use (the old one with payment details inside, or the
+  // new short one with the How to Pay button) and its variables: see buildReminderPayload.
+  const payload = extras.buildReminderPayload(reminderLang, {
+    customerName: customer.name,
+    shopName,
+    total,
+    itemized: itemizedList,
+    contactPhone,
+    owner: owner ?? {},
+  });
+  const messageId = await sendWhatsAppTemplateMessage(phone, payload.templateName, payload.languageCode, payload.vars);
 
   // Start the cooldown clock and reset the delivery status for the Follow-up list.
   await supabase
@@ -2323,6 +2366,22 @@ async function recordPayment(shopId: string, customerId: string, customerName: s
   if ((await getUnpaidTotal(customerId)) === 0) {
     await supabase.from("customers").update({ promise_date: null }).eq("id", customerId);
   }
+
+  // Receipt to the customer ("You paid X, Y remaining"). It is a Meta template, so it needs
+  // the receipt template approved; until then it quietly does nothing. A moment of delay lets
+  // the owner's own "payment recorded" message arrive first.
+  setTimeout(() => {
+    void extras.sendPaymentReceipt(shopId, customerId, amount);
+  }, 1500);
+}
+
+// Marks every unpaid debt of a customer as paid and tells the owner.
+async function markAllPaid(from: string, lang: Lang, customer: { id: string; name: string }): Promise<void> {
+  // Work out what is being cleared BEFORE marking paid, so the Report can count it as money collected.
+  const owedBefore = await getUnpaidTotal(customer.id);
+  await supabase.from("transactions").update({ paid: true }).eq("customer_id", customer.id).eq("paid", false);
+  await recordPayment(from, customer.id, customer.name, owedBefore);
+  await sendWhatsAppMessage(from, T[lang].allPaid(customer.name));
 }
 
 async function getUnpaidTotal(customerId: string): Promise<number> {
@@ -2691,8 +2750,6 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
   const reminderLang: Lang = (owner?.language as Lang) ?? "en";
   const contactPhone = owner?.contact_phone || cleanPhone(from);
 
-  const momoBlock = buildMomoBlock(owner ?? {}, reminderLang);
-
   const { data: customers } = await supabase.from("customers").select("*").eq("shop_id", from);
 
   if (!customers || customers.length === 0) {
@@ -2711,14 +2768,18 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
   let grandTotal = 0;
   let sentCount = 0;
   let failedCount = 0;
+  let skippedNoNumber = 0; // owe money but have no phone number: shown at the end with a fix button
 
   for (const customer of customers) {
-    // FIX: skip customers with no phone — nothing to send a WhatsApp reminder to.
-    if (!customer.phone) continue;
-
     const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
     const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
     if (total === 0) continue;
+
+    // No phone number: nothing to send a WhatsApp reminder to. Count them so the owner can add the numbers.
+    if (!customer.phone) {
+      skippedNoNumber++;
+      continue;
+    }
 
     // Only customers who owe money get reported as skipped, so the owner
     // isn't told about people who had nothing to be reminded of anyway.
@@ -2748,19 +2809,17 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
     }).select().single();
 
     try {
-      // Same template-based send as sendReminder — required since bulk reminders
-      // almost always go to customers outside the 24h free-form messaging window.
-      // English (debt_reminder) has 6 variables; Kinyarwanda (debt_reminder_rw_v2)
-      // has 7 — {{6}} and {{7}} are both the contact number, repeated.
-      const bulkReminderVars = reminderLang === "rw"
-        ? [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone, contactPhone]
-        : [customer.name, shopName, total.toLocaleString(), itemizedList, momoBlock, contactPhone];
-      const messageId = await sendWhatsAppTemplateMessage(
-        customer.phone,
-        reminderTemplateName(reminderLang),
-        metaLanguageCode(reminderLang),
-        bulkReminderVars,
-      );
+      // Same template-based send as sendReminder: bulk reminders almost always go to
+      // customers outside the 24h free-form messaging window.
+      const payload = extras.buildReminderPayload(reminderLang, {
+        customerName: customer.name,
+        shopName,
+        total,
+        itemized: itemizedList,
+        contactPhone,
+        owner: owner ?? {},
+      });
+      const messageId = await sendWhatsAppTemplateMessage(customer.phone, payload.templateName, payload.languageCode, payload.vars);
       if (insertedLog) {
         await supabase.from("reminder_logs").update({ message_id: messageId }).eq("id", insertedLog.id);
       }
@@ -2793,6 +2852,7 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
     await sendWhatsAppMessage(from, (lang === "rw"
       ? "❌ Ubutumwa ntabwo bwoherejwe — hari ikibazo. Reba raporo cyangwa gerageza nanone."
       : "❌ Reminders failed to send — please check your template/setup and try again.") + skippedNote);
+    if (skippedNoNumber > 0) await extras.sendFixNumbersPrompt(from, lang, skippedNoNumber);
     return;
   }
 
@@ -2800,15 +2860,25 @@ async function sendReminderAll(from: string, lang: Lang, req: Request): Promise<
     if (skippedNote) {
       // Debts exist, but everyone was skipped for opt-out / missing consent / cooldown.
       await sendWhatsAppMessage(from, T[lang].remindAllNoneSent + skippedNote);
-      setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+    } else if (skippedNoNumber === 0) {
+      await sendWhatsAppMessage(from, T[lang].remindAllNone);
       return;
     }
-    await sendWhatsAppMessage(from, T[lang].remindAllNone);
+    if (skippedNoNumber > 0) {
+      // The warning and the button to fix it, in one bubble.
+      await extras.sendFixNumbersPrompt(from, lang, skippedNoNumber);
+      return;
+    }
+    setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
     return;
   }
 
   const summary = T[lang].remindAllSummary(sentCount, grandTotal) + lines.join("\n") + T[lang].remindAllTotal(grandTotal) + skippedNote;
   await sendWhatsAppMessage(from, summary);
+  if (skippedNoNumber > 0) {
+    await extras.sendFixNumbersPrompt(from, lang, skippedNoNumber);
+    return;
+  }
   setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
 }
 
@@ -3071,9 +3141,19 @@ async function handleLegacyPaid(from: string, text: string, lang: Lang): Promise
   }
 }
 
-// Connect the feature module (menus, stock, sales, profit, expenses, supplier
-// debts, auto-reminders, promise dates, credit limit) to this file's helpers.
+// Connect the two feature modules (shopFeatures.ts and shopExtras.ts) to this file's helpers.
 features.initShopFeatures({
+  sessions,
+  cleanPhone,
+  sendMenu: sendPersistentMenu,
+  sendAddDebtPhonePrompt: sendAddPhonePrompt,
+  finishAddDebt,
+  applyPartialPayment,
+  markAllPaid,
+  saveEditedCustomer,
+});
+
+extras.initExtras({
   sessions,
   cleanPhone,
   sendMenu: sendPersistentMenu,
@@ -3083,7 +3163,43 @@ features.initShopFeatures({
   reminderTemplateName,
   metaLanguageCode,
   getOptedOutSet,
+  isOptedOut,
+  getLang,
+  askConsent,
+  startMarkPaid: startMarkPaidForPhone,
   reminderCooldownDays: REMINDER_COOLDOWN_DAYS,
 });
+
+// --- Background jobs (no external timer needed) ---
+// 1) Every 2 minutes: start an auto-reminder countdown that is due (the 5 minutes after an
+//    owner turns it on) and run the daily reminders between 09:00 and 18:00 Kigali time.
+//    Each run is claimed in the database first, so two servers or two pings can't double-send.
+// 2) Every 15 minutes: on Monday after 08:00 Kigali time, send each owner last week's
+//    "ShopBrain recovered X for you". Each owner can only get it once per week.
+// Set SCHEDULERS_OFF=1 to switch these off (for example on a test copy of the bot).
+function startSchedulers(): void {
+  if (process.env["SCHEDULERS_OFF"] === "1") return;
+
+  const every = (ms: number, label: string, job: () => Promise<unknown>): void => {
+    const timer = setInterval(() => {
+      job().catch((err) => console.error(`${label} failed:`, err));
+    }, ms);
+    // Don't let these timers keep the process alive on shutdown.
+    (timer as unknown as { unref?: () => void }).unref?.();
+  };
+
+  every(2 * 60 * 1000, "Auto-reminder scheduler", () => extras.runAutoReminders());
+
+  let weeklyDoneFor = "";
+  every(15 * 60 * 1000, "Weekly recovery scheduler", async () => {
+    const monday = extras.mondayStartKigali(0);
+    const key = monday.toISOString();
+    if (weeklyDoneFor === key) return;
+    if (Date.now() < monday.getTime() + 8 * 60 * 60 * 1000) return; // before 08:00 on Monday
+    weeklyDoneFor = key;
+    await extras.runWeeklyRecovery();
+  });
+}
+startSchedulers();
 
 export default router;

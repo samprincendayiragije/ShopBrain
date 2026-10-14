@@ -1,3 +1,12 @@
+import {
+  templateName,
+  templateLanguageCode,
+  findTemplate,
+  TEMPLATE_MAX_PARAMS,
+  type TemplateKind,
+  type TemplateLang,
+} from "./templateSettings";
+
 const PHONE_NUMBER_ID = process.env["WHATSAPP_PHONE_NUMBER_ID"];
 const ACCESS_TOKEN = process.env["WHATSAPP_ACCESS_TOKEN"];
 if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
@@ -87,22 +96,87 @@ export async function markMessageAsRead(messageId: string): Promise<void> {
 }
 
 /**
- * Sends a pre-approved WhatsApp message template.
- * Required for messaging customers outside the 24h customer service window
- * (i.e. anyone who hasn't messaged the bot recently, or ever).
- *
- * `params` are inserted in order into the {{1}}, {{2}}, {{3}}... placeholders
- * in the template body, as configured in WhatsApp Manager.
- *
- * Example: sendWhatsAppTemplateMessage(phone, "debt_reminder", "en_US", [customerName, shopName, amount])
+ * Meta rejects a template variable (error 132018 / 132000) when it:
+ *   - contains a new line or tab
+ *   - contains 4 or more spaces in a row
+ *   - is empty
+ *   - is longer than 1024 characters
+ * Every template param goes through this, so callers don't have to care.
+ *   "sugar 2000\nbread 500"  ->  "sugar 2000 | bread 500"
  */
-export async function sendWhatsAppTemplateMessage(
+function cleanTemplateParam(value: unknown): string {
+  let s = String(value ?? "")
+    .split(/[\r\n]+/)
+    .map((line) => line.replace(/\t/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join(" | ");
+  s = s.replace(/ {2,}/g, " ").trim();
+  if (s.length > 1000) s = s.slice(0, 997) + "...";
+  return s.length > 0 ? s : "-";
+}
+
+/**
+ * Meta error 132001 = "template does not exist in this language". It means the
+ * language code we sent is not the one the template is registered under.
+ * Nothing is sent when this happens, so it is safe to retry once with the
+ * sibling code. Safety net only: templateSettings.ts should already be right.
+ */
+const ALTERNATE_LANGUAGE_CODE: Record<string, string> = {
+  rw: "rw_RW",
+  rw_RW: "rw",
+  en: "en_US",
+  en_US: "en",
+};
+
+/** Remembers which language code actually worked for a template (by name). */
+const workingLanguageCode = new Map<string, string>();
+
+/** Remembers how many variables Meta said a template takes (by name). */
+const learnedMaxParams = new Map<string, number>();
+
+/** Reads N out of "...does not match the expected number of params (N)". */
+function expectedParamCount(body: string): number | null {
+  const m = body.match(/expected number of params \((\d+)\)/);
+  return m ? parseInt(m[1] as string, 10) : null;
+}
+
+interface TemplateAttempt {
+  ok: boolean;
+  status: number;
+  body: string;
+  metaCode?: number;
+  messageId?: string;
+}
+
+/** One raw call to Meta. Never throws on an HTTP error, it reports it. */
+async function postTemplate(
   to: string,
-  templateName: string,
+  name: string,
   languageCode: string,
   params: string[],
-): Promise<string> {
+): Promise<TemplateAttempt> {
   const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+
+  const template: {
+    name: string;
+    language: { code: string };
+    components?: object[];
+  } = {
+    name,
+    language: { code: languageCode },
+  };
+  if (params.length > 0) {
+    template.components = [
+      {
+        type: "body",
+        parameters: params.map((p) => ({
+          type: "text",
+          text: cleanTemplateParam(p),
+        })),
+      },
+    ];
+  }
+
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -113,22 +187,154 @@ export async function sendWhatsAppTemplateMessage(
       messaging_product: "whatsapp",
       to,
       type: "template",
-      template: {
-        name: templateName,
-        language: { code: languageCode },
-        components: [
-          {
-            type: "body",
-            parameters: params.map((text) => ({ type: "text", text })),
-          },
-        ],
-      },
+      template,
     }),
   });
+
+  const body = await res.text();
+
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`WhatsApp API error ${res.status}: ${body}`);
+    let metaCode: number | undefined;
+    try {
+      metaCode = (JSON.parse(body) as { error?: { code?: number } }).error?.code;
+    } catch {
+      // body wasn't JSON, leave metaCode undefined
+    }
+    return { ok: false, status: res.status, body, metaCode };
   }
-  const data = await res.json() as { messages: Array<{ id: string }> };
-  return data.messages[0].id;
+
+  let messageId: string | undefined;
+  try {
+    messageId = (JSON.parse(body) as { messages?: Array<{ id: string }> }).messages?.[0]?.id;
+  } catch {
+    // fall through
+  }
+  if (!messageId) {
+    return { ok: false, status: res.status, body: `No message id in response: ${body}` };
+  }
+  return { ok: true, status: res.status, body, messageId };
+}
+
+/**
+ * Sends a pre-approved WhatsApp message template.
+ * Required for messaging customers outside the 24h customer service window
+ * (i.e. anyone who hasn't messaged the bot recently, or ever).
+ *
+ * For any template listed in templateSettings.ts, THAT FILE decides the
+ * language code and the maximum number of variables, whatever the caller
+ * passes in. (Callers that still pass their own language code, like the
+ * receipt and Monday messages, are corrected here, e.g. "receipt" is
+ * registered as English even though its text is Kinyarwanda.)
+ * Variables beyond the configured count are dropped from the END of the list.
+ *
+ * Fallbacks, each logged so you can fix the settings file:
+ *   132001 (wrong language code)  -> retry once with the sibling code
+ *   132000 (too many variables)   -> read Meta's expected count, trim, retry once
+ * Neither can send twice: Meta sends nothing when it answers with those errors.
+ *
+ * Returns the WhatsApp message id (wamid). The sent / delivered / read
+ * status callbacks that arrive on the webhook carry this same id, so store it
+ * against the reminder when you log it.
+ */
+export async function sendWhatsAppTemplateMessage(
+  to: string,
+  templateName: string,
+  languageCode: string,
+  params: string[],
+): Promise<string> {
+  const known = findTemplate(templateName);
+
+  let code =
+    workingLanguageCode.get(templateName) ??
+    (known ? templateLanguageCode(known.kind, known.lang) : languageCode);
+
+  let vars = params;
+  const configuredMax = known ? TEMPLATE_MAX_PARAMS[known.kind][known.lang] : null;
+  const max = learnedMaxParams.get(templateName) ?? configuredMax;
+  if (max !== null && max !== undefined && vars.length > max) {
+    vars = vars.slice(0, max);
+  }
+
+  let attempt = await postTemplate(to, templateName, code, vars);
+  let triedLanguage = false;
+  let triedTrim = false;
+
+  while (!attempt.ok) {
+    if (attempt.metaCode === 132001 && !triedLanguage && ALTERNATE_LANGUAGE_CODE[code]) {
+      triedLanguage = true;
+      const alt = ALTERNATE_LANGUAGE_CODE[code] as string;
+      console.warn(
+        `[template] "${templateName}" has no "${code}" version (132001). Retrying with "${alt}".`,
+      );
+      const retry = await postTemplate(to, templateName, alt, vars);
+      // If the retry also says 132001, the first error is the more useful one to report.
+      if (!retry.ok && retry.metaCode === 132001) break;
+      code = alt;
+      attempt = retry;
+      if (retry.ok) {
+        workingLanguageCode.set(templateName, alt);
+        console.warn(
+          `[template] "${templateName}" worked with language code "${alt}". Put that code in templateSettings.ts.`,
+        );
+      }
+      continue;
+    }
+
+    if (attempt.metaCode === 132000 && !triedTrim) {
+      triedTrim = true;
+      const expected = expectedParamCount(attempt.body);
+      if (expected !== null && expected > 0 && expected < vars.length) {
+        console.warn(
+          `[template] "${templateName}" takes ${expected} variables, not ${vars.length} (132000). Dropping the last ${vars.length - expected} and retrying.`,
+        );
+        vars = vars.slice(0, expected);
+        const retry = await postTemplate(to, templateName, code, vars);
+        attempt = retry;
+        if (retry.ok) {
+          learnedMaxParams.set(templateName, expected);
+          console.warn(
+            `[template] "${templateName}" worked with ${expected} variables. Set that number in TEMPLATE_MAX_PARAMS in templateSettings.ts.`,
+          );
+        }
+        continue;
+      }
+    }
+
+    break;
+  }
+
+  if (!attempt.ok) {
+    // Logged here too, in case a caller swallows the thrown error. The Meta
+    // error code in this line (132000, 132001, 132018, 131042, 131047...)
+    // tells you exactly what is wrong.
+    console.error(
+      `[template] "${templateName}" (${code}) to ${to} failed, ${attempt.status}, ${vars.length} params: ${attempt.body}`,
+    );
+    throw new Error(
+      `WhatsApp template "${templateName}" (${code}) failed, ${attempt.status}: ${attempt.body}`,
+    );
+  }
+
+  return attempt.messageId as string;
+}
+
+/**
+ * Sends a template by kind ("reminder" | "receipt" | "weekly") and language
+ * ("en" | "rw"). The template name AND its language code both come from
+ * templateSettings.ts, so changing a template only ever means editing that file.
+ *
+ * Example: sendWhatsAppTemplateByKind(phone, "receipt", "rw", [a, b, c, d])
+ */
+export async function sendWhatsAppTemplateByKind(
+  to: string,
+  kind: TemplateKind,
+  lang: TemplateLang,
+  params: string[],
+): Promise<string> {
+  return sendWhatsAppTemplateMessage(
+    to,
+    templateName(kind, lang),
+    templateLanguageCode(kind, lang),
+    params,
+  );
 }
