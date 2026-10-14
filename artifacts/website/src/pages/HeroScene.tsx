@@ -33,8 +33,8 @@ const CAPS: Record<Lang, { t: string; d: string }[]> = {
     { t: "Paid. Receipt sent.", d: "Your balance updates and the customer gets proof." },
   ],
   rw: [
-    { t: "Ubutumwa bumwe, umwenda umwe", d: "Izina, igicuruzwa, amafaranga. Shop Brain irabyemeza mbere yo kubika." },
-    { t: "Inyibutsa zijya ku bwawe", d: "Ku bemeye gusa, kandi nta na rimwe nyuma ya STOP." },
+    { t: "Ubutumwa bumwe, kumukiriya umwe", d: "Izina, igicuruzwa, amafaranga. Shop Brain irabyemeza mbere yo kubika." },
+    { t: "Inyibutsa zoherezwa ku bwawe"},
     { t: "Yishyuye. Inyemezabwishyu yoherejwe.", d: "Konti yawe ivugururwa, umukiriya agahabwa gihamya." },
   ],
   fr: [

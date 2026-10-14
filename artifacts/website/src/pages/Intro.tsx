@@ -35,12 +35,12 @@ const SKIP: Record<string, string> = { en: "Skip", rw: "Simbuka", fr: "Passer" }
 const PAID: Record<string, string> = { en: "PAID", rw: "YISHYUYE", fr: "PAYÉ" };
 const TAG: Record<string, string> = {
   en: "Know who owes you. Get paid sooner.",
-  rw: "Menya abakubereyemo. Wishyurwe vuba.",
+  rw: "Cunga amafaranga ya business . Wagure vuba.",
   fr: "Sachez qui vous doit. Soyez payé plus vite.",
 };
 const PILLS: Record<string, string[]> = {
   en: ["On WhatsApp", "No app to install", "First month free"],
-  rw: ["Kuri WhatsApp", "Nta porogaramu", "Ukwezi kwa mbere ni ubuntu"],
+  rw: ["Kuri WhatsApp", "bika", "terimbere"],
   fr: ["Sur WhatsApp", "Aucune appli", "Premier mois gratuit"],
 };
 const GHOSTS = [
