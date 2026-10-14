@@ -729,7 +729,7 @@ type Copy = typeof en;
 const rw: Copy = {
   nav: { why: "Impamvu", how: "Uko bikora", features: "Ibyo ikora", pricing: "Igiciro", faq: "Ibibazo", contact: "Twandikire", privacy: "Ibanga", trust: "Icyizere n'umutekano", admin: "Admin" },
   hero: {
-    title: "Menya abakubereyemo imyenda. Wishyurwe vuba.",
+    title: "Cunga amafaranga asohoka. Wishyurwe vuba.",
     body: "Shop Brain ibika imyenda y'abakiriya bawe kuri WhatsApp. Andika umwenda mu masegonda, ohereza inyibutsa n'ubutumwa bumwe, kandi urebe igiteranyo cyose igihe cyose.",
     cta: "Tangira kuri WhatsApp",
     more: "Reba uko bikora",
