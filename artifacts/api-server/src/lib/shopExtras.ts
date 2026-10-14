@@ -305,7 +305,7 @@ const rw: typeof en = {
   cancelBtn: "✖️ Reka",
 
   addDebtPrompt:
-    "➕ *Ongeraho Umwenda*\n\nAndika byose mu butumwa bumwe:\n\n`0788123456 Jean isukari 2000`\n\nNta nimero?\n`Jean isukari 2000`\n\nIzina rifite amagambo abiri? Koresha akazu:\n`Mama Janet, isukari, 2000`\n\nCyangwa ohereza nimero gusa, nzakubaza ibindi.",
+    "➕ *Ongeraho Umwenda*\n\nAndika byose mu butumwa bumwe:\n\n`0788123456 Jean isukari 2000`\n\nNiba nta nimero?\n`Jean isukari 2000`\n\nIzina rifite amagambo abiri?:\n`Mama Janet, isukari, 2000`\n\nCyangwa ohereza nimero gusa, ndakubaza ibindi.",
   addDebtHint:
     "❌ Ntabwo nabisomye.\n\nUrugero: `0788123456 Jean isukari 2000`\nCyangwa ohereza nimero gusa.",
   debtConfirmBody: (name: string, phone: string | null, item: string, amount: number, isNew: boolean, dupName: boolean) =>

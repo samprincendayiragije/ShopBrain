@@ -296,34 +296,34 @@ const T = {
     askPhone: "➕ *Ongeraho Umwenda*\n\nAndika nimero y'umukiriya?\n\nUrugero: 0788123456",
     askName: "Andika izina ry'umukiriya?",
     askItem: "Igicuruzwa atwaye?",
-    askAmount: "Agusigayemo angahe? (muri Frw)\n\n✍️ Andika cyangwa uhitemo hano hasi (si ngombwa)",
+    askAmount: "Amafaranga atarishyurwa? (muri Frw)\n\n✍️ Andika cyangwa ukande hano hasi",
     invalidPhone: "❌ Nimero si yo. Andika nimero y'umukiriya ikurikira:",
     invalidAmount: "❌ Umubare si wo. Andika umubare urugero 5000",
     debtSaved: (name: string, phone: string, item: string, amount: number, total: number) =>
-      `✅ *Umwenda Wabitswe!*\n\n👤 ${name} (${phone})\n📦 Igicuruzwa: ${item}\n💰 Byongewe: ${amount.toLocaleString()} Frw\n📊 Asigayemo: ${total.toLocaleString()} Frw`,
+      `✅ *amakuru arabitse ubu\n\n👤 ${name} (${phone})\n📦 Igicuruzwa: ${item}\n💰 Amafaranga: ${amount.toLocaleString()} Frw\n📊 Asigayemo: ${total.toLocaleString()} Frw`,
     noCustomer: (phone: string) => `❌ Uyu mukiriya ntago yanditse muri sisteme ${phone}.`,
     noCustomerText: "❌ Uyu mukiriya ntago yanditse muri sisteme.",
-    allPaid: (name: string) => `✅ Amadeni yose yabazwe nkayishyuwe kuri *${name}*.`,
+    allPaid: (name: string) => `✅ Amadeni yose hemejwe ko yishyuwe kuri *${name}*.`,
     viewHistory: "📋 Raporo y'ideni",
     sendReminder: "🔔 kwibutsa",
     markPaidBtn: "✅ Emeza Kwishyura",
-    reminderSent: (name: string) => `⏳ Ubutumwa bwoherejwe kuri *${name}* — tegereza ko bakiriye...`,
+    reminderSent: (name: string) => `⏳ Ubutumwa bwoherejwe kuri *${name}*`,
     reminderDelivered: (name: string, phone: string, amount: number) =>
-      `✅ Umukiriya *${name}* (${phone}) yakiriye ubutumwa bw'ishyura rya *${amount.toLocaleString()} Frw* 🎉`,
+      `✅ Umukiriya *${name}* (${phone}) yakiriye ubutumwa bw'ibutsa kwishyura *${amount.toLocaleString()} Frw* 🎉`,
     reminderRead: (name: string) => `👀 Umukiriya *${name}* yasomye ubutumwa!`,
     reminderSentNotReceived: (name: string, phone: string) =>
       `✅ Ubutumwa bwoherejwe neza kuri *${name}* (${phone}) — ntabwo barakira ubutumwa`,
-    reminderFailed: (phone: string) => `❌ Ubutumwa ntabwo bwoherejwe — *+${phone}* ntago bafite WhatsApp`,
+    reminderFailed: (phone: string) => `❌ Ubutumwa ntabwo bwoherejwe — *+${phone}* nimero ntiba kuri WhatsApp`,
     reminderFailedGeneric: (name: string, code: number) => `❌ Ubutumwa bwanze kuri *${name}* (code: ${code}) — gerageza nanone`,
-    noDebts: (name: string) => `✅ ${name} ntagomba kwishyura. Nta butumwa bwoherejwe.`,
+    noDebts: (name: string) => `✅ ${name} nta mafaranga atarishyurwa yanditse.`,
     findCustomerPrompt: "🔍 *Shakisha Umukiriya*\n\nAndika nimero y'umukiriya:",
     findCustomerPromptSearch: "🔍 *Shakisha Umukiriya*\n\nAndika nimero cyangwa izina ry'umukiriya:",
     findReminderPromptSearch: "🔔 *Kwibutsa*\n\nAndika nimero cyangwa izina ry'umukiriya:",
     markPaidPrompt: "✅ *Emeza Kwishyura*\n\nAndika nimero y'umukiriya:",
-    askPartialAmount: "💰 Umukiriya ariha angahe?",
-    askPartialItem: "📦 Ni iyihe kiguzi cy'iri shyura?",
+    askPartialAmount: "💰 Umukiriya arishyura angahe?",
+    askPartialItem: "📦 Ni ikihe kiguzi ari kwishyura?",
     whatToDo: "Urashaka gukora iki?",
-    existingCustomer: (name: string) => `👤 Umukiriya warahise: *${name}*\n\nIgicuruzwa atwaye?`,
+    existingCustomer: (name: string) => `👤 Umukiriya usanzwe: *${name}*\n\nIgicuruzwa atwaye?`,
     noHistory: (name: string) => `📋 Nta makuru yabonetse kuri ${name}.`,
     historyHeader: (name: string) => `📋 *Raporo y'ideni — ${name}*`,
     totalOwed: (total: number) => `💰 *Asigayemo: ${total.toLocaleString()} Frw*`,
@@ -336,22 +336,22 @@ const T = {
     registered: "Yanditse",
     cleared: "Yishyuye ✅",
     partialPaid: (name: string, paid: number, remaining: number, item: string) =>
-      `✅ *Igice cy'ishyura cyabitswe!*\n\n👤 ${name}\n📦 Kuri: ${item}\n💰 Yishyuye: ${paid.toLocaleString()} Frw\n📊 Asigayemo: ${remaining.toLocaleString()} Frw`,
+      `✅ *Amafaranga yishyuwe yabitswe!*\n\n👤 ${name}\n📦 Kuri: ${item}\n💰 Yishyuye: ${paid.toLocaleString()} Frw\n📊 Asigayemo: ${remaining.toLocaleString()} Frw`,
     fullPaid: (name: string, paid: number) =>
-      `✅ *Yishyuye yose!*\n\n👤 ${name}\n💰 Yishyuye: ${paid.toLocaleString()} Frw\n📊 Asigayemo: 0 Frw`,
-    noUnpaid: (name: string) => `✅ ${name} ntagomba kwishyura.`,
-    askShopName: "👋 Murakaza neza kuri *ShopBrain!*\n\nAndikisha ubucuruzi bwawe:",
+      `✅ *amafaranga yose arishyuwe!*\n\n👤 ${name}\n💰 Yishyuye: ${paid.toLocaleString()} Frw\n📊 Asigayemo: 0 Frw`,
+    noUnpaid: (name: string) => `✅ ${name} nta mafaranga atarishyurwa.`,
+    askShopName: "👋 Murakaza neza kuri *ShopBrain!*\n\nAndika amazina yawe cyangwa izina ry'iduka:",
     shopNameSaved: (name: string) => `✅ Kwiyandikisha byakunze — *${name}*!`,
-    shopNameTooShort: "❌ Izina rifupi cyane. Andikisha ubucuruzi bwawe:",
-    selectLanguage: "🌐 Hitamo ururimi rwawe:",
-    languageSet: "✅ Ururimi rwahinduwe kuri Kinyarwanda!",
-    ownerOnly: "Iyi nimero ni iy'nyir'iduka gusa.",
-    somethingWrong: "Hari ikibazo. Gerageza nanone.",
-    interactiveRetry: "❌ Hari ikibazo cyabaye. Ongera ukande buto:",
-    languageAlreadySetRegistered: "🌐 Ururimi rwarahisemo. Niba ushaka kurihindura, koresha 'Guhindura Ururimi' kuri menu.",
-    languageAlreadySetUnregistered: "🌐 Ururimi rwarahisemo. Ongera wandike izina ry'ubucuruzi bwawe kugira ngo urangize kwiyandikisha. Ushobora guhindura ururimi nyuma.",
-    reminderInvalidNumber: "❌ Nimero si yo.\nUkurikira: REMIND <nimero>\nUrugero: REMIND 0788123456",
-    remindAllSummary: (count: number, total: number) => `✅ Ubutumwa woherejewe kubakiriya *${count}*:\n\n`,
+    shopNameTooShort: "❌ Izina ni rigufi cyane.Ongera w'andike izina ryawe cyangwa iry'ubucuruzi bwawe:",
+    selectLanguage: "🌐 Hitamo ururimi:",
+    languageSet: "✅ Ururimi rwahinduwe mu Kinyarwanda!",
+    ownerOnly: "Iyi sisteme ni iyabacuruzi gusa, twandikire hano tugufashe cyangwa ujye kurubuga rwacu\n\n https://shop-brain-webhook--ndayiragijesamu.replit.app/",
+    somethingWrong: "Habayeho ikibazo. Gerageza nanone.",
+    interactiveRetry: "❌ Hari ikibazo cyabaye. Ongera ukande:",
+    languageAlreadySetRegistered: "🌐 Guhitamo ururimi byagenze neza. Niba ushaka kuruhindura, koresha 'Guhindura Ururimi' kuri menu.",
+    languageAlreadySetUnregistered: "🌐 Guhitamo ururimi byagenze neza. Ongera wandike izina ryawe cyangwa ry'ubucuruzi bwawe kugira ngo urangize kwiyandikisha. Ushobora guhindura ururimi nyuma.",
+    reminderInvalidNumber: "❌ Nimero si yo.\nIbutsa: REMIND <nimero>\nUrugero: REMIND 0788123456",
+    remindAllSummary: (count: number, total: number) => `✅ Ubutumwa bwoherejwe kubakiriya *${count}*:\n\n`,
     remindAllTotal: (total: number) => `\n💰 *Igiteranyo cyamafranga: ${total.toLocaleString()} Frw*`,
     remindAllNone: "✅ Nta bakiriya bafite amadeni.",
     totalDebtHeader: "💰 *Igiteranyo cy'amadeni atarishyurwa*",
@@ -359,19 +359,19 @@ const T = {
     totalDebtGrandTotal: (total: number) => `💵 *Igiteranyo k'ideni ryose: ${total.toLocaleString()} Frw*`,
     totalDebtTopDebtors: "Abafitemo ideni rinini:",
     totalDebtNone: "✅ Nta madeni asigaye. Abakiriya bose barishyuye!",
-    paidHint: "💡 Kwishyura umukiriya, andika:\nPAID 0788123456\ncyangwa igice: PAID 0788123456 2000",
-    helpTitle: "📖 *ShopBrain — Ibyo Nshobora Gukora*",
+    paidHint: "💡 Kwishyura yose k'umukiriya, andika:\nPAID 0788123456\ncyangwa igice: PAID 0788123456 2000",
+    helpTitle: "📖 *ShopBrain — Ibyo ishobora Gukora ubu*",
     helpStock: "📦 Ububiko:\n💵 Andika Igurisha — gurisha mu bubiko, cash cyangwa ku mwenda; ububiko bugabanuka bwonyine\n📦 Ububiko — ongeramo ibicuruzwa, reba ibigiye gushira\n💹 Inyungu — uyu munsi / iminsi 7 / 30 (muri Amafaranga & Raporo)\n🧾 Andika Ikiguzi — andika amafaranga wakoresheje (muri Amafaranga & Raporo)",
     helpFooter: (phone: string, link: string) => `💬 Ukeneye ubufasha kuri ShopBrain? Twandikire: ${phone}\n${link}`,
     helpBody: `Dore ibyo wakoresha:
 
 💡 Inama: andika byose mu butumwa bumwe, urugero 0788123456 Jean isukari 2000
 
-*Gukoresha buto:*
+*Uko bikora:*
 ➕ Ongeraho Umwenda — andika umwenda mushya
 ✅ Emeza Kwishyura — andika nimero, hanyuma uhitemo Igice cyangwa Byose
 📋 Menu — urutonde rwose rw'ibikorwa:
-🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo. Ku makuru ye: Raporo y'ideni, Kwibutsa, Emeza Kwishyura, ↩️ Siba Uheruka (usiba umwenda uheruka niba wibeshye), ✏️ Hindura Umukiriya, 📅 Itariki (andika igihe yasezeranyije kwishyura)
+🔍 Shakisha Umukiriya — reba amafaranga umukiriya asigayemo. Ku makuru ye: Raporo y'ideni, Kwibutsa, Emeza Kwishyura, ↩️ Siba amakuru aheruka (usiba umwenda uheruka niba wibeshye), ✏️ Hindura Umukiriya, 📅 Itariki (andika igihe yasezeranyije kwishyura)
 🔔 Kwibutsa — wibutsa umukiriya umwe, cyangwa bose icyarimwe
 🚩 Gukurikirana — abakiriya bakeneye guhamagarwa cyangwa gusurwa
 📋 Abakiriya Bose — urutonde rw'abakiriya bawe bose
@@ -407,11 +407,11 @@ const T = {
     moreBtn: "➕ Ibindi",
     momoMenuStart: "💳 Shyiraho MoMo",
     momoMenuContact: "📞 Nimero yo Kuvugana",
-    contactNumberPrompt: "Ese abakiriya bazakubona bate?\n\nAndika nimero, cyangwa kanda Nta Nimero niba udashaka gutanga imwe.",
-    contactNumberSaved: "✅ Nimero yabitswe! Abakiriya bazamenyeshwa uko bakuvugana.",
+    contactNumberPrompt: "Ese abakiriya bazakubona bate?\n\nAndika nimero, cyangwa kanda Nta Nimero niba nta nimero.",
+    contactNumberSaved: "✅ Nimero yabitswe! Abakiriya bazamenyeshwa uko bakuvugisha.",
     contactNumberSkip: "⏭️ Nta Nimero",
     allCustomersBtn: "📋 Abakiriya Bose",
-    securityBtn: "🔒 Umutekano",
+    securityBtn: "🔒 Uko warinda amakuru na sisteme yawe",
     // --- Edit Customer ---
     editBtn: "✏️ Hindura Umukiriya",
     editIntro: (name: string) => `✏️ *Uhindura ${name}*\n\nAndika izina rishya, cyangwa ukande Gumana Izina niba udashaka guhindura.`,
@@ -421,55 +421,55 @@ const T = {
     editKeepPhone: "⏭️ Gumana Nimero",
     editSaved: (name: string, phone: string) => `✅ *Umukiriya yahinduwe!*\n\n👤 ${name}\n📞 ${phone}`,
     // --- Reminder consent / STOP opt-out ---
-    askConsent: "📋 Uyu mukiriya yemeye kwakira ubutumwa bwo kwibutsa amadeni kuri WhatsApp?\n\nAbemeye gusa nibo bazabona ubutumwa.",
+    askConsent: "📋 Uyu mukiriya azakira ubutumwa bwo kwibutsa amadeni kuri WhatsApp?\n",
     consentYes: "✅ Yego",
     consentNo: "❌ Oya",
     consentSavedYes: "✅ Byabitswe. Uyu mukiriya ashobora kwibutswa.",
     consentSavedNo: "✅ Byabitswe. Nta butumwa bwo kwibutsa buzoherezwa kuri uyu mukiriya.",
     reminderSkippedOptedOut: (name: string) =>
-      `🚫 *${name}* yasabye guhagarikirwa ubutumwa bwo kwibutsa. Nta butumwa bwoherejwe.`,
+      `🚫 *${name}* yasabye kurekera kwakira ubu ubutumwa bwo kwibutsa. Nta butumwa bwoherejwe.`,
     reminderSkippedNoConsent: (name: string) =>
-      `⚠️ Nta bwemera bwo kwibutsa bwanditswe kuri *${name}*, ubutumwa ntibwoherejwe.`,
-    remindAllSkippedOptOut: (names: string) => `\n\n🚫 Ntibyoherejwe — basabye guhagarikirwa: ${names}`,
+      `⚠️ Ntiyemera kwakira ubutumwa bwo kwibutsa bwanditswe kuri *${name}*, ubutumwa ntibwoherejwe.`,
+    remindAllSkippedOptOut: (names: string) => `\n\n🚫 Ntibyoherejwe — basabye guhagarika ubu butumwa: ${names}`,
     remindAllSkippedNoConsent: (names: string) =>
-      `\n\n⚠️ Ntibyoherejwe — nta bwemera bwanditswe: ${names}\n(Kanda Shakisha Umukiriya → Kwibutsa kugira ngo wandike ubwemera.)`,
+      `\n\n⚠️ Ntibyoherejwe — ntago buryo bwo kohereza bwanditse: ${names}\n(Kanda Shakisha Umukiriya → Kwibutsa - kugira ngo wandike uburyo bwo kwibutsa.)`,
     remindAllNoneSent: "ℹ️ Nta butumwa bwoherejwe.",
     customerOptedOutNotice: (name: string, phone: string) =>
-      `🚫 *${name}* (${phone}) yanditse STOP. ShopBrain ntizongera kohereza ubutumwa bwo kwibutsa kuri iyi nimero.`,
+      `🚫 *${name}* (${phone}) yakanze *HAGARIKA*. ShopBrain ntizongera kohereza ubutumwa bwo kwibutsa kuri iyi nimero.`,
     customerOptedInNotice: (name: string, phone: string) =>
-      `✅ *${name}* (${phone}) yanditse START. Ubutumwa bwo kwibutsa kuri iyi nimero buzongera koherezwa.`,
-    optedOutLine: "🚫 Yasabye guhagarikirwa ubutumwa bwo kwibutsa (yanditse STOP)",
+      `✅ *${name}* (${phone}) yanditse *START*. Ubutumwa bwo kwibutsa kuri iyi nimero buzongera koherezwa.`,
+    optedOutLine: "🚫 Yasabye guhagarikirwa ubutumwa bwo kwibutsa (yAHISEMO *HAGARIKA*)",
     // --- Name search ---
     multipleCustomersFound: (name: string) => `🔍 Hari abakiriya benshi bahuye na "${name}". Kanda uhitemo:`,
     multipleCustomersFoundReminder: (name: string) => `🔍 Hari abakiriya benshi bahuye na "${name}". Kanda uwo wibutsa:`,
     noNameMatch: (name: string) => `❌ Nta mukiriya ubonetse witwa "${name}".`,
     optedOutRowLabel: "🚫 Yahagaritse — STOP",
-    noNumberRowLabel: "📵 Nta nimero — ntibishoboka",
+    noNumberRowLabel: "📵 Nta nimero — ntibikunze",
     // --- No-number duplicate name warning ---
     duplicateNameWarning: (name: string, item: string, total: number) =>
-      `⚠️ Ufite undi mukiriya witwa *${name}* udafite nimero (asigayemo ${total.toLocaleString()} Frw, igicuruzwa giherutse: ${item}).\n\nKugira ngo utabatanya, wongeraho ikimenyetso gito (urugero: "${name} (moto)"), cyangwa ukomeze niba uzi ko ari umuntu utandukanye.`,
+      `⚠️ Ufite undi mukiriya witwa *${name}* udafite nimero (asigayemo ${total.toLocaleString()} Frw, igicuruzwa giherutse: ${item}).\n\nKugira ngo ubashe kubatandukanya, wongeraho ikimenyetso gito (urugero: "${name} (moto)"), cyangwa ukomeze niba uzi ko ari umuntu utandukanye.`,
     dupContinueBtn: "✅ Komeza Uko Bimeze",
     dupRelabelBtn: "✏️ Ongeraho Ikimenyetso",
     askRelabel: "Andika izina hamwe n'ikimenyetso gito, urugero \"Jean (moto)\":",
     // --- Week-1 check-in flagging ---
     checkinIssueBtn: "❌ Yego, mfite ikibazo",
-    checkinConfirmed: "Byakiriwe — hari uzagufasha vuba.",
+    checkinConfirmed: "Byakiriwe — hari ugufasha vuba.",
     // --- Reminder cooldown ---
     sendAnywayBtn: "📤 Ohereza Nubundi",
     cancelBtn: "✖️ Reka",
     reminderCooldown: (name: string, daysAgo: number) =>
-      `⏱ *${name}* yibutswe ${daysAgo === 0 ? "uyu munsi" : `hashize iminsi ${daysAgo}`}. Kugira ngo abakiriya batarakara, kwibutsa bikorwa rimwe mu minsi ${REMINDER_COOLDOWN_DAYS}.\n\nUracyashaka kohereza?`,
+      `⏱ *${name}* yibukijwe ${daysAgo === 0 ? "uyu munsi" : `hashize iminsi ${daysAgo}`}. kwibutsa bikorwa rimwe mu minsi ${REMINDER_COOLDOWN_DAYS}.\n\nUracyashaka kohereza?`,
     remindAllSkippedRecent: (names: string) =>
-      `\n\n⏱ Ntibyoherejwe — bibutswe mu minsi ${REMINDER_COOLDOWN_DAYS} ishize: ${names}`,
+      `\n\n⏱ Ntibyoherejwe — bibukijwe mu minsi ${REMINDER_COOLDOWN_DAYS} ishize: ${names}`,
     // --- Follow-up list ---
     followUpBtn: "🚩 Gukurikirana",
-    followUpHeader: (count: number) => `🚩 *Abakeneye Gukurikiranwa (${count})*\n\nAba bakiriya bakeneye guhamagarwa cyangwa gusurwa:\n\n`,
+    followUpHeader: (count: number) => `🚩 *Abakeneye Gukurikiranwa (${count})*\n\nAba bakiriya bakeneye guhamagarwa cyangwa kwegerwa:\n\n`,
     followUpContinued: "🚩 *Gukomeza...*\n\n",
-    followUpMore: (n: number) => `➕ Hari abandi ${n} batagaragaye hano. Banza ukurikirane abo hejuru.`,
+    followUpMore: (n: number) => `➕ Hari abandi ${n} batagaragaye hano.`,
     followUpNone: "✅ Nta muntu ukeneye gukurikiranwa ubu.",
     reasonNoPhone: "nta nimero — ntushobora kumwibutsa",
     reasonOptedOut: "yasabye guhagarikirwa ubutumwa — muhamagare",
-    reasonNoConsent: "nta bwemera bwo kwibutsa bwanditswe",
+    reasonNoConsent: "nta cyemeza kwibutsa cyanditse",
     reasonFailed: "ubutumwa bwa nyuma ntibwagezeyo",
     reasonOld: (days: number) => `ideni rya kera rimaze iminsi ${days}`,
     // --- Report ---
@@ -480,7 +480,7 @@ const T = {
     reportCollected7: (total: number) => `✅ Yishyuwe mu minsi 7 ishize: *${total.toLocaleString()} Frw*`,
     reportOldest: (days: number) => `🕰 Ideni rya kera: iminsi ${days}`,
     reportFollowUp: (n: number) => `🚩 Bakeneye gukurikiranwa: ${n} — andika GUKURIKIRANA ubirebe`,
-    reportNote: "ℹ️ Amafaranga yishyuwe abarwa gusa ku kwishyura kwanditswe muri ShopBrain.",
+    reportNote: "ℹ️ Amafaranga yishyuwe abarwa gusa ku kwishyura kwanditse muri ShopBrain.",
     // --- Undo last debt ---
     undoBtn: "↩️ Siba Uheruka",
     undoYes: "✅ Yego, siba",
@@ -488,7 +488,7 @@ const T = {
       `↩️ Ushaka gusiba uyu mwenda wa *${name}*?\n\n📦 ${item}\n💰 ${amount.toLocaleString()} Frw\n📅 ${date}`,
     undoDone: (name: string, item: string, amount: number, total: number) =>
       `✅ *Umwenda wasibwe*\n\n👤 ${name}\n📦 ${item} — ${amount.toLocaleString()} Frw\n📊 Asigayemo ubu: ${total.toLocaleString()} Frw`,
-    undoAlreadyPaid: (name: string) => `ℹ️ Umwenda uheruka wa *${name}* waramaze kwishyurwa, ntushobora gusibwa hano.`,
+    undoAlreadyPaid: (name: string) => `ℹ️ Umwenda uheruka wa *${name}* wamaze kwishyurwa, ntushobora gusibwa hano.`,
     undoNothing: (name: string) => `ℹ️ *${name}* nta mwenda wo gusiba afite.`,
     undoGone: "ℹ️ Uyu mwenda waramaze gusibwa.",
     // --- Today ---
