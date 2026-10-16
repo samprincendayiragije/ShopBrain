@@ -9,7 +9,7 @@ import {
 // notebook. We read it, show the list, and only save after they confirm.
 //
 // Needs one new Replit secret:  GEMINI_API_KEY  (free key from aistudio.google.com)
-// Optional secret:              GEMINI_MODEL  (defaults to gemini-2.5-flash)
+// Optional secret:              GEMINI_MODEL  (defaults to gemini-flash-latest)
 // No new SQL needed.
 
 type Lang = "en" | "rw";
@@ -28,7 +28,7 @@ interface PendingScan {
 }
 
 const GEMINI_API_KEY = process.env["GEMINI_API_KEY"];
-const GEMINI_MODEL = process.env["GEMINI_MODEL"] ?? "gemini-2.5-flash";
+const GEMINI_MODEL = process.env["GEMINI_MODEL"] ?? "gemini-flash-latest";
 
 const PENDING_TTL_MS = 30 * 60 * 1000; // a scan waits 30 minutes for the owner to confirm
 const DAILY_LIMIT = 10; // photos per owner per day (protects your API bill)
