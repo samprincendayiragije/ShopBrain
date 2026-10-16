@@ -1,3 +1,4 @@
+import * as scan from "../lib/NotebookScan.js";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { sendWhatsAppMessage, sendWhatsAppInteractiveMessage, sendWhatsAppTemplateMessage, markMessageAsRead } from "../lib/whatsapp.js";
 import { supabase } from "../lib/supabase.js";
@@ -941,6 +942,7 @@ interface WhatsAppMessage {
   id: string;
   from: string;
   text?: { body: string };
+   image?: { id: string; mime_type?: string; caption?: string };
   interactive?: {
     type: string;
     button_reply?: { id: string; title: string };
@@ -1060,6 +1062,15 @@ router.post("/webhook", async (req: Request, res: Response) => {
       req.log.warn({ err, from }, "Failed to mark message as read");
     }
     try {
+      if (msg.type === "image" && msg.image?.id) {
+        if (!(await isOwner(from))) {
+          await sendWhatsAppMessage(from, NON_OWNER_REPLY);
+          continue;
+        }
+        const imgLang = await getLang(from);
+        await scan.handleNotebookPhoto(from, msg.image.id, imgLang);
+        continue;
+      }
       if (msg.type === "button") {
         const label = msg.button?.payload || msg.button?.text || "";
         // The "stop" button counts whatever its wording is: English "stop", Kinyarwanda
@@ -1499,7 +1510,7 @@ async function handleInteractive(from: string, replyId: string, req: Request): P
   if (await features.handleInteractive(from, replyId, lang)) return;
   // Auto-reminders, no-number fixes, paid claims, recovered scoreboard, export.
   if (await extras.handleInteractive(from, replyId, lang)) return;
-
+  if (await scan.handleInteractive(from, replyId, lang)) return;
   // Main-menu "Mark as Paid": always ask for the customer, never reuse a
   // stale lookup from earlier in the chat.
   if (replyId === "mark_paid_menu") {
@@ -1896,7 +1907,7 @@ async function handleMessage(from: string, text: string, req: Request): Promise<
     setTimeout(async () => { await sendFirstTimeMenu(from, lang); }, 500);
     return;
   }
-
+  if (await scan.handleScanText(from, text, lang)) return;
   const upper = text.toUpperCase();
 
   if (upper === "HELP") {
@@ -3152,7 +3163,7 @@ features.initShopFeatures({
   markAllPaid,
   saveEditedCustomer,
 });
-
+scan.initNotebookScan({ sendMenu: sendPersistentMenu });
 extras.initExtras({
   sessions,
   cleanPhone,
