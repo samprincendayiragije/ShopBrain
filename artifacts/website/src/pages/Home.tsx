@@ -50,7 +50,7 @@ const HAND = { fontFamily: "'Caveat', cursive" } as const;
 
 // Emoji icon per feature card (same order as the groups in the copy below)
 const FEATURE_ICONS: Record<string, string[]> = {
-  record: ["➕", "↩️", "💰", "🚦", "📅"],
+  record: ["➕", "📷", "↩️", "💰", "🚦", "📅"],
   see: ["🔍", "📊", "📞", "🎉", "📥", "🚚"],
   remind: ["🔔", "🤖", "📵"],
   customers: ["💬", "✅", "🧾"],
@@ -127,6 +127,19 @@ const enGroups: Group[] = [
           "For a new customer, it also asks if they agreed to reminders.",
         ],
         ex: [["me", "0788123456 Jean sugar 2000"], ["bot", "Jean · sugar · 2,000 RWF. Save? ✅"]],
+      },
+      {
+        title: "Scan your notebook",
+        desc: "Send a photo of a page from your paper notebook. Shop Brain reads the debts and saves them after you check them.",
+        how: [
+          "Take a clear photo of one notebook page, in good light.",
+          "Send the photo to Shop Brain on WhatsApp.",
+          "Shop Brain reads it and shows a numbered list with the total.",
+          "Check every line. Fix one with EDIT or remove one with REMOVE, for example EDIT 2 Jean, sugar, 3000.",
+          "Tap Save All. Nothing is saved until you do.",
+          "Customers added this way have not agreed to reminders yet, so Shop Brain will not remind them until you confirm they agreed.",
+        ],
+        ex: [["me", "📷 (photo of notebook page)"], ["bot", "📒 I found 8 debts, total 45,000 RWF. Save these debts?"]],
       },
       {
         title: "Fix mistakes",
@@ -298,6 +311,19 @@ const rwGroups: Group[] = [
         ex: [["me", "0788123456 Jean isukari 2000"], ["bot", "Jean · isukari · 2,000 RWF. Mbike? ✅"]],
       },
       {
+        title: "Fotora ikayi yawe",
+        desc: "Ohereza ifoto y'urupapuro rw'ikayi yawe. Shop Brain isoma imyenda, ikayibika umaze kuyisuzuma.",
+        how: [
+          "Fotora urupapuro rumwe rw'ikayi yawe, mu rumuri ruhagije.",
+          "Ohereza ifoto kuri Shop Brain kuri WhatsApp.",
+          "Shop Brain irayisoma ikakwereka urutonde rufite nomero n'igiteranyo.",
+          "Suzuma buri murongo. Gukosora umurongo koresha EDIT, gusiba ukoreshe REMOVE, urugero EDIT 2 Jean, isukari, 3000.",
+          "Kanda Bika Yose. Nta kintu kibitswe utarakanda.",
+          "Abakiriya babitswe batyo ntibarabyemera kwibutswa, bityo Shop Brain ntizabibutsa kugeza wemeje ko babyemeye.",
+        ],
+        ex: [["me", "📷 (ifoto y'ikayi)"], ["bot", "📒 Nabonye amadeni 8, igiteranyo 45,000 RWF. Mbike aya madeni?"]],
+      },
+      {
         title: "Gukosora amakosa",
         desc: "Kuraho umwenda wa nyuma, hindura umukiriya, kandi uburirwe iyo amazina asa.",
         how: [
@@ -465,6 +491,19 @@ const frGroups: Group[] = [
           "Pour un nouveau client, il demande aussi s'il accepte les rappels.",
         ],
         ex: [["me", "0788123456 Jean sucre 2000"], ["bot", "Jean · sucre · 2 000 RWF. Enregistrer ? ✅"]],
+      },
+      {
+        title: "Scanner votre cahier",
+        desc: "Envoyez la photo d'une page de votre cahier. Shop Brain lit les dettes et les enregistre après votre vérification.",
+        how: [
+          "Prenez une photo nette d'une page du cahier, avec une bonne lumière.",
+          "Envoyez la photo à Shop Brain sur WhatsApp.",
+          "Shop Brain la lit et affiche une liste numérotée avec le total.",
+          "Vérifiez chaque ligne. Corrigez-en une avec EDIT ou supprimez-en une avec REMOVE, par exemple EDIT 2 Jean, sucre, 3000.",
+          "Touchez Save All. Rien n'est enregistré tant que vous ne l'avez pas fait.",
+          "Les clients ajoutés ainsi n'ont pas encore accepté les rappels : Shop Brain ne les relancera pas tant que vous n'avez pas confirmé leur accord.",
+        ],
+        ex: [["me", "📷 (photo du cahier)"], ["bot", "📒 J'ai trouvé 8 dettes, total 45 000 RWF. Enregistrer ces dettes ?"]],
       },
       {
         title: "Corriger ses erreurs",
@@ -665,7 +704,7 @@ const en = {
     hide: "Tap to close",
     soonTitle: "Coming soon",
     soonTag: "Soon",
-    soon: ["Voice notes", "Photo import of your notebook", "Edit or delete any debt", "Staff access"],
+    soon: ["Voice notes", "Edit or delete any debt", "Staff access"],
   },
   groups: enGroups,
   pricing: {
@@ -774,7 +813,7 @@ const rw: Copy = {
     hide: "Kanda ufunge",
     soonTitle: "Ibizaza vuba",
     soonTag: "Vuba",
-    soon: ["Ubutumwa bw'amajwi", "Gufotora igitabo sisteme ikakwandikira", "Guhindura cyangwa gusiba umwenda uwo ari wo wose", "Abakozi bakoresha konti"],
+    soon: ["Ubutumwa bw'amajwi", "Guhindura cyangwa gusiba umwenda uwo ari wo wose", "Abakozi bakoresha konti"],
   },
   groups: rwGroups,
   pricing: {
@@ -881,7 +920,7 @@ const fr: Copy = {
     hide: "Touchez pour fermer",
     soonTitle: "Bientôt",
     soonTag: "Bientôt",
-    soon: ["Notes vocales", "Import de votre cahier par photo", "Modifier ou supprimer n'importe quelle dette", "Accès pour le personnel"],
+    soon: ["Notes vocales", "Modifier ou supprimer n'importe quelle dette", "Accès pour le personnel"],
   },
   groups: frGroups,
   pricing: {
