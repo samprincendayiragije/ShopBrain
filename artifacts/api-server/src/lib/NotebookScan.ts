@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 import { supabase } from "./supabase.js";
 import {
   sendWhatsAppMessage,
@@ -9,9 +8,8 @@ import {
 // "Scan notebook": the owner sends a photo of a page of their paper debt
 // notebook. We read it, show the list, and only save after they confirm.
 //
-// Needs one Replit secret:      GEMINI_API_KEY
-// Optional secret:              NOTEBOOK_SCAN_MODEL  (defaults to gemini-3-flash-preview)
-// Needs one npm package:        npm install @google/genai
+// Needs one new Replit secret:  GEMINI_API_KEY  (free key from aistudio.google.com)
+// Optional secret:              GEMINI_MODEL  (defaults to gemini-2.5-flash)
 // No new SQL needed.
 
 type Lang = "en" | "rw";
@@ -30,10 +28,10 @@ interface PendingScan {
 }
 
 const GEMINI_API_KEY = process.env["GEMINI_API_KEY"];
-const SCAN_MODEL = process.env["NOTEBOOK_SCAN_MODEL"] ?? "gemini-3-flash-preview";
+const GEMINI_MODEL = process.env["GEMINI_MODEL"] ?? "gemini-2.5-flash";
 
 const PENDING_TTL_MS = 30 * 60 * 1000; // a scan waits 30 minutes for the owner to confirm
-const DAILY_LIMIT = 10; // photos per owner per day (protects your API quota)
+const DAILY_LIMIT = 10; // photos per owner per day (protects your API bill)
 const MAX_ROWS = 60;
 
 // Held in memory, same as `sessions` in webhook.ts: a server restart clears them
@@ -54,6 +52,7 @@ const T = {
     limit: "You've reached today's notebook scan limit. Please try again tomorrow.",
     noRows: "❌ I couldn't find any debts in that photo. Try again: one page at a time, good light, hold the phone steady.",
     fail: "❌ I couldn't read that photo. Please try again with a clearer picture.",
+    busy: "⏳ The reader is busy right now. Please try again in a minute.",
     header: (count: number, total: number) =>
       `📒 *Notebook scan*\n\nI found *${count} debts*, total *${total.toLocaleString()} Frw*.\n\nCheck them before saving:\n\n`,
     skipped: (n: number) => `\n\n⚠️ ${n} line(s) were too unclear and were skipped.`,
@@ -77,6 +76,7 @@ const T = {
     limit: "Wagejeje ku mubare w'amafoto yemewe uyu munsi. Ongera ejo.",
     noRows: "❌ Nta madeni mbonye kuri iyi foto. Ongera ugerageze: urupapuro rumwe, urumuri ruhagije, ufate telefone neza.",
     fail: "❌ Ntibyakunze gusoma iyi foto. Ongera ugerageze ifoto isobanutse.",
+    busy: "⏳ Sisitemu irahuze ubu. Ongera ugerageze nyuma y'umunota.",
     header: (count: number, total: number) =>
       `📒 *Gusoma ikayi*\n\nNabonye *amadeni ${count}*, igiteranyo *${total.toLocaleString()} Frw*.\n\nYarebe mbere yo kubika:\n\n`,
     skipped: (n: number) => `\n\n⚠️ Imirongo ${n} ntisomeka neza, yasimbutswe.`,
@@ -184,46 +184,53 @@ function splitMessage(text: string, max = 3500): string[] {
   return parts;
 }
 
-// --- reading the photo (Gemini) ---
+// --- reading the photo ---
 
-let gemini: GoogleGenAI | null = null;
-function getGemini(): GoogleGenAI {
+async function readNotebook(base64: string, mediaType: string): Promise<{ rows: ScanRow[]; skipped: number }> {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set");
-  if (!gemini) gemini = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  return gemini;
-}
 
-async function readNotebook(base64: string, mimeType: string): Promise<{ rows: ScanRow[]; skipped: number }> {
-  const ai = getGemini();
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Gemini timed out after 60s")), 60_000);
-  });
-
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
   try {
-    const response = await Promise.race([
-      ai.models.generateContent({
-        model: SCAN_MODEL,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { inlineData: { mimeType, data: base64 } },
-              { text: "Extract the debts from this notebook page." },
-            ],
-          },
-        ],
-        config: {
-          systemInstruction: SYSTEM_PROMPT,
-          responseMimeType: "application/json",
-          temperature: 0,
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": GEMINI_API_KEY,
         },
-      }),
-      timeout,
-    ]);
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { inlineData: { mimeType: mediaType, data: base64 } },
+                { text: "Extract the debts from this notebook page." },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: "application/json",
+            maxOutputTokens: 8192,
+          },
+        }),
+        signal: controller.signal,
+      }
+    );
+    if (!res.ok) throw new Error(`Gemini API ${res.status}: ${await res.text()}`);
 
-    const text = response.text ?? "";
+    const data = (await res.json()) as {
+      candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }>;
+      promptFeedback?: { blockReason?: string };
+    };
+    const candidate = data.candidates?.[0];
+    if (!candidate) {
+      throw new Error(`Gemini returned no answer (blockReason: ${data.promptFeedback?.blockReason ?? "none"})`);
+    }
+    const text = (candidate.content?.parts ?? []).map((p) => p.text ?? "").join("");
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
     if (start === -1 || end === -1) throw new Error(`No JSON in model reply: ${text.slice(0, 200)}`);
@@ -373,7 +380,8 @@ export async function handleNotebookPhoto(from: string, mediaId: string, lang: L
     await showPending(from, lang);
   } catch (err) {
     console.error("Notebook scan failed:", err);
-    await sendWhatsAppMessage(from, t.fail);
+    const busy = err instanceof Error && /Gemini API 429/.test(err.message);
+    await sendWhatsAppMessage(from, busy ? t.busy : t.fail);
   }
 }
 
