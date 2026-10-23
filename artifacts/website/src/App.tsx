@@ -6,20 +6,22 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Admin from "@/pages/admin";
 import TrustPage from "./pages/Trustpage";
-import { PrivacyPage } from "@/pages/Legal";
+import { Privacy, Terms } from "@/pages/Legal";
 
 import { FxHost } from "@/fx/FxHost";
 import { FxPanel, DashIntro } from "@/fx/FxUI";
 
 const queryClient = new QueryClient();
 
-// 3D scroll animation for the whole page, plus the dashboard-only intro and animation settings.
+// The public site is now calm and static. The 3D scroll animation and the intro
+// only run on the admin dashboard. To bring the animation back on the public
+// pages, change `{admin && <FxHost ... />}` to always render <FxHost />.
 function FxShell() {
   const [loc] = useLocation();
   const admin = loc.startsWith("/admin");
   return (
     <>
-      <FxHost admin={admin} path={loc} />
+      {admin && <FxHost admin={admin} path={loc} />}
       {admin && (
         <>
           <DashIntro />
@@ -36,7 +38,8 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/trust" component={TrustPage} />
       <Route path="/admin" component={Admin} />
-      <Route path="/privacy" component={PrivacyPage} />
+      <Route path="/privacy" component={Privacy} />
+      <Route path="/terms" component={Terms} />
       <Route component={NotFound} />
     </Switch>
   );
