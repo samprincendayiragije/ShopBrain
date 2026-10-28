@@ -96,6 +96,43 @@ export async function markMessageAsRead(messageId: string): Promise<void> {
 }
 
 /**
+ * Downloads an image the sender attached (msg.image.id from the webhook).
+ * Two steps, both needed: ask Meta for the temporary file URL, then fetch
+ * that URL with the same access token. Returns base64 + mime type, ready to
+ * hand to a vision model. Throws on any failure, so callers can tell the
+ * owner to try again.
+ */
+export async function downloadWhatsAppMedia(
+  mediaId: string,
+): Promise<{ base64: string; mimeType: string }> {
+  const metaRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+  });
+  if (!metaRes.ok) {
+    throw new Error(`WhatsApp media lookup failed ${metaRes.status}: ${await metaRes.text()}`);
+  }
+  const meta = (await metaRes.json()) as { url?: string; mime_type?: string };
+  if (!meta.url) throw new Error("WhatsApp media lookup returned no url");
+
+  const mimeType = meta.mime_type ?? "image/jpeg";
+  if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mimeType)) {
+    throw new Error(`Unsupported image type: ${mimeType}`);
+  }
+
+  const fileRes = await fetch(meta.url, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+  });
+  if (!fileRes.ok) {
+    throw new Error(`WhatsApp media download failed ${fileRes.status}`);
+  }
+  const buf = Buffer.from(await fileRes.arrayBuffer());
+  // The vision API rejects images over 5 MB; WhatsApp photos are normally well under.
+  if (buf.length > 4_500_000) throw new Error("Image too large");
+
+  return { base64: buf.toString("base64"), mimeType };
+}
+
+/**
  * Meta rejects a template variable (error 132018 / 132000) when it:
  *   - contains a new line or tab
  *   - contains 4 or more spaces in a row
