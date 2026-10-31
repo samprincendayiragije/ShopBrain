@@ -27,6 +27,7 @@ import {
   sendWhatsAppTemplateMessage,
 } from "./whatsapp.js";
 import { sendWhatsAppDocument, WhatsAppNotConfiguredError } from "./whatsappDocument.js";
+import { reserveReminder, logActivity } from "./guard.js";
 
 export type Lang = "en" | "rw";
 export interface Session {
@@ -852,20 +853,22 @@ async function runAutoRemindersFor(owner: OwnerRow, mode: RunMode): Promise<{ se
   for (const c of toSend) {
     const total = agg.get(String(c.id))?.total ?? 0;
     const itemized = await D.buildItemizedList(c.id);
-    const { data: logRow } = await supabase
-      .from("reminder_logs")
-      .insert({
-        message_id: `pending_${c.phone}_${Date.now()}`,
-        owner_phone: shopId,
-        customer_name: c.name,
-        customer_phone: c.phone,
-        amount: total,
-        status: "pending",
-        is_auto: true,
-        quiet,
-      })
-      .select()
-      .single();
+    // BATCH 1: owner daily cap + max 2 reminders per customer per day across all shops.
+    const reservation = await reserveReminder({
+      ownerPhone: shopId,
+      customerName: c.name,
+      customerPhone: c.phone ?? "",
+      amount: total,
+      isAuto: true,
+      quiet,
+    });
+    if (!reservation.ok) {
+      console.warn("Auto reminder blocked:", { shopId, customer: c.phone, reason: reservation.reason });
+      // Owner cap reached: stop for today. The rest are picked up by tomorrow's run.
+      if (reservation.reason === "owner_daily_cap") break;
+      continue;
+    }
+    const logRow = reservation.log;
     try {
       const payload = buildReminderPayload(lang, {
         customerName: c.name,
@@ -881,6 +884,7 @@ async function runAutoRemindersFor(owner: OwnerRow, mode: RunMode): Promise<{ se
         .from("customers")
         .update({ last_reminded_at: new Date().toISOString(), last_reminder_status: "pending" })
         .eq("id", c.id);
+      void logActivity("reminder_sent", { ownerPhone: shopId, actor: "auto", target: c.phone ?? "" });
       sent++;
     } catch (err) {
       console.error("Auto reminder failed:", { shopId, customer: c.phone, err });

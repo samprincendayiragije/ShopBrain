@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { timingSafeEqual } from "node:crypto";
 import { supabase } from "../lib/supabase.js";
+import { logActivity } from "../lib/guard.js";
 
 const router: IRouter = Router();
 
@@ -42,7 +43,7 @@ function noteFail(ip: string): void {
 // Every /admin/* route below (except /admin/verify) requires this header,
 // set to the same ADMIN_PASSWORD. The frontend keeps the password in
 // sessionStorage after login and sends it on every admin API call.
-function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   if (!ADMIN_PASSWORD) {
     res.status(500).json({ ok: false, message: "ADMIN_PASSWORD not configured on server." });
     return;
@@ -624,6 +625,7 @@ router.post("/admin/owners/:phone/deactivate", requireAdmin, async (req: Request
     res.status(500).json({ ok: false, message: "Failed to deactivate owner." });
     return;
   }
+  void logActivity("owner_deactivated", { ownerPhone: String(phone), actor: "admin" });
   overviewCache = null;
   publicCache = null;
   res.json({ ok: true });
@@ -637,6 +639,7 @@ router.post("/admin/owners/:phone/activate", requireAdmin, async (req: Request, 
     res.status(500).json({ ok: false, message: "Failed to activate owner." });
     return;
   }
+  void logActivity("owner_activated", { ownerPhone: String(phone), actor: "admin" });
   overviewCache = null;
   publicCache = null;
   res.json({ ok: true });

@@ -6,6 +6,8 @@ import { runWeeklyCheckin } from "../jobs/weeklyCheckin.js";
 import * as features from "../lib/shopFeatures.js";
 import * as extras from "../lib/shopExtras.js";
 import { parseAmountToken } from "../lib/shopParsing.js";
+import { runAlertRules, runDigestIfDue } from "../lib/digest.js";
+import { logActivity, reserveReminder, canAddCustomers, customerLimitMessage, reminderBlockedMessage } from "../lib/guard.js";
 
 const router: IRouter = Router();
 
@@ -652,6 +654,7 @@ async function handleDebtorStop(from: string, req: Request): Promise<void> {
   const phone = cleanPhone(from);
   const { error } = await supabase.from("opt_outs").upsert({ phone }, { onConflict: "phone" });
   if (error) throw error;
+  void logActivity("customer_stop", { target: phone });
   await sendWhatsAppMessage(from, STOP_CONFIRMATION);
   await sendWhatsAppInteractiveMessage(from, {
     type: "button",
@@ -2313,14 +2316,20 @@ async function sendReminder(from: string, phone: string, lang: Lang, force = fal
 
   const itemizedList = await buildItemizedList(customer.id);
 
-  const { data: insertedLog } = await supabase.from("reminder_logs").insert({
-    message_id: `pending_${from}_${Date.now()}`,
-    owner_phone: cleanPhone(from),
-    customer_name: customer.name,
-    customer_phone: phone,
+  // BATCH 1: owner daily cap + max 2 reminders per customer per day across all shops.
+  // Replaces the plain reminder_logs insert; returns the same 'pending' row.
+  const reservation = await reserveReminder({
+    ownerPhone: cleanPhone(from),
+    customerName: customer.name,
+    customerPhone: phone,
     amount: total,
-    status: "pending",
-  }).select().single();
+  });
+  if (!reservation.ok) {
+    await sendWhatsAppMessage(from, reminderBlockedMessage(lang, reservation, customer.name));
+    setTimeout(async () => { await sendPersistentMenu(from, lang); }, 1000);
+    return;
+  }
+  const insertedLog = reservation.log;
 
   // Which approved template to use (the old one with payment details inside, or the
   // new short one with the How to Pay button) and its variables: see buildReminderPayload.
@@ -2332,7 +2341,15 @@ async function sendReminder(from: string, phone: string, lang: Lang, force = fal
     contactPhone,
     owner: owner ?? {},
   });
-  const messageId = await sendWhatsAppTemplateMessage(phone, payload.templateName, payload.languageCode, payload.vars);
+  let messageId: string;
+  try {
+    messageId = await sendWhatsAppTemplateMessage(phone, payload.templateName, payload.languageCode, payload.vars);
+  } catch (err) {
+    // A failed send must not keep counting toward the daily caps.
+    if (insertedLog) await supabase.from("reminder_logs").update({ status: "failed" }).eq("id", insertedLog.id);
+    throw err;
+  }
+  void logActivity("reminder_sent", { ownerPhone: from, actor: cleanPhone(from), target: phone });
 
   // Start the cooldown clock and reset the delivery status for the Follow-up list.
   await supabase
@@ -2365,6 +2382,7 @@ async function sendReminder(from: string, phone: string, lang: Lang, force = fal
 // payment itself.
 async function recordPayment(shopId: string, customerId: string, customerName: string, amount: number): Promise<void> {
   if (!amount || amount <= 0) return;
+  void logActivity("payment_recorded", { ownerPhone: shopId, actor: cleanPhone(shopId), target: String(customerId), meta: { amount } });
   const { error } = await supabase.from("payments").insert({
     shop_id: shopId,
     customer_id: String(customerId),
@@ -2388,6 +2406,7 @@ async function recordPayment(shopId: string, customerId: string, customerName: s
 
 // Marks every unpaid debt of a customer as paid and tells the owner.
 async function markAllPaid(from: string, lang: Lang, customer: { id: string; name: string }): Promise<void> {
+  void logActivity("mark_paid", { ownerPhone: from, actor: cleanPhone(from), target: String(customer.id) });
   // Work out what is being cleared BEFORE marking paid, so the Report can count it as money collected.
   const owedBefore = await getUnpaidTotal(customer.id);
   await supabase.from("transactions").update({ paid: true }).eq("customer_id", customer.id).eq("paid", false);
@@ -2488,6 +2507,11 @@ async function finishAddDebt(from: string, lang: Lang, amount: number): Promise<
     customer = existingCustomer;
   }
   if (!customer) {
+    const cap = await canAddCustomers(from);
+    if (!cap.ok) {
+      await sendWhatsAppMessage(from, customerLimitMessage(lang, cap.limit));
+      return;
+    }
     const { data: newCustomer, error } = await supabase.from("customers").insert({ phone: phoneValue, name, shop_id: from, reminders_consent: consentGiven }).select().single();
     if (error || !newCustomer) {
       await sendWhatsAppMessage(from, T[lang].somethingWrong);
@@ -2500,6 +2524,7 @@ async function finishAddDebt(from: string, lang: Lang, amount: number): Promise<
     await sendWhatsAppMessage(from, T[lang].somethingWrong);
     return;
   }
+  void logActivity("add_debt", { ownerPhone: from, actor: cleanPhone(from), target: String(customer.id), meta: { amount } });
   const total = await getUnpaidTotal(customer.id);
   await sendWhatsAppMessage(from, T[lang].debtSaved(customer.name, phoneValue || (lang === "rw" ? "nta nimero" : "no number"), item ?? "", amount, total));
 
@@ -3110,6 +3135,11 @@ async function handleLegacyAdd(from: string, text: string, lang: Lang): Promise<
   let { data: customer } = await supabase.from("customers").select("*").eq("phone", phone).eq("shop_id", from).single();
   if (!customer) {
     // New customers start with no reminder consent; we ask right after saving.
+    const cap = await canAddCustomers(from);
+    if (!cap.ok) {
+      await sendWhatsAppMessage(from, customerLimitMessage(lang, cap.limit));
+      return;
+    }
     const { data: newCustomer, error } = await supabase.from("customers").insert({ phone, name, shop_id: from, reminders_consent: false }).select().single();
     if (error || !newCustomer) {
       await sendWhatsAppMessage(from, T[lang].somethingWrong);
@@ -3123,6 +3153,7 @@ async function handleLegacyAdd(from: string, text: string, lang: Lang): Promise<
     await sendWhatsAppMessage(from, T[lang].somethingWrong);
     return;
   }
+  void logActivity("add_debt", { ownerPhone: from, actor: cleanPhone(from), target: String(customer.id), meta: { amount } });
   const { data: unpaidTx } = await supabase.from("transactions").select("amount").eq("customer_id", customer.id).eq("paid", false);
   const total = (unpaidTx ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
   await sendWhatsAppMessage(from, T[lang].debtSaved(name, phone, item, amount, total));
@@ -3200,6 +3231,10 @@ function startSchedulers(): void {
   };
 
   every(2 * 60 * 1000, "Auto-reminder scheduler", () => extras.runAutoReminders());
+
+  // BATCH 1: rule-based alerts every 15 minutes, morning digest once a day from 07:00 Kigali.
+  every(15 * 60 * 1000, "Alert rules", () => runAlertRules());
+  every(10 * 60 * 1000, "Morning digest", () => runDigestIfDue());
 
   let weeklyDoneFor = "";
   every(15 * 60 * 1000, "Weekly recovery scheduler", async () => {
