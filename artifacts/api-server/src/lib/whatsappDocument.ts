@@ -26,7 +26,7 @@ function credentials(): { token: string; phoneId: string; version: string } {
 
 export async function sendWhatsAppDocument(
   to: string,
-  content: string,
+  content: string | Uint8Array,
   filename: string,
   caption: string,
   mimeType = "text/csv",
@@ -42,7 +42,7 @@ export async function sendWhatsAppDocument(
       json: () => Promise<unknown>;
     }>;
     FormData: new () => { append: (...args: unknown[]) => void };
-    Blob: new (parts: string[], options?: { type?: string }) => unknown;
+    Blob: new (parts: Array<string | Uint8Array>, options?: { type?: string }) => unknown;
   };
 
   // Step 1: upload the file and get a media id back.
