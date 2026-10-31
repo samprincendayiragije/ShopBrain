@@ -1,4 +1,5 @@
 import { supabase } from "./supabase.js";
+import { canAddCustomers, customerLimitMessage } from "./guard.js";
 import {
   sendWhatsAppMessage,
   sendWhatsAppInteractiveMessage,
@@ -331,6 +332,14 @@ async function savePending(from: string, lang: Lang): Promise<void> {
   const p = getPending(from);
   if (!p) {
     await sendWhatsAppMessage(from, t.expired);
+    return;
+  }
+  // BATCH 1: trial customer cap. Upper bound: counts every distinct person in the photo as
+  // new, so a trial owner right at the limit may be stopped even if some already exist.
+  const distinct = new Set(p.rows.map((r) => (r.phone ? String(r.phone) : String(r.name).toLowerCase().trim())));
+  const cap = await canAddCustomers(from, distinct.size);
+  if (!cap.ok) {
+    await sendWhatsAppMessage(from, customerLimitMessage(lang, cap.limit));
     return;
   }
   try {
