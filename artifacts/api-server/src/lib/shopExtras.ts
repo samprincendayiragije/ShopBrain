@@ -28,6 +28,7 @@ import {
 } from "./whatsapp.js";
 import { sendWhatsAppDocument, WhatsAppNotConfiguredError } from "./whatsappDocument.js";
 import { reserveReminder, logActivity } from "./guard.js";
+import { sendExportSummary, sendExportFile, exportCancelledText } from "./exportDocx.js";
 
 export type Lang = "en" | "rw";
 export interface Session {
@@ -1501,7 +1502,16 @@ export async function handleInteractive(from: string, id: string, lang: Lang): P
       await showRecovered(from, lang);
       return true;
     case "export_btn":
-      await exportBackup(from, lang);
+      // BATCH 2: Word export. Summary first, file only after the owner taps Send.
+      if (!(await sendExportSummary(from, lang))) menuSoon(from, lang);
+      return true;
+    case "export_send":
+      await sendExportFile(from, lang);
+      menuSoon(from, lang);
+      return true;
+    case "export_cancel":
+      await sendWhatsAppMessage(from, exportCancelledText(lang));
+      menuSoon(from, lang);
       return true;
   }
 
